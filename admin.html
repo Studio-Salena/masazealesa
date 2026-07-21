@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Administrace — Masáže Alesa</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant:wght@400;600;700;800&family=Dancing+Script:wght@600;700&family=Nunito:wght@300;400;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --cream:#fff5ef;--brown:#5c3a1e;--brown-dark:#3a2410;
+  --tan:#d4856a;--tan-light:#fde8d8;--sage:#6bbf7a;--gold:#d4a84a;
+  --red:#e74c3c;--blue:#3498db;--orange:#f39c12;--purple:#9b59b6;
+  --text:#3a2410;--text-light:#7a5535;
+}
+body{font-family:'Nunito',sans-serif;background:var(--cream);color:var(--text);min-height:100vh}
+
+/* LOGIN */
+.login-overlay{position:fixed;inset:0;background:linear-gradient(135deg,var(--cream),#fde8d0);display:flex;align-items:center;justify-content:center;z-index:1000}
+.login-box{background:#fff;border-radius:24px;padding:48px;box-shadow:0 8px 40px rgba(92,58,30,0.15);width:100%;max-width:400px;text-align:center}
+.login-logo{font-family:'Dancing Script',cursive;font-size:2.2rem;color:var(--brown);margin-bottom:4px}
+.login-sub{color:var(--text-light);font-size:0.85rem;margin-bottom:32px}
+.login-box input{width:100%;padding:14px 16px;border:2px solid var(--tan-light);border-radius:12px;font-size:1rem;outline:none;margin-bottom:16px;font-family:'Nunito',sans-serif}
+.login-box input:focus{border-color:var(--tan)}
+.login-btn{width:100%;padding:14px;background:linear-gradient(135deg,#d4856a,#e0a830);color:#fff;border:none;border-radius:12px;font-size:1rem;font-weight:700;cursor:pointer;font-family:'Nunito',sans-serif}
+.login-error{color:var(--red);font-size:0.85rem;margin-top:12px;display:none}
+
+/* LAYOUT */
+.admin-wrap{display:none;min-height:100vh}
+.sidebar{width:230px;background:#fff;border-right:2px solid var(--tan-light);position:fixed;top:0;left:0;bottom:0;padding:0;display:flex;flex-direction:column;box-shadow:2px 0 12px rgba(92,58,30,0.06);z-index:50;transition:transform 0.3s;overflow-y:auto}
+.sidebar-logo{font-family:'Dancing Script',cursive;font-size:1.4rem;color:var(--brown);padding:20px;border-bottom:1px solid var(--tan-light)}
+.sidebar-logo span{display:block;font-family:'Nunito',sans-serif;font-size:0.65rem;color:var(--text-light);font-weight:400;letter-spacing:1px;text-transform:uppercase}
+.nav-label{font-size:0.65rem;color:var(--text-light);text-transform:uppercase;letter-spacing:1.5px;padding:14px 20px 4px;font-weight:700}
+.nav-item{display:flex;align-items:center;gap:10px;padding:11px 20px;cursor:pointer;color:var(--text-light);font-weight:600;font-size:0.87rem;transition:all 0.2s;border-left:3px solid transparent;position:relative}
+.nav-item:hover{background:var(--cream);color:var(--brown)}
+.nav-item.active{background:linear-gradient(90deg,var(--tan-light),transparent);color:var(--brown);border-left-color:var(--tan)}
+.nav-item .icon{font-size:1rem;width:20px;text-align:center}
+.nav-badge{background:var(--red);color:#fff;border-radius:10px;padding:2px 7px;font-size:0.65rem;font-weight:700;margin-left:auto}
+.sidebar-footer{margin-top:auto;padding:16px;border-top:1px solid var(--tan-light)}
+.logout-btn{width:100%;padding:10px;background:none;border:2px solid var(--tan-light);border-radius:8px;color:var(--text-light);cursor:pointer;font-family:'Nunito',sans-serif;font-weight:600;font-size:0.85rem;transition:all 0.2s}
+.logout-btn:hover{border-color:var(--red);color:var(--red)}
+
+/* TOP BAR */
+.topbar{position:fixed;top:0;left:230px;right:0;height:56px;background:#fff;border-bottom:1px solid var(--tan-light);display:flex;align-items:center;justify-content:space-between;padding:0 24px;z-index:40;box-shadow:0 2px 8px rgba(92,58,30,0.06)}
+.menu-toggle{display:none;background:none;border:none;font-size:1.4rem;cursor:pointer;color:var(--brown)}
+.topbar-user{font-size:0.82rem;color:var(--text-light);font-weight:600}
+
+.main{margin-left:230px;padding:80px 28px 28px;min-height:100vh}
+.page{display:none}
+.page.active{display:block}
+.page-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:12px}
+.page-title{font-family:'Cormorant',serif;font-size:1.7rem;color:var(--brown)}
+
+/* STATS */
+.stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px}
+.stat-card{background:#fff;border-radius:16px;padding:18px;border:1px solid var(--tan-light);transition:all 0.2s;cursor:default}
+.stat-card:hover{box-shadow:0 4px 20px rgba(92,58,30,0.1);transform:translateY(-2px)}
+.stat-label{font-size:0.7rem;color:var(--text-light);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px}
+.stat-value{font-size:1.8rem;font-weight:700;color:var(--brown);font-family:'Cormorant',serif}
+.stat-green{color:var(--sage)!important}
+.stat-orange{color:var(--orange)!important}
+
+/* TABLE */
+.table-wrap{background:#fff;border-radius:16px;border:1px solid var(--tan-light);overflow:hidden;margin-bottom:20px}
+.table-header{padding:16px 20px;border-bottom:1px solid var(--tan-light);display:flex;justify-content:space-between;align-items:center;background:linear-gradient(135deg,#fff,var(--cream));flex-wrap:wrap;gap:8px}
+.table-header h3{font-family:'Cormorant',serif;color:var(--brown);font-size:1rem}
+.table-actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+table{width:100%;border-collapse:collapse}
+th{padding:10px 14px;text-align:left;font-size:0.7rem;text-transform:uppercase;letter-spacing:1px;color:var(--text-light);border-bottom:1px solid var(--tan-light);background:var(--cream);font-weight:700}
+td{padding:12px 14px;border-bottom:1px solid #faf0e6;font-size:0.85rem;vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:#fffaf5}
+
+/* BADGES */
+.badge{padding:3px 9px;border-radius:20px;font-size:0.7rem;font-weight:700;display:inline-block}
+.badge-nova{background:#e8f7ee;color:#27ae60}
+.badge-cekajici{background:#fff3cd;color:#e67e22}
+.badge-ok{background:#e8f7ee;color:#27ae60}
+.badge-zruseno{background:#fde8e8;color:#e74c3c}
+
+/* BUTTONS */
+.btn{padding:7px 14px;border-radius:8px;border:none;cursor:pointer;font-family:'Nunito',sans-serif;font-weight:700;font-size:0.8rem;transition:all 0.2s;display:inline-flex;align-items:center;gap:5px}
+.btn-primary{background:linear-gradient(135deg,#d4856a,#e0a830);color:#fff}
+.btn-primary:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(92,58,30,0.3)}
+.btn-sm{padding:4px 9px;font-size:0.73rem}
+.btn-green{background:var(--sage);color:#fff}
+.btn-red{background:var(--red);color:#fff}
+.btn-outline{background:none;border:2px solid var(--tan-light);color:var(--text-light)}
+.btn-outline:hover{border-color:var(--tan);color:var(--brown)}
+.refresh-btn{background:none;border:2px solid var(--tan-light);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:0.8rem;color:var(--text-light);font-family:'Nunito',sans-serif;transition:all 0.2s}
+.refresh-btn:hover{border-color:var(--tan);color:var(--brown)}
+
+/* FORM */
+.form-group{display:flex;flex-direction:column;gap:5px;margin-bottom:12px}
+.form-group label{font-size:0.8rem;font-weight:700;color:var(--text-light)}
+.form-group input,.form-group select,.form-group textarea{padding:9px 12px;border:2px solid var(--tan-light);border-radius:10px;font-family:'Nunito',sans-serif;font-size:0.88rem;outline:none;background:#fff}
+.form-group input:focus,.form-group select:focus{border-color:var(--tan)}
+.form-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.form-grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+
+/* MODAL */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.5);display:none;align-items:center;justify-content:center;z-index:500;padding:16px}
+.modal-overlay.open{display:flex}
+.modal{background:#fff;border-radius:20px;padding:28px;width:100%;max-width:560px;max-height:92vh;overflow-y:auto}
+.modal h3{font-family:'Cormorant',serif;color:var(--brown);margin-bottom:18px;font-size:1.2rem}
+.modal-footer{display:flex;gap:10px;justify-content:flex-end;margin-top:18px;padding-top:14px;border-top:1px solid var(--tan-light)}
+
+/* MISC */
+.loading{text-align:center;padding:36px;color:var(--text-light)}
+.empty{text-align:center;padding:36px;color:var(--text-light);font-style:italic}
+.error-msg{background:#fde8e8;color:var(--red);padding:10px 14px;border-radius:8px;margin-bottom:12px;font-size:0.83rem}
+.success-msg{background:#e8f7ee;color:#27ae60;padding:10px 14px;border-radius:8px;margin-bottom:12px;font-size:0.83rem}
+.filter-pills{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+.pill{padding:5px 12px;border-radius:16px;border:2px solid var(--tan-light);background:#fff;cursor:pointer;font-family:'Nunito',sans-serif;font-weight:700;font-size:0.75rem;color:var(--text-light);transition:all 0.2s}
+.pill.active{background:var(--tan);color:#fff;border-color:var(--tan)}
+.pill:hover:not(.active){border-color:var(--tan);color:var(--brown)}
+
+/* MOBILE */
+@media(max-width:768px){
+  .sidebar{transform:translateX(-100%)}
+  .sidebar.open{transform:translateX(0)}
+  .topbar{left:0}
+  .main{margin-left:0;padding:70px 14px 14px}
+  .menu-toggle{display:block}
+  .stats-grid{grid-template-columns:repeat(2,1fr)}
+  .form-grid-2,.form-grid-3{grid-template-columns:1fr}
+  .table-header{flex-direction:column;align-items:flex-start}
+  .page-header{flex-direction:column;align-items:flex-start}
+  table{font-size:0.78rem}
+  th,td{padding:8px 10px}
+}
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div class="login-overlay" id="loginOverlay">
+  <div class="login-box">
+    <div class="login-logo">🌸 Masáže Alesa</div>
+    <div class="login-sub">Administrace webu</div>
+    <input type="password" id="passwordInput" placeholder="Heslo" onkeydown="if(event.key==='Enter')login()">
+    <button class="login-btn" onclick="login()">Přihlásit se</button>
+    <div class="login-error" id="loginError">Nesprávné heslo, zkuste to prosím znovu.</div>
+  </div>
+</div>
+
+<!-- ADMIN -->
+<div class="admin-wrap" id="adminWrap">
+  <div class="sidebar" id="sidebar">
+    <div class="sidebar-logo">🌸 Masáže Alesa<span>Admin panel</span></div>
+    <div class="nav-label">Přehled</div>
+    <div class="nav-item active" onclick="showPage('prehled',this)"><span class="icon">📊</span> Přehled</div>
+    <div class="nav-label">Provoz</div>
+    <div class="nav-item" onclick="showPage('rezervace',this)"><span class="icon">📅</span> Rezervace <span class="nav-badge" id="navBadgeRez" style="display:none">0</span></div>
+    <div class="nav-item" onclick="showPage('poukazy',this)"><span class="icon">🎁</span> Poukazy <span class="nav-badge" id="navBadgePoukazy" style="display:none">0</span></div>
+    <div class="nav-item" onclick="showPage('cenik',this)"><span class="icon">💰</span> Ceník</div>
+    <div class="nav-label">Prodejna</div>
+    <div class="nav-item" onclick="showPage('masaze',this)"><span class="icon">🧖</span> Masáže</div>
+    <div class="nav-item" onclick="showPage('ucetnictvi',this)"><span class="icon">📈</span> Účetnictví</div>
+    <div class="sidebar-footer">
+      <button class="logout-btn" onclick="logout()">Odhlásit se</button>
+    </div>
+  </div>
+
+  <div class="topbar">
+    <button class="menu-toggle" onclick="toggleSidebar()">☰</button>
+    <div class="topbar-user">Masáže Alesa — Admin</div>
+  </div>
+
+  <div class="main">
+
+    <!-- PŘEHLED -->
+    <div class="page active" id="page-prehled">
+      <div class="page-header"><div class="page-title">📊 Přehled</div></div>
+      <div class="stats-grid">
+        <div class="stat-card"><div class="stat-label">Rezervace celkem</div><div class="stat-value" id="stCelkem">—</div></div>
+        <div class="stat-card"><div class="stat-label">Čekající rezervace</div><div class="stat-value stat-orange" id="stCekajici">—</div></div>
+        <div class="stat-card"><div class="stat-label">Budoucí rezervace</div><div class="stat-value stat-green" id="stVolne">—</div></div>
+        <div class="stat-card"><div class="stat-label">Aktivní poukazy</div><div class="stat-value" id="stPoukazy">—</div></div>
+      </div>
+      <div class="stats-grid" style="grid-template-columns:repeat(2,1fr)">
+        <div class="stat-card"><div class="stat-label">Hodnota aktivních poukazů</div><div class="stat-value" id="stPoukazyHodnota">—</div></div>
+        <div class="stat-card"><div class="stat-label">Nové žádosti o poukaz</div><div class="stat-value stat-orange" id="stZadosti">—</div></div>
+      </div>
+    </div>
+
+    <!-- REZERVACE -->
+    <div class="page" id="page-rezervace">
+      <div class="page-header">
+        <div class="page-title">📅 Rezervace</div>
+        <div class="table-actions">
+          <button class="refresh-btn" onclick="loadRezervace()">↻ Obnovit</button>
+        </div>
+      </div>
+      <div class="stats-grid" style="grid-template-columns:repeat(2,1fr);margin-bottom:20px">
+        <div class="stat-card"><div class="stat-label">Celkem rezervací</div><div class="stat-value" id="rezStatCelkem">—</div></div>
+        <div class="stat-card"><div class="stat-label">Čekajících</div><div class="stat-value stat-orange" id="rezStatCekajici">—</div></div>
+      </div>
+      <div class="table-wrap">
+        <div class="table-header">
+          <h3>🕐 Pracovní doba (podle ní se počítají volné termíny na webu)</h3>
+          <span style="font-size:0.72rem;color:var(--text-light)">Mezi masážemi se automaticky nechává 30minutová mezera</span>
+        </div>
+        <div id="pracovniDobaTable"><div class="loading">Načítám...</div></div>
+      </div>
+      <div class="table-wrap">
+        <div class="table-header">
+          <h3>📋 Příchozí rezervace</h3>
+          <div class="filter-pills" style="margin:0">
+            <span class="pill active" onclick="filtrovatRez('vse',this)">Vše</span>
+            <span class="pill" onclick="filtrovatRez('cekajici',this)">⏳ Čekající</span>
+            <span class="pill" onclick="filtrovatRez('potvrzena',this)">✅ Potvrzené</span>
+            <span class="pill" onclick="filtrovatRez('zrusena',this)">❌ Zrušené</span>
+          </div>
+        </div>
+        <div id="rezervaceTable"><div class="loading">Načítám...</div></div>
+      </div>
+    </div>
+
+    <!-- POUKAZY -->
+    <div class="page" id="page-poukazy">
+      <div class="page-header">
+        <div class="page-title">🎁 Dárkové poukazy</div>
+        <div class="table-actions">
+          <button class="btn btn-primary" onclick="openModal('modalNovyPoukaz')">+ Vydat poukaz</button>
+          <button class="refresh-btn" onclick="loadPoukazy()">↻ Obnovit</button>
+        </div>
+      </div>
+      <div class="stats-grid" style="grid-template-columns:repeat(3,1fr)">
+        <div class="stat-card"><div class="stat-label">Aktivní poukazy (nevyužitá hodnota)</div><div class="stat-value" id="poukazyAktivniHodnota">—</div></div>
+        <div class="stat-card"><div class="stat-label">Počet vydaných</div><div class="stat-value" id="poukazyPocet">—</div></div>
+        <div class="stat-card"><div class="stat-label">Plně využité</div><div class="stat-value" id="poukazyVyuzite">—</div></div>
+      </div>
+      <div class="table-wrap">
+        <div class="table-header"><h3>📋 Žádosti o poukaz z webu</h3></div>
+        <div id="poukazyZadostiTable"><div class="loading">Načítám...</div></div>
+      </div>
+      <div class="table-wrap">
+        <div class="table-header"><h3>🎁 Vydané poukazy</h3></div>
+        <div id="poukazyTable"><div class="loading">Načítám...</div></div>
+      </div>
+    </div>
+
+    <!-- CENÍK -->
+    <div class="page" id="page-cenik">
+      <div class="page-header">
+        <div class="page-title">💰 Ceník</div>
+        <div class="table-actions">
+          <button class="btn btn-primary" onclick="openModal('modalNovaPolozka')">+ Přidat masáž</button>
+          <button class="refresh-btn" onclick="loadCenik()">↻ Obnovit</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <div class="table-header"><h3>Aktuální ceník</h3></div>
+        <div id="cenikTable"><div class="loading">Načítám...</div></div>
+      </div>
+    </div>
+
+    <!-- MASÁŽE (prodejna) -->
+    <div class="page" id="page-masaze">
+      <div class="page-header">
+        <div class="page-title">🧖 Masáže — prodej na místě</div>
+        <div class="table-actions">
+          <button class="btn btn-primary" onclick="openModal('modalNovaPolozka')">+ Přidat masáž</button>
+          <button class="refresh-btn" onclick="loadProdejna()">↻ Obnovit</button>
+        </div>
+      </div>
+      <div class="stats-grid" style="grid-template-columns:repeat(3,1fr)">
+        <div class="stat-card"><div class="stat-label">Tržby dnes</div><div class="stat-value stat-green" id="prodejnaDnes">—</div></div>
+        <div class="stat-card"><div class="stat-label">Tržby celkem</div><div class="stat-value" id="prodejnaTrzby">—</div></div>
+        <div class="stat-card"><div class="stat-label">Počet prodejů</div><div class="stat-value" id="prodejnaPocet">—</div></div>
+      </div>
+      <div class="table-wrap">
+        <div class="table-header"><h3>💳 Rychlý prodej</h3></div>
+        <div style="padding:16px" id="rychlyProdejWrap">
+          <div class="loading">Načítám ceník...</div>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <div class="table-header"><h3>📋 Historie prodejů</h3></div>
+        <div id="prodejnaTable"><div class="loading">Načítám...</div></div>
+      </div>
+    </div>
+
+    <!-- ÚČETNICTVÍ -->
+    <div class="page" id="page-ucetnictvi">
+      <div class="page-header">
+        <div class="page-title">📈 Účetnictví</div>
+        <div class="table-actions">
+          <button class="btn btn-csv" onclick="exportCsvUcetnictvi()" style="background:linear-gradient(135deg,#27ae60,#1e8449);color:#fff">⬇ CSV pro účetní</button>
+          <button class="refresh-btn" onclick="loadUcetnictvi()">↻ Obnovit</button>
+        </div>
+      </div>
+      <div class="stats-grid" style="grid-template-columns:repeat(4,1fr)">
+        <div class="stat-card"><div class="stat-label">Tržby celkem</div><div class="stat-value" id="ucetTrzby">—</div></div>
+        <div class="stat-card"><div class="stat-label">Tržby dnes</div><div class="stat-value stat-green" id="ucetDnes">—</div></div>
+        <div class="stat-card"><div class="stat-label">Počet položek</div><div class="stat-value" id="ucetPocet">—</div></div>
+        <div class="stat-card"><div class="stat-label">Průměrná položka</div><div class="stat-value" id="ucetPrumer">—</div></div>
+      </div>
+      <div class="table-wrap">
+        <div class="table-header"><h3>📅 Tržby po měsících</h3></div>
+        <div id="ucetMesice"><div class="loading">Načítám...</div></div>
+      </div>
+      <div class="table-wrap">
+        <div class="table-header"><h3>📋 Všechny položky (rezervace, prodejna, poukazy)</h3></div>
+        <div id="ucetPolozky"><div class="loading">Načítám...</div></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- MODAL: Vydat poukaz -->
+<div class="modal-overlay" id="modalNovyPoukaz">
+  <div class="modal">
+    <h3>+ Vydat dárkový poukaz</h3>
+    <div id="novyPoukazMsg"></div>
+    <div class="form-group"><label>Hodnota (Kč)</label><input type="number" id="npHodnota" placeholder="890"></div>
+    <div class="form-group"><label>Jméno kupující/ho</label><input type="text" id="npJmeno"></div>
+    <div class="form-grid-2">
+      <div class="form-group"><label>E-mail</label><input type="email" id="npEmail"></div>
+      <div class="form-group"><label>Telefon</label><input type="text" id="npTelefon"></div>
+    </div>
+    <div class="form-group"><label>Pro koho (nepovinné)</label><input type="text" id="npProKoho"></div>
+    <div class="form-group"><label>Zakoupeno</label>
+      <select id="npKde"><option value="osobne">Osobně v salonu</option><option value="web">Přes web</option></select>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modalNovyPoukaz')">Zrušit</button>
+      <button class="btn btn-primary" onclick="vydatPoukaz()">Vydat poukaz</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Nová položka ceníku -->
+<div class="modal-overlay" id="modalNovaPolozka">
+  <div class="modal">
+    <h3>+ Přidat masáž / variantu do ceníku</h3>
+    <div id="novaPolozkaMsg"></div>
+    <div style="font-size:0.78rem;color:var(--text-light);margin-bottom:10px">Pokud masáž (skupina) už existuje, napiš stejný název jako u ní — přidá se jako další varianta pod ni. Pokud je nová, vytvoří se nová skupina.</div>
+    <div class="form-grid-2">
+      <div class="form-group"><label>Název masáže (skupina)</label><input type="text" id="cpSkupina" placeholder="např. Rekondiční masáž"></div>
+      <div class="form-group"><label>Emoji</label><input type="text" id="cpEmoji" placeholder="💪"></div>
+    </div>
+    <div class="form-group"><label>Varianta</label><input type="text" id="cpVarianta" placeholder="např. Záda + šíje"></div>
+    <div class="form-grid-2">
+      <div class="form-group"><label>Délka (min)</label><input type="number" id="cpDelka" placeholder="45"></div>
+      <div class="form-group"><label>Cena (Kč)</label><input type="number" id="cpCena" placeholder="690"></div>
+    </div>
+    <div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;font-weight:600">
+        <input type="checkbox" id="cpRezervovatelna" checked style="width:16px;height:16px">
+        Klientky si na to mohou rezervovat termín na webu
+      </label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modalNovaPolozka')">Zrušit</button>
+      <button class="btn btn-primary" onclick="pridatPolozkuCeniku()">Přidat</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ⚠️ Jakmile zprovozníš backend na Renderu, sem doplň jeho URL adresu:
+const API = 'https://TVOJE-API-URL.onrender.com/api';
+
+let vsechnyRezervace = [];
+
+function adminFetch(url, options = {}) {
+  const heslo = sessionStorage.getItem('adminHeslo') || '';
+  const headers = Object.assign({}, options.headers || {}, { 'x-admin-heslo': heslo, 'Content-Type': 'application/json' });
+  return fetch(url, Object.assign({}, options, { headers }));
+}
+
+async function login() {
+  const zadaneHeslo = document.getElementById('passwordInput').value;
+  document.getElementById('loginError').style.display = 'none';
+  try {
+    const res = await fetch(API + '/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ heslo: zadaneHeslo })
+    });
+    if (res.ok) {
+      sessionStorage.setItem('adminHeslo', zadaneHeslo);
+      document.getElementById('loginOverlay').style.display = 'none';
+      document.getElementById('adminWrap').style.display = 'flex';
+      loadPrehled();
+    } else {
+      document.getElementById('loginError').style.display = 'block';
+    }
+  } catch (e) {
+    document.getElementById('loginError').textContent = 'Chyba spojení se serverem, zkuste to prosím znovu.';
+    document.getElementById('loginError').style.display = 'block';
+  }
+}
+function logout() { sessionStorage.removeItem('adminHeslo'); location.reload(); }
+if (sessionStorage.getItem('adminHeslo')) {
+  document.getElementById('loginOverlay').style.display = 'none';
+  document.getElementById('adminWrap').style.display = 'flex';
+  loadPrehled();
+}
+
+function toggleSidebar() { document.getElementById('sidebar').classList.toggle('open'); }
+
+function showPage(name, el) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  if (el) el.classList.add('active');
+  if (name === 'prehled') loadPrehled();
+  if (name === 'rezervace') loadRezervace();
+  if (name === 'poukazy') loadPoukazy();
+  if (name === 'cenik') loadCenik();
+  if (name === 'masaze') loadProdejna();
+  if (name === 'ucetnictvi') loadUcetnictvi();
+  document.getElementById('sidebar').classList.remove('open');
+}
+
+function openModal(id) { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+// ── PŘEHLED ──
+async function loadPrehled() {
+  try {
+    const d = await adminFetch(API + '/admin/prehled').then(r => r.json());
+    document.getElementById('stCelkem').textContent = d.rezervaceCelkem;
+    document.getElementById('stCekajici').textContent = d.rezervaceCekajici;
+    document.getElementById('stVolne').textContent = d.rezervaceBudouci;
+    document.getElementById('stPoukazy').textContent = d.poukazyAktivni;
+    document.getElementById('stPoukazyHodnota').textContent = Number(d.poukazyHodnota).toLocaleString('cs-CZ') + ' Kč';
+    document.getElementById('stZadosti').textContent = d.poukazyZadostiNove;
+    const rezBadge = document.getElementById('navBadgeRez');
+    if (d.rezervaceCekajici > 0) { rezBadge.textContent = d.rezervaceCekajici; rezBadge.style.display = 'inline-block'; }
+    else rezBadge.style.display = 'none';
+    const poukBadge = document.getElementById('navBadgePoukazy');
+    if (d.poukazyZadostiNove > 0) { poukBadge.textContent = d.poukazyZadostiNove; poukBadge.style.display = 'inline-block'; }
+    else poukBadge.style.display = 'none';
+  } catch (e) { /* tichá chyba na přehledu */ }
+}
+
+// ── REZERVACE ──
+let vsechnyDnyPD = [];
+const NAZVY_DNU = ['Neděle', 'Pondělí', 'Úterý', 'Středa', 'Čtvrtek', 'Pátek', 'Sobota'];
+
+async function loadRezervace() {
+  try {
+    vsechnyRezervace = await adminFetch(API + '/admin/rezervace').then(r => r.json());
+    document.getElementById('rezStatCelkem').textContent = vsechnyRezervace.length;
+    document.getElementById('rezStatCekajici').textContent = vsechnyRezervace.filter(r => r.stav === 'cekajici').length;
+    vykreslitRezervace('vse');
+  } catch (e) {
+    document.getElementById('rezervaceTable').innerHTML = '<div class="error-msg">Chyba načítání — zkontroluj, že je vyplněná adresa API a backend běží.</div>';
+  }
+  loadPracovniDoba();
+}
+
+async function loadPracovniDoba() {
+  try {
+    vsechnyDnyPD = await adminFetch(API + '/admin/pracovni-doba').then(r => r.json());
+    document.getElementById('pracovniDobaTable').innerHTML = `
+      <table><thead><tr><th>Den</th><th>Otevřeno</th><th>Od</th><th>Do</th><th></th></tr></thead>
+      <tbody>${vsechnyDnyPD.map(d => `<tr>
+        <td><strong>${NAZVY_DNU[d.den_v_tydnu]}</strong></td>
+        <td><input type="checkbox" id="pd-akt-${d.den_v_tydnu}" ${d.aktivni ? 'checked' : ''} style="width:18px;height:18px"></td>
+        <td><input type="time" id="pd-od-${d.den_v_tydnu}" value="${d.otevreno_od.slice(0,5)}" style="border:1px solid var(--tan-light);border-radius:6px;padding:5px 8px"></td>
+        <td><input type="time" id="pd-do-${d.den_v_tydnu}" value="${d.otevreno_do.slice(0,5)}" style="border:1px solid var(--tan-light);border-radius:6px;padding:5px 8px"></td>
+        <td><button class="btn btn-green btn-sm" onclick="ulozitPracovniDobu(${d.den_v_tydnu})">💾</button></td>
+      </tr>`).join('')}</tbody></table>`;
+  } catch (e) { document.getElementById('pracovniDobaTable').innerHTML = '<div class="error-msg">Chyba načítání.</div>'; }
+}
+async function ulozitPracovniDobu(den) {
+  const aktivni = document.getElementById('pd-akt-' + den).checked;
+  const otevreno_od = document.getElementById('pd-od-' + den).value;
+  const otevreno_do = document.getElementById('pd-do-' + den).value;
+  await adminFetch(API + '/admin/pracovni-doba/' + den, { method: 'PUT', body: JSON.stringify({ otevreno_od, otevreno_do, aktivni }) });
+}
+
+function vykreslitRezervace(filtr) {
+  let seznam = [...vsechnyRezervace];
+  if (filtr !== 'vse') seznam = seznam.filter(r => r.stav === filtr);
+  if (!seznam.length) { document.getElementById('rezervaceTable').innerHTML = '<div class="empty">Žádné rezervace</div>'; return; }
+  const stavBadge = { cekajici: '<span class="badge badge-cekajici">⏳ Čeká</span>', potvrzena: '<span class="badge badge-ok">✅ Potvrzena</span>', zrusena: '<span class="badge badge-zruseno">❌ Zrušena</span>' };
+  document.getElementById('rezervaceTable').innerHTML = `
+    <table><thead><tr><th>Termín</th><th>Jméno</th><th>Kontakt</th><th>Masáž</th><th>Stav</th><th>Akce</th></tr></thead>
+    <tbody>${seznam.map(r => `<tr>
+      <td>${new Date(r.datum).toLocaleDateString('cs-CZ')} ${r.cas_od.slice(0,5)}–${r.cas_do.slice(0,5)}</td>
+      <td>${r.jmeno}</td>
+      <td>${r.telefon}${r.email ? '<br><small>' + r.email + '</small>' : ''}</td>
+      <td>${r.masaz}</td>
+      <td>${stavBadge[r.stav] || r.stav}</td>
+      <td style="display:flex;gap:4px">
+        ${r.stav !== 'potvrzena' ? `<button class="btn btn-green btn-sm" onclick="zmenitStavRez(${r.id},'potvrzena')">✅</button>` : ''}
+        ${r.stav !== 'zrusena' ? `<button class="btn btn-red btn-sm" onclick="zmenitStavRez(${r.id},'zrusena')">❌</button>` : ''}
+      </td>
+    </tr>`).join('')}</tbody></table>`;
+}
+function filtrovatRez(f, el) {
+  document.querySelectorAll('#page-rezervace .table-wrap:last-child .pill').forEach(p => p.classList.remove('active'));
+  el.classList.add('active');
+  vykreslitRezervace(f);
+}
+async function zmenitStavRez(id, stav) {
+  await adminFetch(API + '/admin/rezervace/' + id + '/stav', { method: 'PATCH', body: JSON.stringify({ stav }) });
+  loadRezervace();
+}
+
+// ── POUKAZY ──
+async function loadPoukazy() {
+  try {
+    const seznam = await adminFetch(API + '/admin/poukazy').then(r => r.json());
+    const aktivni = seznam.filter(p => p.stav === 'aktivni');
+    const vyuzite = seznam.filter(p => p.stav === 'pouzity');
+    document.getElementById('poukazyAktivniHodnota').textContent = aktivni.reduce((s, p) => s + Number(p.zustatek), 0).toLocaleString('cs-CZ') + ' Kč';
+    document.getElementById('poukazyPocet').textContent = seznam.length;
+    document.getElementById('poukazyVyuzite').textContent = vyuzite.length;
+    if (!seznam.length) { document.getElementById('poukazyTable').innerHTML = '<div class="empty">Zatím žádné vydané poukazy</div>'; }
+    else {
+      const stavBadge = { aktivni: '<span class="badge badge-ok">✅ Aktivní</span>', pouzity: '<span class="badge badge-zruseno">✔️ Vyčerpaný</span>', zruseny: '<span class="badge badge-zruseno">❌ Zrušený</span>' };
+      document.getElementById('poukazyTable').innerHTML = `
+        <table><thead><tr><th>Kód</th><th>Hodnota</th><th>Zůstatek</th><th>Platnost do</th><th>Kupující</th><th>Stav</th><th>Akce</th></tr></thead>
+        <tbody>${seznam.map(p => `<tr>
+          <td><code style="background:var(--cream);padding:2px 6px;border-radius:4px">${p.kod}</code></td>
+          <td><strong>${Number(p.hodnota).toLocaleString('cs-CZ')} Kč</strong></td>
+          <td>${Number(p.zustatek).toLocaleString('cs-CZ')} Kč</td>
+          <td>${new Date(p.platnost_do).toLocaleDateString('cs-CZ')}</td>
+          <td>${p.kupujici_jmeno || '—'}</td>
+          <td>${stavBadge[p.stav] || p.stav}</td>
+          <td><button class="btn btn-red btn-sm" onclick="smazatPoukaz(${p.id})">🗑️</button></td>
+        </tr>`).join('')}</tbody></table>`;
+    }
+  } catch (e) { document.getElementById('poukazyTable').innerHTML = '<div class="error-msg">Chyba načítání.</div>'; }
+  loadPoukazyZadosti();
+}
+async function loadPoukazyZadosti() {
+  try {
+    const seznam = await adminFetch(API + '/admin/poukazy/zadosti').then(r => r.json());
+    if (!seznam.length) { document.getElementById('poukazyZadostiTable').innerHTML = '<div class="empty">Žádné žádosti</div>'; return; }
+    const stavBadge = { nova: '<span class="badge badge-nova">🆕 Nová</span>', vyrizena: '<span class="badge badge-ok">✅ Vyřízena</span>', zamitnuta: '<span class="badge badge-zruseno">❌ Zamítnuta</span>' };
+    document.getElementById('poukazyZadostiTable').innerHTML = `
+      <table><thead><tr><th>Datum</th><th>Hodnota</th><th>Kupující</th><th>Pro koho</th><th>Stav</th><th>Akce</th></tr></thead>
+      <tbody>${seznam.map(z => `<tr>
+        <td>${new Date(z.vytvoreno).toLocaleDateString('cs-CZ')}</td>
+        <td><strong>${Number(z.hodnota).toLocaleString('cs-CZ')} Kč</strong></td>
+        <td>${z.kupujici_jmeno}<br><small>${z.kupujici_email}${z.kupujici_telefon ? ' | ' + z.kupujici_telefon : ''}</small></td>
+        <td>${z.pro_koho || '—'}</td>
+        <td>${stavBadge[z.stav] || z.stav}</td>
+        <td style="display:flex;gap:4px">
+          ${z.stav === 'nova' ? `<button class="btn btn-green btn-sm" onclick="vyriditZadost(${z.id},'vyrizena')">✅ Schválit</button><button class="btn btn-red btn-sm" onclick="vyriditZadost(${z.id},'zamitnuta')">❌</button>` : ''}
+        </td>
+      </tr>`).join('')}</tbody></table>`;
+  } catch (e) { document.getElementById('poukazyZadostiTable').innerHTML = '<div class="error-msg">Chyba načítání.</div>'; }
+}
+async function vyriditZadost(id, stav) {
+  await adminFetch(API + '/admin/poukazy/zadosti/' + id + '/stav', { method: 'PATCH', body: JSON.stringify({ stav }) });
+  loadPoukazy();
+}
+async function vydatPoukaz() {
+  const hodnota = document.getElementById('npHodnota').value;
+  const kupujici_jmeno = document.getElementById('npJmeno').value;
+  const kupujici_email = document.getElementById('npEmail').value;
+  const kupujici_telefon = document.getElementById('npTelefon').value;
+  const pro_koho = document.getElementById('npProKoho').value;
+  const zakoupeno_kde = document.getElementById('npKde').value;
+  const msg = document.getElementById('novyPoukazMsg');
+  if (!hodnota) { msg.innerHTML = '<div class="error-msg">Zadejte hodnotu poukazu.</div>'; return; }
+  try {
+    const res = await adminFetch(API + '/admin/poukazy', { method: 'POST', body: JSON.stringify({ hodnota, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, zakoupeno_kde }) });
+    if (res.ok) { closeModal('modalNovyPoukaz'); loadPoukazy(); } else msg.innerHTML = '<div class="error-msg">Nepodařilo se vydat poukaz.</div>';
+  } catch (e) { msg.innerHTML = '<div class="error-msg">Nejde se připojit k serveru — backend ještě neběží nebo není doplněná jeho adresa v proměnné API.</div>'; }
+}
+async function smazatPoukaz(id) {
+  if (!confirm('Smazat tento poukaz?')) return;
+  await adminFetch(API + '/admin/poukazy/' + id, { method: 'DELETE' });
+  loadPoukazy();
+}
+
+// ── CENÍK ── (skupiny masáží s variantami)
+let posledniCenik = [];
+async function loadCenik() {
+  try {
+    posledniCenik = await adminFetch(API + '/admin/cenik').then(r => r.json());
+    if (!posledniCenik.length) { document.getElementById('cenikTable').innerHTML = '<div class="empty">Ceník je zatím prázdný</div>'; return; }
+    const skupiny = {};
+    posledniCenik.forEach(c => { (skupiny[c.skupina] = skupiny[c.skupina] || []).push(c); });
+    document.getElementById('cenikTable').innerHTML = Object.entries(skupiny).map(([nazev, varianty]) => `
+      <div style="padding:14px 20px;border-bottom:1px solid var(--tan-light)">
+        <div style="font-family:'Cormorant',serif;font-size:1.1rem;color:var(--brown);margin-bottom:8px">${varianty[0].emoji} ${nazev}</div>
+        <table><tbody>${varianty.map(c => `<tr>
+          <td style="width:35%"><input value="${c.varianta}" id="cn-var-${c.id}" style="border:1px solid var(--tan-light);border-radius:6px;padding:5px 8px;width:100%;font-family:'Nunito',sans-serif"></td>
+          <td><input type="number" value="${c.delka_min}" id="cn-delka-${c.id}" style="border:1px solid var(--tan-light);border-radius:6px;padding:5px 8px;width:65px;font-family:'Nunito',sans-serif"> min</td>
+          <td><input type="number" value="${c.cena}" id="cn-cena-${c.id}" style="border:1px solid var(--tan-light);border-radius:6px;padding:5px 8px;width:85px;font-family:'Nunito',sans-serif"> Kč</td>
+          <td><label style="font-size:0.72rem;color:var(--text-light);display:flex;align-items:center;gap:4px"><input type="checkbox" id="cn-rez-${c.id}" ${c.rezervovatelna ? 'checked' : ''}> lze rezervovat</label></td>
+          <td style="display:flex;gap:4px">
+            <button class="btn btn-green btn-sm" onclick="ulozitPolozkuCeniku(${c.id})">💾</button>
+            <button class="btn btn-red btn-sm" onclick="smazatPolozkuCeniku(${c.id})">🗑️</button>
+          </td>
+        </tr>`).join('')}</tbody></table>
+      </div>`).join('');
+  } catch (e) { document.getElementById('cenikTable').innerHTML = '<div class="error-msg">Chyba načítání.</div>'; }
+}
+async function ulozitPolozkuCeniku(id) {
+  const varianta = document.getElementById('cn-var-' + id).value;
+  const delka_min = document.getElementById('cn-delka-' + id).value;
+  const cena = document.getElementById('cn-cena-' + id).value;
+  const rezervovatelna = document.getElementById('cn-rez-' + id).checked;
+  try {
+    await adminFetch(API + '/admin/cenik/' + id, { method: 'PUT', body: JSON.stringify({ varianta, delka_min, cena, rezervovatelna }) });
+    loadCenik();
+  } catch (e) { alert('Nejde se připojit k serveru — backend ještě neběží nebo není doplněná jeho adresa v proměnné API.'); }
+}
+async function smazatPolozkuCeniku(id) {
+  if (!confirm('Smazat tuto položku z ceníku?')) return;
+  await adminFetch(API + '/admin/cenik/' + id, { method: 'DELETE' });
+  loadCenik();
+}
+async function pridatPolozkuCeniku() {
+  const skupina = document.getElementById('cpSkupina').value;
+  const emoji = document.getElementById('cpEmoji').value || '💆';
+  const varianta = document.getElementById('cpVarianta').value;
+  const delka_min = document.getElementById('cpDelka').value;
+  const cena = document.getElementById('cpCena').value;
+  const rezervovatelna = document.getElementById('cpRezervovatelna').checked;
+  const msg = document.getElementById('novaPolozkaMsg');
+  if (!skupina || !varianta || !delka_min || !cena) { msg.innerHTML = '<div class="error-msg">Vyplňte název masáže, variantu, délku a cenu.</div>'; return; }
+  try {
+    const res = await adminFetch(API + '/admin/cenik', { method: 'POST', body: JSON.stringify({ skupina, emoji, varianta, delka_min, cena, rezervovatelna }) });
+    if (res.ok) {
+      closeModal('modalNovaPolozka');
+      document.getElementById('cpSkupina').value = ''; document.getElementById('cpEmoji').value = '';
+      document.getElementById('cpVarianta').value = ''; document.getElementById('cpDelka').value = ''; document.getElementById('cpCena').value = '';
+      loadCenik(); loadProdejna();
+    } else msg.innerHTML = '<div class="error-msg">Nepodařilo se přidat.</div>';
+  } catch (e) {
+    msg.innerHTML = '<div class="error-msg">Nejde se připojit k serveru — backend ještě neběží nebo není doplněná jeho adresa v proměnné API.</div>';
+  }
+}
+
+// ── MASÁŽE — prodejna (prodej na místě) ──
+async function loadProdejna() {
+  const wrap = document.getElementById('rychlyProdejWrap');
+  if (wrap) {
+    try {
+      const cenik = await adminFetch(API + '/admin/cenik').then(r => r.json());
+      wrap.innerHTML = `
+        <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px">
+          ${cenik.map(c => `<button class="btn btn-outline" onclick="otevritProdej(${c.id},'${(c.skupina + ' – ' + c.varianta).replace(/'/g,"\\'")}',${c.cena})">${c.emoji} ${c.skupina} — ${c.varianta} — ${c.cena} Kč</button>`).join('')}
+        </div>
+        <div id="prodejForm" style="display:none;background:var(--cream);border-radius:12px;padding:16px;margin-top:8px">
+          <div class="form-group"><label id="prodejNazev"></label></div>
+          <div class="form-grid-2">
+            <div class="form-group"><label>Cena (Kč)</label><input type="number" id="prodejCena"></div>
+            <div class="form-group"><label>Platba</label>
+              <select id="prodejPlatba"><option value="hotove">Hotově</option><option value="qr">QR kód</option></select>
+            </div>
+          </div>
+          <div id="prodejMsg"></div>
+          <div style="display:flex;gap:10px;margin-top:8px">
+            <button class="btn btn-outline" onclick="document.getElementById('prodejForm').style.display='none'">Zrušit</button>
+            <button class="btn btn-primary" onclick="potvrditProdej()">✅ Potvrdit prodej</button>
+          </div>
+        </div>`;
+    } catch (e) { wrap.innerHTML = '<div class="error-msg">Chyba načítání ceníku.</div>'; }
+  }
+
+  try {
+    const seznam = await adminFetch(API + '/admin/prodejna').then(r => r.json());
+    const dnes = new Date().toISOString().slice(0, 10);
+    document.getElementById('prodejnaTrzby').textContent = seznam.reduce((s, p) => s + Number(p.cena), 0).toLocaleString('cs-CZ') + ' Kč';
+    document.getElementById('prodejnaPocet').textContent = seznam.length;
+    document.getElementById('prodejnaDnes').textContent = seznam.filter(p => p.vytvoreno.slice(0, 10) === dnes).reduce((s, p) => s + Number(p.cena), 0).toLocaleString('cs-CZ') + ' Kč';
+    if (!seznam.length) { document.getElementById('prodejnaTable').innerHTML = '<div class="empty">Zatím žádné prodeje</div>'; return; }
+    document.getElementById('prodejnaTable').innerHTML = `
+      <table><thead><tr><th>Datum</th><th>Masáž</th><th>Cena</th><th>Platba</th><th></th></tr></thead>
+      <tbody>${seznam.map(p => `<tr>
+        <td>${new Date(p.vytvoreno).toLocaleDateString('cs-CZ')} ${new Date(p.vytvoreno).toLocaleTimeString('cs-CZ',{hour:'2-digit',minute:'2-digit'})}</td>
+        <td>${p.masaz}</td>
+        <td><strong>${Number(p.cena).toLocaleString('cs-CZ')} Kč</strong></td>
+        <td>${p.zpusob_platby === 'qr' ? 'QR kód' : 'Hotově'}</td>
+        <td><button class="btn btn-red btn-sm" onclick="smazatProdej(${p.id})">🗑️</button></td>
+      </tr>`).join('')}</tbody></table>`;
+  } catch (e) { document.getElementById('prodejnaTable').innerHTML = '<div class="error-msg">Chyba načítání.</div>'; }
+}
+function otevritProdej(id, nazev, cena) {
+  document.getElementById('prodejForm').style.display = 'block';
+  document.getElementById('prodejForm').dataset.masaz = nazev;
+  document.getElementById('prodejNazev').textContent = nazev;
+  document.getElementById('prodejCena').value = cena;
+}
+async function potvrditProdej() {
+  const masaz = document.getElementById('prodejForm').dataset.masaz;
+  const cena = document.getElementById('prodejCena').value;
+  const zpusob_platby = document.getElementById('prodejPlatba').value;
+  const msg = document.getElementById('prodejMsg');
+  if (!cena) { msg.innerHTML = '<div class="error-msg">Zadejte cenu.</div>'; return; }
+  try {
+    const res = await adminFetch(API + '/admin/prodejna', { method: 'POST', body: JSON.stringify({ masaz, cena, zpusob_platby }) });
+    if (res.ok) { document.getElementById('prodejForm').style.display = 'none'; loadProdejna(); }
+    else msg.innerHTML = '<div class="error-msg">Nepodařilo se zapsat prodej.</div>';
+  } catch (e) { msg.innerHTML = '<div class="error-msg">Nejde se připojit k serveru — backend ještě neběží nebo není doplněná jeho adresa v proměnné API.</div>'; }
+}
+async function smazatProdej(id) {
+  if (!confirm('Smazat tento záznam o prodeji?')) return;
+  await adminFetch(API + '/admin/prodejna/' + id, { method: 'DELETE' });
+  loadProdejna();
+}
+
+// ── ÚČETNICTVÍ ──
+let posledniUcetnictvi = null;
+async function loadUcetnictvi() {
+  try {
+    const d = await adminFetch(API + '/admin/ucetnictvi').then(r => r.json());
+    posledniUcetnictvi = d;
+    document.getElementById('ucetTrzby').textContent = Math.round(d.trzbyCelkem).toLocaleString('cs-CZ') + ' Kč';
+    document.getElementById('ucetDnes').textContent = Math.round(d.trzbyDnes).toLocaleString('cs-CZ') + ' Kč';
+    document.getElementById('ucetPocet').textContent = d.pocetPolozek;
+    document.getElementById('ucetPrumer').textContent = Math.round(d.prumernaPolozka).toLocaleString('cs-CZ') + ' Kč';
+
+    document.getElementById('ucetMesice').innerHTML = !d.mesicniPrehled.length ? '<div class="empty">Zatím žádná data</div>' : `
+      <table><thead><tr><th>Měsíc</th><th>Tržby</th></tr></thead>
+      <tbody>${d.mesicniPrehled.map(m => `<tr><td>${m.mesic}</td><td><strong>${Math.round(m.castka).toLocaleString('cs-CZ')} Kč</strong></td></tr>`).join('')}</tbody></table>`;
+
+    const zdrojLabel = { rezervace: '📅 Rezervace', prodejna: '🧖 Prodejna', poukaz: '🎁 Poukaz' };
+    document.getElementById('ucetPolozky').innerHTML = !d.polozky.length ? '<div class="empty">Zatím žádné položky</div>' : `
+      <table><thead><tr><th>Datum</th><th>Zdroj</th><th>Částka</th></tr></thead>
+      <tbody>${d.polozky.slice(0, 100).map(p => `<tr><td>${new Date(p.datum).toLocaleDateString('cs-CZ')}</td><td>${zdrojLabel[p.zdroj] || p.zdroj}</td><td>${Math.round(p.castka).toLocaleString('cs-CZ')} Kč</td></tr>`).join('')}</tbody></table>`;
+  } catch (e) { document.getElementById('ucetMesice').innerHTML = '<div class="error-msg">Chyba načítání.</div>'; }
+}
+function exportCsvUcetnictvi() {
+  if (!posledniUcetnictvi) return;
+  const zdrojLabel = { rezervace: 'Rezervace', prodejna: 'Prodejna', poukaz: 'Poukaz' };
+  let csv = 'Datum;Zdroj;Castka\n';
+  posledniUcetnictvi.polozky.forEach(p => {
+    csv += `${new Date(p.datum).toLocaleDateString('cs-CZ')};${zdrojLabel[p.zdroj] || p.zdroj};${Math.round(p.castka)}\n`;
+  });
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'ucetnictvi-masaze-alesa.csv';
+  a.click();
+}
+</script>
+</body>
+</html>
