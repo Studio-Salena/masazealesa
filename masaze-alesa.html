@@ -722,6 +722,101 @@
     box-shadow: 0 12px 40px rgba(196,122,74,0.5);
   }
 
+  /* ── FORMULÁŘE (rezervace online + žádost o poukaz) ── */
+  .form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    text-align: left;
+  }
+  .form-field { display: flex; flex-direction: column; gap: 0.35rem; }
+  .form-field-full { grid-column: 1 / -1; }
+  .form-field label {
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    color: var(--text-light);
+  }
+  .form-input, .form-select, .form-textarea {
+    padding: 0.75rem 1rem;
+    border: 1.5px solid rgba(196,122,74,0.25);
+    border-radius: 12px;
+    font-size: 0.92rem;
+    font-family: 'Nunito', sans-serif;
+    outline: none;
+    background: var(--white);
+    color: var(--text);
+    width: 100%;
+  }
+  .form-input:focus, .form-select:focus, .form-textarea:focus { border-color: var(--terracotta); }
+  .form-textarea { resize: vertical; min-height: 80px; }
+  .form-msg { margin-top: 0.9rem; font-size: 0.9rem; font-weight: 600; text-align: center; }
+  .form-msg.ok { color: #3a7a4a; }
+  .form-msg.err { color: #b8402a; }
+
+  .rez-form-card {
+    background: var(--white);
+    border-radius: 24px;
+    padding: 2.2rem;
+    margin-top: 2.5rem;
+    text-align: left;
+    border: 1px solid rgba(196,122,74,0.15);
+    box-shadow: 0 12px 40px rgba(90,50,20,0.08);
+  }
+  .rez-form-card h3 {
+    font-family: 'Cormorant', Georgia, serif;
+    font-size: 1.5rem;
+    color: var(--brown);
+    margin-bottom: 1.2rem;
+    text-align: center;
+  }
+  .rez-slots {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    justify-content: center;
+    margin: 1.2rem 0;
+  }
+  .rez-slot-btn {
+    padding: 0.6rem 1.1rem;
+    border-radius: 50px;
+    border: 1.5px solid rgba(196,122,74,0.3);
+    background: var(--white);
+    color: var(--brown);
+    font-weight: 700;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: 'Nunito', sans-serif;
+  }
+  .rez-slot-btn:hover { border-color: var(--terracotta); }
+  .rez-slot-btn.selected { background: var(--terracotta); color: var(--white); border-color: var(--terracotta); }
+  .rez-hint { font-size: 0.85rem; color: var(--text-light); text-align: center; margin: 0.5rem 0; }
+
+  .pk-form-card {
+    grid-column: 1 / -1;
+    margin-top: 2rem;
+    background: var(--white);
+    border: 1px solid rgba(196,122,74,0.15);
+    border-radius: 24px;
+    padding: 2.2rem;
+    box-shadow: 0 12px 40px rgba(90,50,20,0.08);
+    position: relative;
+  }
+  .pk-form-card h3 {
+    font-family: 'Cormorant', Georgia, serif;
+    font-size: 1.4rem;
+    color: var(--brown);
+    margin-bottom: 1.2rem;
+  }
+  .pk-form-card .form-field label { color: var(--text-light); }
+  .pk-form-card .form-msg.ok { color: #8ee6a8; }
+  .pk-form-card .form-msg.err { color: #ffb3a3; }
+
+  @media (max-width: 768px) {
+    .form-row { grid-template-columns: 1fr; }
+  }
+
   /* ── KONTAKT ── */
   #kontakt { background: var(--cream); }
 
@@ -1506,6 +1601,40 @@
         </div>
         <p>Poukazy vystavujeme na konkrétní masáž nebo na vybranou částku. Kontaktujte nás telefonicky nebo e-mailem.</p>
       </div>
+
+      <div id="pkFormCard" class="pk-form-card" style="display:none;">
+        <h3>Nebo požádejte o poukaz online</h3>
+        <div class="form-row">
+          <div class="form-field">
+            <label for="pkHodnota">Hodnota poukazu (Kč)*</label>
+            <input type="number" id="pkHodnota" class="form-input" min="100" step="50" placeholder="např. 800">
+          </div>
+          <div class="form-field">
+            <label for="pkProKoho">Pro koho je poukaz</label>
+            <input type="text" id="pkProKoho" class="form-input" placeholder="např. pro maminku">
+          </div>
+          <div class="form-field">
+            <label for="pkJmeno">Vaše jméno*</label>
+            <input type="text" id="pkJmeno" class="form-input" placeholder="Jana Nováková">
+          </div>
+          <div class="form-field">
+            <label for="pkEmail">Váš e-mail*</label>
+            <input type="email" id="pkEmail" class="form-input" placeholder="jana@example.cz">
+          </div>
+          <div class="form-field">
+            <label for="pkTelefon">Telefon</label>
+            <input type="tel" id="pkTelefon" class="form-input" placeholder="Nepovinné">
+          </div>
+          <div class="form-field form-field-full">
+            <label for="pkVzkaz">Vzkaz</label>
+            <textarea id="pkVzkaz" class="form-textarea" placeholder="Nepovinné"></textarea>
+          </div>
+        </div>
+        <div style="text-align:center; margin-top:1.2rem;">
+          <button type="button" class="btn-gold" onclick="pkOdeslat()">Odeslat žádost</button>
+        </div>
+        <p id="pkZprava" class="form-msg"></p>
+      </div>
     </div>
   </div>
 </section>
@@ -1567,6 +1696,49 @@
       <a href="https://masaze-hasalova.reservio.com/" target="_blank" class="btn-rezervace">
         Rezervovat online →
       </a>
+
+      <div id="rezFormCard" class="rez-form-card" style="display:none;">
+        <h3>Nebo rezervujte přímo tady</h3>
+        <div class="form-row">
+          <div class="form-field">
+            <label for="rezMasaz">Masáž</label>
+            <select id="rezMasaz" class="form-select" onchange="rezNacistTerminy()">
+              <option value="">Načítám ceník…</option>
+            </select>
+          </div>
+          <div class="form-field">
+            <label for="rezDatum">Datum</label>
+            <input type="date" id="rezDatum" class="form-input" onchange="rezNacistTerminy()">
+          </div>
+        </div>
+
+        <div id="rezSloty" class="rez-slots"></div>
+
+        <div id="rezFormFields" style="display:none;">
+          <div class="form-row" style="margin-top:1rem;">
+            <div class="form-field">
+              <label for="rezJmeno">Jméno a příjmení*</label>
+              <input type="text" id="rezJmeno" class="form-input" placeholder="Jana Nováková">
+            </div>
+            <div class="form-field">
+              <label for="rezTelefon">Telefon*</label>
+              <input type="tel" id="rezTelefon" class="form-input" placeholder="736 734 951">
+            </div>
+            <div class="form-field">
+              <label for="rezEmail">E-mail</label>
+              <input type="email" id="rezEmail" class="form-input" placeholder="jana@example.cz">
+            </div>
+            <div class="form-field form-field-full">
+              <label for="rezPoznamka">Poznámka</label>
+              <textarea id="rezPoznamka" class="form-textarea" placeholder="Nepovinné"></textarea>
+            </div>
+          </div>
+          <div style="text-align:center; margin-top:1.2rem;">
+            <button type="button" id="rezSubmitBtn" class="btn-rezervace" onclick="rezOdeslat()">Odeslat rezervaci</button>
+          </div>
+        </div>
+        <p id="rezZprava" class="form-msg"></p>
+      </div>
     </div>
   </div>
 </section>
@@ -1859,12 +2031,15 @@ const API = 'https://TVOJE-API-URL.onrender.com/api';
 
 // Načte aktuální ceník z administrace — pokud se to nepovede (např. backend ještě neběží),
 // zůstane na webu ceník tak, jak je napsaný napevno v HTML výše.
+// Pokud se povede, zároveň se odemknou online formuláře Rezervace a Poukazy (jinak zůstanou skryté).
+var cenikData = [];
 async function nacistCenikZAdministrace() {
   try {
     const res = await fetch(API + '/cenik');
     if (!res.ok) return;
     const data = await res.json();
     if (!data.length) return;
+    cenikData = data;
     const skupiny = {};
     data.forEach(function(c) { (skupiny[c.skupina] = skupiny[c.skupina] || []).push(c); });
     const wrap = document.getElementById('cenikAccordion');
@@ -1877,9 +2052,137 @@ async function nacistCenikZAdministrace() {
       }).join('');
       return '<div class="cenik-acc-item" onclick="toggleCenik(this)"><div class="cenik-acc-header"><span class="cenik-acc-emoji">' + varianty[0].emoji + '</span><span class="cenik-acc-name">' + nazev + '</span><span class="cenik-acc-from">' + odText + '</span><span class="cenik-acc-arrow">▼</span></div><div class="cenik-acc-body">' + polozky + '</div></div>';
     }).join('');
-  } catch (e) { /* necháme napevno zapsaný ceník jako zálohu */ }
+
+    // Naplnit select masáží ve formuláři rezervace (jen položky, na které lze online rezervovat)
+    var rezSelect = document.getElementById('rezMasaz');
+    var rezervovatelne = data.filter(function(c) { return c.rezervovatelna; });
+    if (rezSelect && rezervovatelne.length) {
+      rezSelect.innerHTML = '<option value="">Vyberte masáž…</option>' + rezervovatelne.map(function(c) {
+        return '<option value="' + c.id + '">' + c.emoji + ' ' + c.skupina + ' – ' + c.varianta + ' (' + c.delka_min + ' min, ' + c.cena.toLocaleString('cs-CZ') + ' Kč)</option>';
+      }).join('');
+    }
+    var rezDatum = document.getElementById('rezDatum');
+    if (rezDatum) rezDatum.min = new Date().toISOString().slice(0, 10);
+
+    // Backend běží → odemknout online formuláře
+    var rezCard = document.getElementById('rezFormCard');
+    var pkCard = document.getElementById('pkFormCard');
+    if (rezCard) rezCard.style.display = 'block';
+    if (pkCard) pkCard.style.display = 'block';
+  } catch (e) { /* necháme napevno zapsaný ceník jako zálohu, formuláře zůstanou skryté */ }
 }
 document.addEventListener('DOMContentLoaded', nacistCenikZAdministrace);
+
+// ── REZERVACE ONLINE ──
+var rezVybranyCas = null;
+
+async function rezNacistTerminy() {
+  rezVybranyCas = null;
+  document.getElementById('rezFormFields').style.display = 'none';
+  document.getElementById('rezZprava').textContent = '';
+  document.getElementById('rezZprava').className = 'form-msg';
+  var cenikId = document.getElementById('rezMasaz').value;
+  var datum = document.getElementById('rezDatum').value;
+  var wrap = document.getElementById('rezSloty');
+  wrap.innerHTML = '';
+  if (!cenikId || !datum) return;
+
+  wrap.innerHTML = '<p class="rez-hint">Hledám volné termíny…</p>';
+  try {
+    var res = await fetch(API + '/rezervace/volne-terminy?datum=' + encodeURIComponent(datum) + '&cenik_id=' + encodeURIComponent(cenikId));
+    var terminy = await res.json();
+    if (!res.ok) { wrap.innerHTML = '<p class="rez-hint">' + (terminy.chyba || 'Termíny se nepodařilo načíst.') + '</p>'; return; }
+    if (!terminy.length) { wrap.innerHTML = '<p class="rez-hint">Pro tento den už bohužel nejsou volné žádné termíny. Zkuste prosím jiné datum.</p>'; return; }
+    wrap.innerHTML = terminy.map(function(t) {
+      return '<button type="button" class="rez-slot-btn" onclick="rezVybratSlot(this, \'' + t + '\')">' + t + '</button>';
+    }).join('');
+  } catch (e) {
+    wrap.innerHTML = '<p class="rez-hint">Termíny se nepodařilo načíst, zkuste to prosím znovu.</p>';
+  }
+}
+
+function rezVybratSlot(btn, cas) {
+  document.querySelectorAll('.rez-slot-btn.selected').forEach(function(b) { b.classList.remove('selected'); });
+  btn.classList.add('selected');
+  rezVybranyCas = cas;
+  document.getElementById('rezFormFields').style.display = 'block';
+}
+
+async function rezOdeslat() {
+  var zprava = document.getElementById('rezZprava');
+  zprava.className = 'form-msg';
+  var cenikId = document.getElementById('rezMasaz').value;
+  var datum = document.getElementById('rezDatum').value;
+  var jmeno = document.getElementById('rezJmeno').value.trim();
+  var telefon = document.getElementById('rezTelefon').value.trim();
+  var email = document.getElementById('rezEmail').value.trim();
+  var poznamka = document.getElementById('rezPoznamka').value.trim();
+
+  if (!rezVybranyCas || !cenikId || !datum) { zprava.textContent = 'Vyberte prosím masáž, datum a čas.'; zprava.className = 'form-msg err'; return; }
+  if (!jmeno || !telefon) { zprava.textContent = 'Vyplňte prosím jméno a telefon.'; zprava.className = 'form-msg err'; return; }
+
+  var btn = document.getElementById('rezSubmitBtn');
+  btn.disabled = true; btn.textContent = 'Odesílám…';
+  try {
+    var res = await fetch(API + '/rezervace', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ datum: datum, cas_od: rezVybranyCas, jmeno: jmeno, telefon: telefon, email: email, cenik_id: cenikId, poznamka: poznamka })
+    });
+    var vysledek = await res.json();
+    if (!res.ok) { zprava.textContent = vysledek.chyba || 'Rezervaci se nepodařilo odeslat.'; zprava.className = 'form-msg err'; return; }
+    zprava.textContent = '🌸 Rezervace odeslána! Ozveme se vám s potvrzením.';
+    zprava.className = 'form-msg ok';
+    document.getElementById('rezJmeno').value = '';
+    document.getElementById('rezTelefon').value = '';
+    document.getElementById('rezEmail').value = '';
+    document.getElementById('rezPoznamka').value = '';
+    document.getElementById('rezFormFields').style.display = 'none';
+    document.getElementById('rezSloty').innerHTML = '';
+    rezVybranyCas = null;
+  } catch (e) {
+    zprava.textContent = 'Rezervaci se nepodařilo odeslat, zkuste to prosím znovu nebo zavolejte.';
+    zprava.className = 'form-msg err';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Odeslat rezervaci';
+  }
+}
+
+// ── ŽÁDOST O POUKAZ ──
+async function pkOdeslat() {
+  var zprava = document.getElementById('pkZprava');
+  zprava.className = 'form-msg';
+  var hodnota = document.getElementById('pkHodnota').value;
+  var proKoho = document.getElementById('pkProKoho').value.trim();
+  var jmeno = document.getElementById('pkJmeno').value.trim();
+  var email = document.getElementById('pkEmail').value.trim();
+  var telefon = document.getElementById('pkTelefon').value.trim();
+  var vzkaz = document.getElementById('pkVzkaz').value.trim();
+
+  if (!hodnota || Number(hodnota) <= 0) { zprava.textContent = 'Zadejte prosím hodnotu poukazu.'; zprava.className = 'form-msg err'; return; }
+  if (!jmeno || !email) { zprava.textContent = 'Vyplňte prosím jméno a e-mail.'; zprava.className = 'form-msg err'; return; }
+
+  try {
+    var res = await fetch(API + '/poukazy/zadost', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hodnota: hodnota, kupujici_jmeno: jmeno, kupujici_email: email, kupujici_telefon: telefon, pro_koho: proKoho, vzkaz: vzkaz })
+    });
+    var vysledek = await res.json();
+    if (!res.ok) { zprava.textContent = vysledek.chyba || 'Žádost se nepodařilo odeslat.'; zprava.className = 'form-msg err'; return; }
+    zprava.textContent = '🌸 Žádost odeslána! Ozveme se vám s dalšími kroky.';
+    zprava.className = 'form-msg ok';
+    document.getElementById('pkHodnota').value = '';
+    document.getElementById('pkProKoho').value = '';
+    document.getElementById('pkJmeno').value = '';
+    document.getElementById('pkEmail').value = '';
+    document.getElementById('pkTelefon').value = '';
+    document.getElementById('pkVzkaz').value = '';
+  } catch (e) {
+    zprava.textContent = 'Žádost se nepodařilo odeslat, zkuste to prosím znovu nebo zavolejte.';
+    zprava.className = 'form-msg err';
+  }
+}
 
 function toggleMenu() {
   var links = document.getElementById('navLinks');
