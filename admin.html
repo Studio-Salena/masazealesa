@@ -262,6 +262,13 @@ tr:hover td{background:#fffaf5}
         <div class="stat-card"><div class="stat-label">Plně využité</div><div class="stat-value" id="poukazyVyuzite">—</div></div>
       </div>
       <div class="table-wrap">
+        <div class="table-header">
+          <h3>🏷️ Varianty poukazů (částka a platnost)</h3>
+          <button class="btn btn-primary btn-sm" onclick="openModal('modalNovyTypPoukazu')">+ Přidat variantu</button>
+        </div>
+        <div id="poukazyTypyTable"><div class="loading">Načítám...</div></div>
+      </div>
+      <div class="table-wrap">
         <div class="table-header"><h3>📋 Žádosti o poukaz z webu</h3></div>
         <div id="poukazyZadostiTable"><div class="loading">Načítám...</div></div>
       </div>
@@ -367,7 +374,7 @@ tr:hover td{background:#fffaf5}
   <div class="modal">
     <h3>+ Vydat dárkový poukaz</h3>
     <div id="novyPoukazMsg"></div>
-    <div class="form-group"><label>Hodnota (Kč)</label><input type="number" id="npHodnota" placeholder="890"></div>
+    <div class="form-group"><label>Varianta poukazu</label><select id="npTyp"><option value="">Načítám varianty…</option></select></div>
     <div class="form-group"><label>Jméno kupující/ho</label><input type="text" id="npJmeno"></div>
     <div class="form-grid-2">
       <div class="form-group"><label>E-mail</label><input type="email" id="npEmail"></div>
@@ -380,6 +387,22 @@ tr:hover td{background:#fffaf5}
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal('modalNovyPoukaz')">Zrušit</button>
       <button class="btn btn-primary" onclick="vydatPoukaz()">Vydat poukaz</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Nová varianta poukazu -->
+<div class="modal-overlay" id="modalNovyTypPoukazu">
+  <div class="modal">
+    <h3>+ Přidat variantu poukazu</h3>
+    <div id="novyTypPoukazuMsg"></div>
+    <div class="form-grid-2">
+      <div class="form-group"><label>Hodnota (Kč)</label><input type="number" id="tpHodnota" placeholder="890"></div>
+      <div class="form-group"><label>Platnost (měsíců)</label><input type="number" id="tpPlatnost" placeholder="12"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modalNovyTypPoukazu')">Zrušit</button>
+      <button class="btn btn-primary" onclick="pridatTypPoukazu()">Přidat</button>
     </div>
   </div>
 </div>
@@ -587,7 +610,59 @@ async function loadPoukazy() {
     }
   } catch (e) { document.getElementById('poukazyTable').innerHTML = '<div class="error-msg">Chyba načítání.</div>'; }
   loadPoukazyZadosti();
+  loadPoukazyTypy();
 }
+
+// -- Varianty poukazů (částka + platnost) --
+let posledniTypyPoukazu = [];
+async function loadPoukazyTypy() {
+  try {
+    posledniTypyPoukazu = await adminFetch(API + '/admin/poukazy/typy').then(r => r.json());
+    const npTyp = document.getElementById('npTyp');
+    if (npTyp) {
+      npTyp.innerHTML = posledniTypyPoukazu.length
+        ? posledniTypyPoukazu.map(t => `<option value="${t.id}">${Number(t.hodnota).toLocaleString('cs-CZ')} Kč — platí ${t.platnost_mesicu} měsíců</option>`).join('')
+        : '<option value="">Nejdřív přidejte variantu poukazu</option>';
+    }
+    if (!posledniTypyPoukazu.length) { document.getElementById('poukazyTypyTable').innerHTML = '<div class="empty">Zatím žádné varianty — přidejte první tlačítkem výše</div>'; return; }
+    document.getElementById('poukazyTypyTable').innerHTML = `
+      <table><thead><tr><th>Hodnota (Kč)</th><th>Platnost (měsíců)</th><th>Akce</th></tr></thead>
+      <tbody>${posledniTypyPoukazu.map(t => `<tr>
+        <td><input type="number" value="${t.hodnota}" id="tp-hodnota-${t.id}" style="border:1px solid var(--tan-light);border-radius:6px;padding:5px 8px;width:90px;font-family:'Nunito',sans-serif"> Kč</td>
+        <td><input type="number" value="${t.platnost_mesicu}" id="tp-platnost-${t.id}" style="border:1px solid var(--tan-light);border-radius:6px;padding:5px 8px;width:70px;font-family:'Nunito',sans-serif"> měsíců</td>
+        <td style="display:flex;gap:4px">
+          <button class="btn btn-green btn-sm" onclick="ulozitTypPoukazu(${t.id})">💾</button>
+          <button class="btn btn-red btn-sm" onclick="smazatTypPoukazu(${t.id})">🗑️</button>
+        </td>
+      </tr>`).join('')}</tbody></table>`;
+  } catch (e) { document.getElementById('poukazyTypyTable').innerHTML = '<div class="error-msg">Chyba načítání.</div>'; }
+}
+async function ulozitTypPoukazu(id) {
+  const hodnota = document.getElementById('tp-hodnota-' + id).value;
+  const platnost_mesicu = document.getElementById('tp-platnost-' + id).value;
+  await adminFetch(API + '/admin/poukazy/typy/' + id, { method: 'PUT', body: JSON.stringify({ hodnota, platnost_mesicu }) });
+  loadPoukazyTypy();
+}
+async function smazatTypPoukazu(id) {
+  if (!confirm('Smazat tuto variantu poukazu? (Už vydané poukazy touto variantou zůstanou beze změny.)')) return;
+  await adminFetch(API + '/admin/poukazy/typy/' + id, { method: 'DELETE' });
+  loadPoukazyTypy();
+}
+async function pridatTypPoukazu() {
+  const hodnota = document.getElementById('tpHodnota').value;
+  const platnost_mesicu = document.getElementById('tpPlatnost').value;
+  const msg = document.getElementById('novyTypPoukazuMsg');
+  if (!hodnota || !platnost_mesicu) { msg.innerHTML = '<div class="error-msg">Zadejte hodnotu i platnost v měsících.</div>'; return; }
+  try {
+    const res = await adminFetch(API + '/admin/poukazy/typy', { method: 'POST', body: JSON.stringify({ hodnota, platnost_mesicu }) });
+    if (res.ok) {
+      closeModal('modalNovyTypPoukazu');
+      document.getElementById('tpHodnota').value = ''; document.getElementById('tpPlatnost').value = '';
+      loadPoukazyTypy();
+    } else msg.innerHTML = '<div class="error-msg">Nepodařilo se přidat variantu.</div>';
+  } catch (e) { msg.innerHTML = '<div class="error-msg">Nejde se připojit k serveru — backend ještě neběží nebo není doplněná jeho adresa v proměnné API.</div>'; }
+}
+
 async function loadPoukazyZadosti() {
   try {
     const seznam = await adminFetch(API + '/admin/poukazy/zadosti').then(r => r.json());
@@ -612,16 +687,16 @@ async function vyriditZadost(id, stav) {
   loadPoukazy();
 }
 async function vydatPoukaz() {
-  const hodnota = document.getElementById('npHodnota').value;
+  const poukaz_typ_id = document.getElementById('npTyp').value;
   const kupujici_jmeno = document.getElementById('npJmeno').value;
   const kupujici_email = document.getElementById('npEmail').value;
   const kupujici_telefon = document.getElementById('npTelefon').value;
   const pro_koho = document.getElementById('npProKoho').value;
   const zakoupeno_kde = document.getElementById('npKde').value;
   const msg = document.getElementById('novyPoukazMsg');
-  if (!hodnota) { msg.innerHTML = '<div class="error-msg">Zadejte hodnotu poukazu.</div>'; return; }
+  if (!poukaz_typ_id) { msg.innerHTML = '<div class="error-msg">Vyberte variantu poukazu.</div>'; return; }
   try {
-    const res = await adminFetch(API + '/admin/poukazy', { method: 'POST', body: JSON.stringify({ hodnota, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, zakoupeno_kde }) });
+    const res = await adminFetch(API + '/admin/poukazy', { method: 'POST', body: JSON.stringify({ poukaz_typ_id, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, zakoupeno_kde }) });
     if (res.ok) { closeModal('modalNovyPoukaz'); loadPoukazy(); } else msg.innerHTML = '<div class="error-msg">Nepodařilo se vydat poukaz.</div>';
   } catch (e) { msg.innerHTML = '<div class="error-msg">Nejde se připojit k serveru — backend ještě neběží nebo není doplněná jeho adresa v proměnné API.</div>'; }
 }

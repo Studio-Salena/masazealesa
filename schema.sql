@@ -68,6 +68,19 @@ create table if not exists prodeje (
   vytvoreno timestamptz not null default now()
 );
 
+-- Varianty poukazů, které lze vydat (částka + doba platnosti) — upravuje si Alena v adminu
+create table if not exists poukazy_typy (
+  id serial primary key,
+  hodnota numeric not null,
+  platnost_mesicu integer not null default 12,
+  poradi integer not null default 0
+);
+insert into poukazy_typy (hodnota, platnost_mesicu, poradi) values
+  (500, 6, 1),
+  (890, 12, 2),
+  (1500, 24, 3)
+on conflict do nothing;
+
 -- Vydané dárkové poukazy
 create table if not exists poukazy (
   id serial primary key,
@@ -126,6 +139,7 @@ on conflict do nothing;
 alter table pracovni_doba enable row level security;
 alter table rezervace enable row level security;
 alter table cenik enable row level security;
+alter table poukazy_typy enable row level security;
 alter table poukazy enable row level security;
 alter table poukazy_zadosti enable row level security;
 alter table prodeje enable row level security;

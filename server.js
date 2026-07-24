@@ -198,6 +198,36 @@ app.put('/api/admin/pracovni-doba/:den', async (req, res) => {
   res.json({ ok: true });
 });
 
+// -- Varianty poukazů (částka + platnost) --
+app.get('/api/admin/poukazy/typy', async (req, res) => {
+  const { data, error } = await supabase.from('poukazy_typy').select('*').order('poradi');
+  if (error) return res.status(500).json({ chyba: error.message });
+  res.json(data);
+});
+
+app.post('/api/admin/poukazy/typy', async (req, res) => {
+  const { hodnota, platnost_mesicu, poradi } = req.body || {};
+  if (!hodnota || !platnost_mesicu) return res.status(400).json({ chyba: 'Zadejte hodnotu a platnost v měsících.' });
+  const { data, error } = await supabase.from('poukazy_typy').insert({
+    hodnota, platnost_mesicu, poradi: poradi || 0
+  }).select().single();
+  if (error) return res.status(500).json({ chyba: error.message });
+  res.json({ ok: true, typ: data });
+});
+
+app.put('/api/admin/poukazy/typy/:id', async (req, res) => {
+  const { hodnota, platnost_mesicu } = req.body || {};
+  const { error } = await supabase.from('poukazy_typy').update({ hodnota, platnost_mesicu }).eq('id', req.params.id);
+  if (error) return res.status(500).json({ chyba: error.message });
+  res.json({ ok: true });
+});
+
+app.delete('/api/admin/poukazy/typy/:id', async (req, res) => {
+  const { error } = await supabase.from('poukazy_typy').delete().eq('id', req.params.id);
+  if (error) return res.status(500).json({ chyba: error.message });
+  res.json({ ok: true });
+});
+
 // -- Poukazy --
 app.get('/api/admin/poukazy', async (req, res) => {
   const { data, error } = await supabase.from('poukazy').select('*').order('vytvoreno', { ascending: false });
@@ -206,14 +236,16 @@ app.get('/api/admin/poukazy', async (req, res) => {
 });
 
 app.post('/api/admin/poukazy', async (req, res) => {
-  const { hodnota, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, zakoupeno_kde } = req.body || {};
-  if (!hodnota) return res.status(400).json({ chyba: 'Zadejte hodnotu poukazu.' });
+  const { poukaz_typ_id, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, zakoupeno_kde } = req.body || {};
+  if (!poukaz_typ_id) return res.status(400).json({ chyba: 'Vyberte variantu poukazu.' });
+  const { data: typ } = await supabase.from('poukazy_typy').select('*').eq('id', poukaz_typ_id).maybeSingle();
+  if (!typ) return res.status(404).json({ chyba: 'Tato varianta poukazu nebyla nalezena.' });
   const platnostDo = new Date();
-  platnostDo.setFullYear(platnostDo.getFullYear() + 1);
+  platnostDo.setMonth(platnostDo.getMonth() + typ.platnost_mesicu);
   const { data, error } = await supabase.from('poukazy').insert({
     kod: vygenerovatKod(),
     ean: vygenerovatEan(),
-    hodnota, zustatek: hodnota,
+    hodnota: typ.hodnota, zustatek: typ.hodnota,
     platnost_do: platnostDo.toISOString().slice(0, 10),
     zakoupeno_kde: zakoupeno_kde || 'osobne',
     kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho,
