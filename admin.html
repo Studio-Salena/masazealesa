@@ -133,33 +133,32 @@ tr:hover td{background:#fffaf5}
 /* POUKAZ — vyhledání/uplatnění */
 .poukaz-hledani-vysledek{border:2px solid var(--tan-light);border-radius:12px;padding:16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px}
 
-/* POUKAZ — grafický náhled k tisku (na pozadí reálná grafika poukazu, přes ni se dopíšou údaje) */
+/* POUKAZ — grafický náhled k tisku (pozadí + pozice popisků se mění podle zvolené šablony, viz POUKAZ_SABLONY v JS) */
 .poukaz-print-card{
   position:relative;
   width:100%;
-  aspect-ratio:907/520;
-  background-image:url('assets/poukaz.jpg');
   background-size:cover;
   background-position:center;
   border-radius:14px;
   overflow:hidden;
 }
-.pp-overlay-line{
+.pp-logo-overlay{position:absolute;text-align:center;line-height:1.15}
+.pp-logo-text{font-family:'Dancing Script',cursive;font-size:1.05rem;color:var(--brown)}
+.pp-title-text{font-size:0.62rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--gold);font-weight:700;margin-top:1px}
+.pp-radek{
   position:absolute;
-  right:6%;
   font-family:'Nunito',sans-serif;
-  font-size:clamp(0.68rem,2.5vw,0.95rem);
+  font-size:0.72rem;
   color:var(--brown);
-  font-weight:700;
+  font-weight:600;
   white-space:nowrap;
   overflow:hidden;
   text-overflow:ellipsis;
 }
-.pp-line-pro{ top:51.5%; left:39%; }
-.pp-line-hodnota{ top:59%; left:43%; }
-.pp-line-platnost{ top:67%; left:48%; }
+.pp-radek strong{font-weight:800}
+.pp-podklad{position:absolute;background:rgba(255,253,248,0.85);border-radius:14px;box-shadow:0 2px 10px rgba(0,0,0,0.08)}
 .pp-bottom{
-  position:absolute; left:34%; right:14%; top:85%; bottom:2%;
+  position:absolute;
   display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px;
 }
 .pp-bottom .pp-kod{font-family:monospace;font-size:0.72rem;color:var(--brown);font-weight:700;margin:0}
@@ -374,6 +373,13 @@ tr:hover td{background:#fffaf5}
 <!-- MODAL: Náhled/tisk poukazu -->
 <div class="modal-overlay" id="modalPoukazTisk">
   <div class="modal" style="max-width:440px">
+    <div class="form-group no-print" style="margin-bottom:14px">
+      <label>Vzhled poukazu</label>
+      <select id="ppSablona" onchange="zmenitSablonuPoukazu()">
+        <option value="klasicky">🌸 Klasický</option>
+        <option value="vanocni">🎄 Vánoční</option>
+      </select>
+    </div>
     <div class="poukaz-print-card" id="poukazPrintCard"></div>
     <div class="modal-footer no-print">
       <button class="btn btn-outline" onclick="closeModal('modalPoukazTisk')">Zavřít</button>
@@ -764,20 +770,62 @@ function eanBarcodeSvg(ean13, barH) {
   return `<svg viewBox="0 0 ${width} ${barH}" width="100%" height="${barH}" xmlns="http://www.w3.org/2000/svg" style="display:block">${rects}</svg>`;
 }
 
-// Grafický náhled poukazu k tisku — přes reálnou grafiku poukazu se dopíšou skutečné údaje
+// Šablony grafického vzhledu poukazu k tisku — každá má vlastní pozadí a pozice popisků
+const POUKAZ_SABLONY = {
+  klasicky: {
+    obrazek: 'assets/poukaz.jpg',
+    pomer: '916/520',
+    logo: false,
+    box: { left: '30%', right: '8%' },
+    radky: { pro: '50%', hodnota: '58%', platnost: '66%' },
+    spodek: { top: '78%', left: '34%', right: '14%' }
+  },
+  vanocni: {
+    obrazek: 'assets/vanocni-poukaz.jpg',
+    pomer: '1024/558',
+    logo: true,
+    podklad: { top: '10%', left: '37%', right: '4%', bottom: '10%' },
+    logoBox: { top: '14%', left: '40%', right: '6%' },
+    box: { left: '40%', right: '6%' },
+    radky: { pro: '38%', hodnota: '47%', platnost: '56%' },
+    spodek: { top: '66%', left: '40%', right: '8%' }
+  }
+};
+
+let aktualniPoukazId = null;
+
+// Grafický náhled poukazu k tisku — přes zvolenou šablonu pozadí se dopíšou skutečné údaje
 function zobrazitPoukaz(id) {
-  const p = posledniPoukazy.find(x => x.id === id);
+  aktualniPoukazId = id;
+  document.getElementById('ppSablona').value = localStorage.getItem('poukazSablona') || 'klasicky';
+  vykreslitNahledPoukazu();
+  openModal('modalPoukazTisk');
+}
+function zmenitSablonuPoukazu() {
+  localStorage.setItem('poukazSablona', document.getElementById('ppSablona').value);
+  vykreslitNahledPoukazu();
+}
+function vykreslitNahledPoukazu() {
+  const p = posledniPoukazy.find(x => x.id === aktualniPoukazId);
   if (!p) return;
-  document.getElementById('poukazPrintCard').innerHTML = `
-    <div class="pp-overlay-line pp-line-pro">${p.pro_koho || p.kupujici_jmeno || ''}</div>
-    <div class="pp-overlay-line pp-line-hodnota">${Number(p.hodnota).toLocaleString('cs-CZ')} Kč</div>
-    <div class="pp-overlay-line pp-line-platnost">${new Date(p.platnost_do).toLocaleDateString('cs-CZ')}</div>
-    <div class="pp-bottom">
+  const s = POUKAZ_SABLONY[document.getElementById('ppSablona').value];
+  const card = document.getElementById('poukazPrintCard');
+  card.style.backgroundImage = `url('${s.obrazek}')`;
+  card.style.aspectRatio = s.pomer;
+  card.innerHTML = `
+    ${s.podklad ? `<div class="pp-podklad" style="top:${s.podklad.top};left:${s.podklad.left};right:${s.podklad.right};bottom:${s.podklad.bottom}"></div>` : ''}
+    ${s.logo ? `<div class="pp-logo-overlay" style="top:${s.logoBox.top};left:${s.logoBox.left};right:${s.logoBox.right}">
+      <div class="pp-logo-text">🌸 Masáže Alesa</div>
+      <div class="pp-title-text">Dárkový poukaz</div>
+    </div>` : ''}
+    <div class="pp-radek" style="top:${s.radky.pro};left:${s.box.left};right:${s.box.right}">Pro: <strong>${p.pro_koho || p.kupujici_jmeno || ''}</strong></div>
+    <div class="pp-radek" style="top:${s.radky.hodnota};left:${s.box.left};right:${s.box.right}">Hodnota: <strong>${Number(p.hodnota).toLocaleString('cs-CZ')} Kč</strong></div>
+    <div class="pp-radek" style="top:${s.radky.platnost};left:${s.box.left};right:${s.box.right}">Platnost: <strong>${new Date(p.platnost_do).toLocaleDateString('cs-CZ')}</strong></div>
+    <div class="pp-bottom" style="top:${s.spodek.top};left:${s.spodek.left};right:${s.spodek.right}">
       <div class="pp-kod">${p.kod}</div>
       ${p.ean ? `<div class="pp-barcode">${eanBarcodeSvg(p.ean, 36)}</div><div class="pp-ean">${p.ean}</div>` : ''}
     </div>
   `;
-  openModal('modalPoukazTisk');
 }
 
 // ── CENÍK ── (skupiny masáží s variantami)
