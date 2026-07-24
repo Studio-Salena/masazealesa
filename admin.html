@@ -162,7 +162,7 @@ tr:hover td{background:#fffaf5}
   display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px;
 }
 .pp-bottom .pp-kod{font-family:monospace;font-size:0.72rem;color:var(--brown);font-weight:700;margin:0}
-.pp-bottom .pp-barcode{width:100%;max-width:220px;line-height:0}
+.pp-bottom .pp-barcode{width:100%;max-width:150px;line-height:0}
 .pp-bottom .pp-ean{font-family:monospace;font-size:0.58rem;color:var(--text-light);letter-spacing:0.1em;margin:0}
 
 @media print{
@@ -823,7 +823,7 @@ function vykreslitNahledPoukazu() {
     <div class="pp-radek" style="top:${s.radky.platnost};left:${s.box.left};right:${s.box.right}">Platnost: <strong>${new Date(p.platnost_do).toLocaleDateString('cs-CZ')}</strong></div>
     <div class="pp-bottom" style="top:${s.spodek.top};left:${s.spodek.left};right:${s.spodek.right}">
       <div class="pp-kod">${p.kod}</div>
-      ${p.ean ? `<div class="pp-barcode">${eanBarcodeSvg(p.ean, 36)}</div><div class="pp-ean">${p.ean}</div>` : ''}
+      ${p.ean ? `<div class="pp-barcode">${eanBarcodeSvg(p.ean, 24)}</div><div class="pp-ean">${p.ean}</div>` : ''}
     </div>
   `;
 }
