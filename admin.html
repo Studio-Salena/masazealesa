@@ -142,6 +142,7 @@ tr:hover td{background:#fffaf5}
   border-radius:14px;
   overflow:hidden;
 }
+.pp-text-shadow{text-shadow:0 0 4px rgba(255,255,255,0.9), 0 0 8px rgba(255,255,255,0.7)}
 .pp-logo-overlay{position:absolute;text-align:center;line-height:1.15}
 .pp-logo-text{font-family:'Dancing Script',cursive;font-size:1.05rem;color:var(--brown)}
 .pp-title-text{font-size:0.62rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--gold);font-weight:700;margin-top:1px}
@@ -156,10 +157,12 @@ tr:hover td{background:#fffaf5}
   text-overflow:ellipsis;
 }
 .pp-radek strong{font-weight:800}
-.pp-podklad{position:absolute;background:rgba(255,253,248,0.85);border-radius:14px;box-shadow:0 2px 10px rgba(0,0,0,0.08)}
 .pp-bottom{
   position:absolute;
   display:flex; align-items:center; justify-content:center; gap:8px;
+  background:rgba(255,255,255,0.9);
+  border-radius:8px;
+  padding:4px 8px;
 }
 .pp-qr{width:15%;aspect-ratio:1/1;flex-shrink:0;line-height:0}
 .pp-barcode-col{display:flex;flex-direction:column;align-items:center;gap:2px}
@@ -916,7 +919,7 @@ const POUKAZ_SABLONY = {
     obrazek: 'assets/vanocni-poukaz.jpg',
     pomer: '1024/558',
     logo: true,
-    podklad: { top: '10%', left: '37%', right: '4%', bottom: '10%' },
+    stin: true,
     logoBox: { top: '14%', left: '40%', right: '6%' },
     box: { left: '40%', right: '6%' },
     radky: { pro: '38%', hodnota: '47%', platnost: '56%' },
@@ -944,15 +947,15 @@ function vykreslitNahledPoukazu() {
   const card = document.getElementById('poukazPrintCard');
   card.style.backgroundImage = `url('${s.obrazek}')`;
   card.style.aspectRatio = s.pomer;
+  const stin = s.stin ? ' pp-text-shadow' : '';
   card.innerHTML = `
-    ${s.podklad ? `<div class="pp-podklad" style="top:${s.podklad.top};left:${s.podklad.left};right:${s.podklad.right};bottom:${s.podklad.bottom}"></div>` : ''}
-    ${s.logo ? `<div class="pp-logo-overlay" style="top:${s.logoBox.top};left:${s.logoBox.left};right:${s.logoBox.right}">
+    ${s.logo ? `<div class="pp-logo-overlay${stin}" style="top:${s.logoBox.top};left:${s.logoBox.left};right:${s.logoBox.right}">
       <div class="pp-logo-text">🌸 Masáže Alesa</div>
       <div class="pp-title-text">Dárkový poukaz</div>
     </div>` : ''}
-    <div class="pp-radek" style="top:${s.radky.pro};left:${s.box.left};right:${s.box.right}">Pro: <strong>${p.pro_koho || p.kupujici_jmeno || ''}</strong></div>
-    <div class="pp-radek" style="top:${s.radky.hodnota};left:${s.box.left};right:${s.box.right}">Hodnota: <strong>${Number(p.hodnota).toLocaleString('cs-CZ')} Kč</strong></div>
-    <div class="pp-radek" style="top:${s.radky.platnost};left:${s.box.left};right:${s.box.right}">Platnost: <strong>${new Date(p.platnost_do).toLocaleDateString('cs-CZ')}</strong></div>
+    <div class="pp-radek${stin}" style="top:${s.radky.pro};left:${s.box.left};right:${s.box.right}">Pro: <strong>${p.pro_koho || p.kupujici_jmeno || ''}</strong></div>
+    <div class="pp-radek${stin}" style="top:${s.radky.hodnota};left:${s.box.left};right:${s.box.right}">Hodnota: <strong>${Number(p.hodnota).toLocaleString('cs-CZ')} Kč</strong></div>
+    <div class="pp-radek${stin}" style="top:${s.radky.platnost};left:${s.box.left};right:${s.box.right}">Platnost: <strong>${new Date(p.platnost_do).toLocaleDateString('cs-CZ')}</strong></div>
     <div class="pp-bottom" style="top:${s.spodek.top};left:${s.spodek.left};right:${s.spodek.right}">
       ${p.ean ? `<div class="pp-qr">${qrCodeSvg(p.ean)}</div>
       <div class="pp-barcode-col">
