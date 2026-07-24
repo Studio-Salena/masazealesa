@@ -295,6 +295,7 @@ tr:hover td{background:#fffaf5}
             <input type="text" id="hledatPoukazKod" placeholder="Naskenujte čárový kód nebo zadejte kód ručně" onkeydown="if(event.key==='Enter') najitPoukaz()">
           </div>
           <button class="btn btn-primary" onclick="najitPoukaz()">🔍 Najít</button>
+          <button class="btn btn-outline" onclick="otevritSkener()" title="Naskenovat kód fotoaparátem">📷</button>
         </div>
         <div id="poukazHledaniVysledek" style="padding:0 16px 16px"></div>
       </div>
@@ -370,6 +371,18 @@ tr:hover td{background:#fffaf5}
       </div>
     </div>
 
+  </div>
+</div>
+
+<!-- MODAL: Skener čárového kódu (fotoaparát) -->
+<div class="modal-overlay" id="modalSkener">
+  <div class="modal" style="max-width:420px">
+    <h3>📷 Naskenovat kód poukazu</h3>
+    <video id="skenerVideo" style="width:100%;border-radius:12px;background:#000;display:block" autoplay playsinline muted></video>
+    <div id="skenerZprava" style="margin-top:10px"></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="zavritSkener()">Zavřít</button>
+    </div>
   </div>
 </div>
 
@@ -726,6 +739,41 @@ async function smazatPoukaz(id) {
   if (!confirm('Smazat tento poukaz?')) return;
   await adminFetch(API + '/admin/poukazy/' + id, { method: 'DELETE' });
   loadPoukazy();
+}
+
+// Naskenování čárového kódu fotoaparátem telefonu (funguje jen v prohlížečích s podporou BarcodeDetector, např. Chrome na Androidu)
+let skenerStream = null, skenerInterval = null;
+async function otevritSkener() {
+  const zprava = document.getElementById('skenerZprava');
+  zprava.innerHTML = '';
+  openModal('modalSkener');
+  if (!('BarcodeDetector' in window)) {
+    zprava.innerHTML = '<div class="error-msg">Tento prohlížeč neumí skenovat fotoaparátem — zadejte prosím kód ručně.</div>';
+    return;
+  }
+  try {
+    const detektor = new BarcodeDetector({ formats: ['ean_13', 'code_128', 'qr_code'] });
+    skenerStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    const video = document.getElementById('skenerVideo');
+    video.srcObject = skenerStream;
+    skenerInterval = setInterval(async () => {
+      try {
+        const kody = await detektor.detect(video);
+        if (kody.length) {
+          document.getElementById('hledatPoukazKod').value = kody[0].rawValue;
+          zavritSkener();
+          najitPoukaz();
+        }
+      } catch (e) { /* ignorovat neúspěšný jednotlivý snímek */ }
+    }, 400);
+  } catch (e) {
+    zprava.innerHTML = '<div class="error-msg">Nepodařilo se spustit fotoaparát — zkontrolujte prosím oprávnění v prohlížeči.</div>';
+  }
+}
+function zavritSkener() {
+  if (skenerInterval) { clearInterval(skenerInterval); skenerInterval = null; }
+  if (skenerStream) { skenerStream.getTracks().forEach(t => t.stop()); skenerStream = null; }
+  closeModal('modalSkener');
 }
 
 // Vyhledání poukazu podle kódu nebo naskenovaného EAN (čárová čtečka funguje jako klávesnice + Enter)
