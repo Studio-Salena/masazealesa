@@ -30,6 +30,16 @@ function vygenerovatKod() {
   return kod;
 }
 
+// Vygeneruje EAN-13 čárový kód pro tisk na poukaz (prefix 20-29 = vyhrazeno GS1 pro vlastní/interní použití)
+function vygenerovatEan() {
+  let zaklad = '20';
+  for (let i = 0; i < 10; i++) zaklad += Math.floor(Math.random() * 10);
+  let soucet = 0;
+  for (let i = 0; i < 12; i++) soucet += Number(zaklad[i]) * (i % 2 === 0 ? 1 : 3);
+  const kontrolni = (10 - (soucet % 10)) % 10;
+  return zaklad + kontrolni;
+}
+
 function casNaMinuty(cas) { const [h, m] = cas.split(':').map(Number); return h * 60 + m; }
 function minutyNaCas(min) { const h = Math.floor(min / 60), m = min % 60; return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0'); }
 
@@ -202,6 +212,7 @@ app.post('/api/admin/poukazy', async (req, res) => {
   platnostDo.setFullYear(platnostDo.getFullYear() + 1);
   const { data, error } = await supabase.from('poukazy').insert({
     kod: vygenerovatKod(),
+    ean: vygenerovatEan(),
     hodnota, zustatek: hodnota,
     platnost_do: platnostDo.toISOString().slice(0, 10),
     zakoupeno_kde: zakoupeno_kde || 'osobne',
@@ -247,6 +258,7 @@ app.patch('/api/admin/poukazy/zadosti/:id/stav', async (req, res) => {
     platnostDo.setFullYear(platnostDo.getFullYear() + 1);
     const { data: poukaz, error } = await supabase.from('poukazy').insert({
       kod: vygenerovatKod(),
+      ean: vygenerovatEan(),
       hodnota: zadost.hodnota, zustatek: zadost.hodnota,
       platnost_do: platnostDo.toISOString().slice(0, 10),
       zakoupeno_kde: 'web',

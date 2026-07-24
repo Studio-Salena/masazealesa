@@ -72,6 +72,7 @@ create table if not exists prodeje (
 create table if not exists poukazy (
   id serial primary key,
   kod text not null unique,
+  ean text unique, -- čárový kód (EAN-13) pro naskenování při uplatnění v salonu
   hodnota numeric not null,
   zustatek numeric not null,
   platnost_do date not null,

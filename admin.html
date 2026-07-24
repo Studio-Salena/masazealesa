@@ -129,6 +129,36 @@ tr:hover td{background:#fffaf5}
   table{font-size:0.78rem}
   th,td{padding:8px 10px}
 }
+
+/* POUKAZ — vyhledání/uplatnění */
+.poukaz-hledani-vysledek{border:2px solid var(--tan-light);border-radius:12px;padding:16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px}
+
+/* POUKAZ — grafický náhled k tisku */
+.poukaz-print-card{
+  background:linear-gradient(160deg,#fffdf9 0%,var(--cream) 100%);
+  border:2px dashed var(--gold);
+  border-radius:20px;
+  padding:32px 28px;
+  text-align:center;
+  position:relative;
+  overflow:hidden;
+}
+.poukaz-print-card::before{content:'🌸';position:absolute;font-size:7rem;right:-1.2rem;bottom:-1.5rem;opacity:0.06}
+.pp-logo{font-family:'Dancing Script',cursive;font-size:1.7rem;color:var(--brown)}
+.pp-tag{font-size:0.72rem;letter-spacing:0.18em;text-transform:uppercase;color:var(--gold);font-weight:700;margin:6px 0 18px}
+.pp-hodnota{font-family:'Cormorant',serif;font-size:3rem;font-weight:700;color:var(--brown);line-height:1}
+.pp-radek{font-size:0.85rem;color:var(--text-light);margin-top:6px}
+.pp-kod{font-family:monospace;font-size:1.05rem;letter-spacing:0.05em;color:var(--brown);margin-top:18px;font-weight:700}
+.pp-barcode{margin:10px auto 0;max-width:280px}
+.pp-ean{font-family:monospace;font-size:0.8rem;color:var(--text-light);letter-spacing:0.15em;margin-top:4px}
+.pp-footer{margin-top:20px;padding-top:14px;border-top:1px solid var(--tan-light);font-size:0.75rem;color:var(--text-light)}
+
+@media print{
+  body *{visibility:hidden}
+  #poukazPrintCard,#poukazPrintCard *{visibility:visible}
+  #poukazPrintCard{position:fixed;top:20px;left:50%;transform:translateX(-50%);width:380px;box-shadow:none}
+  .no-print{display:none!important}
+}
 </style>
 </head>
 <body>
@@ -236,6 +266,17 @@ tr:hover td{background:#fffaf5}
         <div id="poukazyZadostiTable"><div class="loading">Načítám...</div></div>
       </div>
       <div class="table-wrap">
+        <div class="table-header"><h3>🔍 Uplatnit poukaz</h3></div>
+        <div style="padding:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+          <div class="form-group" style="flex:1;min-width:240px;margin-bottom:0">
+            <label>Kód nebo čárový kód (EAN) poukazu</label>
+            <input type="text" id="hledatPoukazKod" placeholder="Naskenujte čárový kód nebo zadejte kód ručně" onkeydown="if(event.key==='Enter') najitPoukaz()">
+          </div>
+          <button class="btn btn-primary" onclick="najitPoukaz()">🔍 Najít</button>
+        </div>
+        <div id="poukazHledaniVysledek" style="padding:0 16px 16px"></div>
+      </div>
+      <div class="table-wrap">
         <div class="table-header"><h3>🎁 Vydané poukazy</h3></div>
         <div id="poukazyTable"><div class="loading">Načítám...</div></div>
       </div>
@@ -307,6 +348,17 @@ tr:hover td{background:#fffaf5}
       </div>
     </div>
 
+  </div>
+</div>
+
+<!-- MODAL: Náhled/tisk poukazu -->
+<div class="modal-overlay" id="modalPoukazTisk">
+  <div class="modal" style="max-width:440px">
+    <div class="poukaz-print-card" id="poukazPrintCard"></div>
+    <div class="modal-footer no-print">
+      <button class="btn btn-outline" onclick="closeModal('modalPoukazTisk')">Zavřít</button>
+      <button class="btn btn-primary" onclick="window.print()">🖨️ Vytisknout</button>
+    </div>
   </div>
 </div>
 
@@ -505,9 +557,11 @@ async function zmenitStavRez(id, stav) {
 }
 
 // ── POUKAZY ──
+let posledniPoukazy = [];
 async function loadPoukazy() {
   try {
     const seznam = await adminFetch(API + '/admin/poukazy').then(r => r.json());
+    posledniPoukazy = seznam;
     const aktivni = seznam.filter(p => p.stav === 'aktivni');
     const vyuzite = seznam.filter(p => p.stav === 'pouzity');
     document.getElementById('poukazyAktivniHodnota').textContent = aktivni.reduce((s, p) => s + Number(p.zustatek), 0).toLocaleString('cs-CZ') + ' Kč';
@@ -525,7 +579,10 @@ async function loadPoukazy() {
           <td>${new Date(p.platnost_do).toLocaleDateString('cs-CZ')}</td>
           <td>${p.kupujici_jmeno || '—'}</td>
           <td>${stavBadge[p.stav] || p.stav}</td>
-          <td><button class="btn btn-red btn-sm" onclick="smazatPoukaz(${p.id})">🗑️</button></td>
+          <td style="display:flex;gap:4px">
+            <button class="btn btn-outline btn-sm" onclick="zobrazitPoukaz(${p.id})" title="Zobrazit / vytisknout">🖨️</button>
+            <button class="btn btn-red btn-sm" onclick="smazatPoukaz(${p.id})">🗑️</button>
+          </td>
         </tr>`).join('')}</tbody></table>`;
     }
   } catch (e) { document.getElementById('poukazyTable').innerHTML = '<div class="error-msg">Chyba načítání.</div>'; }
@@ -572,6 +629,67 @@ async function smazatPoukaz(id) {
   if (!confirm('Smazat tento poukaz?')) return;
   await adminFetch(API + '/admin/poukazy/' + id, { method: 'DELETE' });
   loadPoukazy();
+}
+
+// Vyhledání poukazu podle kódu nebo naskenovaného EAN (čárová čtečka funguje jako klávesnice + Enter)
+function najitPoukaz() {
+  const vstup = document.getElementById('hledatPoukazKod').value.trim();
+  const vysledek = document.getElementById('poukazHledaniVysledek');
+  if (!vstup) { vysledek.innerHTML = ''; return; }
+  const p = posledniPoukazy.find(x => (x.kod && x.kod.toLowerCase() === vstup.toLowerCase()) || (x.ean && x.ean === vstup));
+  if (!p) { vysledek.innerHTML = '<div class="error-msg">Poukaz s tímto kódem nebyl nalezen.</div>'; return; }
+  const stavText = { aktivni: '✅ Aktivní', pouzity: '✔️ Již vyčerpaný', zruseny: '❌ Zrušený' }[p.stav] || p.stav;
+  vysledek.innerHTML = `
+    <div class="poukaz-hledani-vysledek">
+      <div>
+        <div style="font-family:'Cormorant',serif;font-size:1.25rem;color:var(--brown)"><code>${p.kod}</code> — ${Number(p.zustatek).toLocaleString('cs-CZ')} Kč z ${Number(p.hodnota).toLocaleString('cs-CZ')} Kč</div>
+        <div style="color:var(--text-light);font-size:0.85rem">${stavText} · platnost do ${new Date(p.platnost_do).toLocaleDateString('cs-CZ')} · ${p.kupujici_jmeno || 'bez jména'}</div>
+      </div>
+      ${p.stav === 'aktivni' ? `<button class="btn btn-green" onclick="oznacitPouzity(${p.id})">✔️ Označit jako uplatněný</button>` : ''}
+    </div>`;
+}
+async function oznacitPouzity(id) {
+  if (!confirm('Označit poukaz jako plně uplatněný?')) return;
+  await adminFetch(API + '/admin/poukazy/' + id + '/stav', { method: 'PATCH', body: JSON.stringify({ stav: 'pouzity' }) });
+  document.getElementById('hledatPoukazKod').value = '';
+  document.getElementById('poukazHledaniVysledek').innerHTML = '';
+  loadPoukazy();
+}
+
+// ── EAN-13 čárový kód jako SVG (bez externí knihovny, tiskově ostrý vektor) ──
+const EAN_L = ['0001101','0011001','0010011','0111101','0100011','0110001','0101111','0111011','0110111','0001011'];
+const EAN_G = ['0100111','0110011','0011011','0100001','0011101','0111001','0000101','0010001','0001001','0010111'];
+const EAN_R = ['1110010','1100110','1101100','1000010','1011100','1001110','1010000','1000100','1001000','1110100'];
+const EAN_PARITY = ['LLLLLL','LLGLGG','LLGGLG','LLGGGL','LGLLGG','LGGLLG','LGGGLL','LGLGLG','LGLGGL','LGGLGL'];
+function eanBarcodeSvg(ean13) {
+  if (!ean13 || ean13.length !== 13) return '';
+  const parity = EAN_PARITY[Number(ean13[0])];
+  let bits = '101';
+  for (let i = 0; i < 6; i++) { const d = Number(ean13[1 + i]); bits += parity[i] === 'L' ? EAN_L[d] : EAN_G[d]; }
+  bits += '01010';
+  for (let i = 0; i < 6; i++) { const d = Number(ean13[7 + i]); bits += EAN_R[d]; }
+  bits += '101';
+  const moduleW = 2.2, barH = 64, width = bits.length * moduleW;
+  let rects = '';
+  for (let i = 0; i < bits.length; i++) { if (bits[i] === '1') rects += `<rect x="${(i * moduleW).toFixed(2)}" y="0" width="${moduleW}" height="${barH}" fill="#000"/>`; }
+  return `<svg viewBox="0 0 ${width} ${barH}" width="100%" height="${barH}" xmlns="http://www.w3.org/2000/svg" style="display:block">${rects}</svg>`;
+}
+
+// Grafický náhled poukazu k tisku
+function zobrazitPoukaz(id) {
+  const p = posledniPoukazy.find(x => x.id === id);
+  if (!p) return;
+  document.getElementById('poukazPrintCard').innerHTML = `
+    <div class="pp-logo">🌸 Masáže Alesa</div>
+    <div class="pp-tag">Dárkový poukaz</div>
+    <div class="pp-hodnota">${Number(p.hodnota).toLocaleString('cs-CZ')} Kč</div>
+    ${p.pro_koho ? `<div class="pp-radek">Pro: ${p.pro_koho}</div>` : ''}
+    <div class="pp-radek">Platí do ${new Date(p.platnost_do).toLocaleDateString('cs-CZ')}</div>
+    <div class="pp-kod">${p.kod}</div>
+    ${p.ean ? `<div class="pp-barcode">${eanBarcodeSvg(p.ean)}</div><div class="pp-ean">${p.ean}</div>` : ''}
+    <div class="pp-footer">Hulín · masazealesa.cz · 736 734 951</div>
+  `;
+  openModal('modalPoukazTisk');
 }
 
 // ── CENÍK ── (skupiny masáží s variantami)
