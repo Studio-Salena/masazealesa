@@ -133,30 +133,43 @@ tr:hover td{background:#fffaf5}
 /* POUKAZ — vyhledání/uplatnění */
 .poukaz-hledani-vysledek{border:2px solid var(--tan-light);border-radius:12px;padding:16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px}
 
-/* POUKAZ — grafický náhled k tisku */
+/* POUKAZ — grafický náhled k tisku (na pozadí reálná grafika poukazu, přes ni se dopíšou údaje) */
 .poukaz-print-card{
-  background:linear-gradient(160deg,#fffdf9 0%,var(--cream) 100%);
-  border:2px dashed var(--gold);
-  border-radius:20px;
-  padding:32px 28px;
-  text-align:center;
   position:relative;
+  width:100%;
+  aspect-ratio:907/520;
+  background-image:url('assets/poukaz.jpg');
+  background-size:cover;
+  background-position:center;
+  border-radius:14px;
   overflow:hidden;
 }
-.poukaz-print-card::before{content:'🌸';position:absolute;font-size:7rem;right:-1.2rem;bottom:-1.5rem;opacity:0.06}
-.pp-logo{font-family:'Dancing Script',cursive;font-size:1.7rem;color:var(--brown)}
-.pp-tag{font-size:0.72rem;letter-spacing:0.18em;text-transform:uppercase;color:var(--gold);font-weight:700;margin:6px 0 18px}
-.pp-hodnota{font-family:'Cormorant',serif;font-size:3rem;font-weight:700;color:var(--brown);line-height:1}
-.pp-radek{font-size:0.85rem;color:var(--text-light);margin-top:6px}
-.pp-kod{font-family:monospace;font-size:1.05rem;letter-spacing:0.05em;color:var(--brown);margin-top:18px;font-weight:700}
-.pp-barcode{margin:10px auto 0;max-width:280px}
-.pp-ean{font-family:monospace;font-size:0.8rem;color:var(--text-light);letter-spacing:0.15em;margin-top:4px}
-.pp-footer{margin-top:20px;padding-top:14px;border-top:1px solid var(--tan-light);font-size:0.75rem;color:var(--text-light)}
+.pp-overlay-line{
+  position:absolute;
+  right:6%;
+  font-family:'Nunito',sans-serif;
+  font-size:clamp(0.68rem,2.5vw,0.95rem);
+  color:var(--brown);
+  font-weight:700;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.pp-line-pro{ top:51.5%; left:39%; }
+.pp-line-hodnota{ top:59%; left:43%; }
+.pp-line-platnost{ top:67%; left:48%; }
+.pp-bottom{
+  position:absolute; left:34%; right:14%; top:85%; bottom:2%;
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px;
+}
+.pp-bottom .pp-kod{font-family:monospace;font-size:0.72rem;color:var(--brown);font-weight:700;margin:0}
+.pp-bottom .pp-barcode{width:100%;max-width:220px;line-height:0}
+.pp-bottom .pp-ean{font-family:monospace;font-size:0.58rem;color:var(--text-light);letter-spacing:0.1em;margin:0}
 
 @media print{
   body *{visibility:hidden}
   #poukazPrintCard,#poukazPrintCard *{visibility:visible}
-  #poukazPrintCard{position:fixed;top:20px;left:50%;transform:translateX(-50%);width:380px;box-shadow:none}
+  #poukazPrintCard{position:fixed;top:20px;left:50%;transform:translateX(-50%);width:420px;box-shadow:none}
   .no-print{display:none!important}
 }
 </style>
@@ -736,33 +749,33 @@ const EAN_L = ['0001101','0011001','0010011','0111101','0100011','0110001','0101
 const EAN_G = ['0100111','0110011','0011011','0100001','0011101','0111001','0000101','0010001','0001001','0010111'];
 const EAN_R = ['1110010','1100110','1101100','1000010','1011100','1001110','1010000','1000100','1001000','1110100'];
 const EAN_PARITY = ['LLLLLL','LLGLGG','LLGGLG','LLGGGL','LGLLGG','LGGLLG','LGGGLL','LGLGLG','LGLGGL','LGGLGL'];
-function eanBarcodeSvg(ean13) {
+function eanBarcodeSvg(ean13, barH) {
   if (!ean13 || ean13.length !== 13) return '';
+  barH = barH || 64;
   const parity = EAN_PARITY[Number(ean13[0])];
   let bits = '101';
   for (let i = 0; i < 6; i++) { const d = Number(ean13[1 + i]); bits += parity[i] === 'L' ? EAN_L[d] : EAN_G[d]; }
   bits += '01010';
   for (let i = 0; i < 6; i++) { const d = Number(ean13[7 + i]); bits += EAN_R[d]; }
   bits += '101';
-  const moduleW = 2.2, barH = 64, width = bits.length * moduleW;
+  const moduleW = 2.2, width = bits.length * moduleW;
   let rects = '';
   for (let i = 0; i < bits.length; i++) { if (bits[i] === '1') rects += `<rect x="${(i * moduleW).toFixed(2)}" y="0" width="${moduleW}" height="${barH}" fill="#000"/>`; }
   return `<svg viewBox="0 0 ${width} ${barH}" width="100%" height="${barH}" xmlns="http://www.w3.org/2000/svg" style="display:block">${rects}</svg>`;
 }
 
-// Grafický náhled poukazu k tisku
+// Grafický náhled poukazu k tisku — přes reálnou grafiku poukazu se dopíšou skutečné údaje
 function zobrazitPoukaz(id) {
   const p = posledniPoukazy.find(x => x.id === id);
   if (!p) return;
   document.getElementById('poukazPrintCard').innerHTML = `
-    <div class="pp-logo">🌸 Masáže Alesa</div>
-    <div class="pp-tag">Dárkový poukaz</div>
-    <div class="pp-hodnota">${Number(p.hodnota).toLocaleString('cs-CZ')} Kč</div>
-    ${p.pro_koho ? `<div class="pp-radek">Pro: ${p.pro_koho}</div>` : ''}
-    <div class="pp-radek">Platí do ${new Date(p.platnost_do).toLocaleDateString('cs-CZ')}</div>
-    <div class="pp-kod">${p.kod}</div>
-    ${p.ean ? `<div class="pp-barcode">${eanBarcodeSvg(p.ean)}</div><div class="pp-ean">${p.ean}</div>` : ''}
-    <div class="pp-footer">Hulín · masazealesa.cz · 736 734 951</div>
+    <div class="pp-overlay-line pp-line-pro">${p.pro_koho || p.kupujici_jmeno || ''}</div>
+    <div class="pp-overlay-line pp-line-hodnota">${Number(p.hodnota).toLocaleString('cs-CZ')} Kč</div>
+    <div class="pp-overlay-line pp-line-platnost">${new Date(p.platnost_do).toLocaleDateString('cs-CZ')}</div>
+    <div class="pp-bottom">
+      <div class="pp-kod">${p.kod}</div>
+      ${p.ean ? `<div class="pp-barcode">${eanBarcodeSvg(p.ean, 36)}</div><div class="pp-ean">${p.ean}</div>` : ''}
+    </div>
   `;
   openModal('modalPoukazTisk');
 }
