@@ -416,6 +416,7 @@ tr:hover td{background:#fffaf5}
       <div class="form-group"><label>Telefon</label><input type="text" id="npTelefon"></div>
     </div>
     <div class="form-group"><label>Pro koho (nepovinné)</label><input type="text" id="npProKoho"></div>
+    <div class="form-group"><label>Konkrétní masáž (nepovinné — pokud poukaz platí jen na jednu masáž, ne na libovolné použití do dané částky)</label><input type="text" id="npMasaz" placeholder="např. Rekondiční masáž 60 min"></div>
     <div class="form-group"><label>Zakoupeno</label>
       <select id="npKde"><option value="osobne">Osobně v salonu</option><option value="web">Přes web</option></select>
     </div>
@@ -632,7 +633,7 @@ async function loadPoukazy() {
         <table><thead><tr><th>Kód</th><th>Hodnota</th><th>Zůstatek</th><th>Platnost do</th><th>Kupující</th><th>Stav</th><th>Akce</th></tr></thead>
         <tbody>${seznam.map(p => `<tr>
           <td><code style="background:var(--cream);padding:2px 6px;border-radius:4px">${p.kod}</code></td>
-          <td><strong>${Number(p.hodnota).toLocaleString('cs-CZ')} Kč</strong></td>
+          <td><strong>${Number(p.hodnota).toLocaleString('cs-CZ')} Kč</strong>${p.konkretni_masaz ? `<br><small style="color:var(--text-light)">🧖 ${p.konkretni_masaz}</small>` : ''}</td>
           <td>${Number(p.zustatek).toLocaleString('cs-CZ')} Kč</td>
           <td>${new Date(p.platnost_do).toLocaleDateString('cs-CZ')}</td>
           <td>${p.kupujici_jmeno || '—'}</td>
@@ -727,12 +728,13 @@ async function vydatPoukaz() {
   const kupujici_email = document.getElementById('npEmail').value;
   const kupujici_telefon = document.getElementById('npTelefon').value;
   const pro_koho = document.getElementById('npProKoho').value;
+  const konkretni_masaz = document.getElementById('npMasaz').value;
   const zakoupeno_kde = document.getElementById('npKde').value;
   const msg = document.getElementById('novyPoukazMsg');
   if (!poukaz_typ_id) { msg.innerHTML = '<div class="error-msg">Vyberte variantu poukazu.</div>'; return; }
   try {
-    const res = await adminFetch(API + '/admin/poukazy', { method: 'POST', body: JSON.stringify({ poukaz_typ_id, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, zakoupeno_kde }) });
-    if (res.ok) { closeModal('modalNovyPoukaz'); loadPoukazy(); } else msg.innerHTML = '<div class="error-msg">Nepodařilo se vydat poukaz.</div>';
+    const res = await adminFetch(API + '/admin/poukazy', { method: 'POST', body: JSON.stringify({ poukaz_typ_id, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, konkretni_masaz, zakoupeno_kde }) });
+    if (res.ok) { closeModal('modalNovyPoukaz'); document.getElementById('npMasaz').value = ''; loadPoukazy(); } else msg.innerHTML = '<div class="error-msg">Nepodařilo se vydat poukaz.</div>';
   } catch (e) { msg.innerHTML = '<div class="error-msg">Nejde se připojit k serveru — backend ještě neběží nebo není doplněná jeho adresa v proměnné API.</div>'; }
 }
 async function smazatPoukaz(id) {
@@ -870,7 +872,7 @@ function vykreslitNahledPoukazu() {
       <div class="pp-title-text">Dárkový poukaz</div>
     </div>` : ''}
     <div class="pp-radek${stin}" style="top:${s.radky.pro};left:${s.box.left};right:${s.box.right}">Pro: <strong>${p.pro_koho || p.kupujici_jmeno || ''}</strong></div>
-    <div class="pp-radek${stin}" style="top:${s.radky.hodnota};left:${s.box.left};right:${s.box.right}">Hodnota: <strong>${Number(p.hodnota).toLocaleString('cs-CZ')} Kč</strong></div>
+    <div class="pp-radek${stin}" style="top:${s.radky.hodnota};left:${s.box.left};right:${s.box.right}">${p.konkretni_masaz ? `Masáž: <strong>${p.konkretni_masaz}</strong>` : `Hodnota: <strong>${Number(p.hodnota).toLocaleString('cs-CZ')} Kč</strong>`}</div>
     <div class="pp-radek${stin}" style="top:${s.radky.platnost};left:${s.box.left};right:${s.box.right}">Platnost: <strong>${new Date(p.platnost_do).toLocaleDateString('cs-CZ')}</strong></div>
     <div class="pp-bottom" style="top:${s.spodek.top};left:${s.spodek.left};right:${s.spodek.right}">
       ${p.ean ? `<div class="pp-barcode-col">

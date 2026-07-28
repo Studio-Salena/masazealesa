@@ -236,7 +236,7 @@ app.get('/api/admin/poukazy', async (req, res) => {
 });
 
 app.post('/api/admin/poukazy', async (req, res) => {
-  const { poukaz_typ_id, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, zakoupeno_kde } = req.body || {};
+  const { poukaz_typ_id, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, zakoupeno_kde, konkretni_masaz } = req.body || {};
   if (!poukaz_typ_id) return res.status(400).json({ chyba: 'Vyberte variantu poukazu.' });
   const { data: typ } = await supabase.from('poukazy_typy').select('*').eq('id', poukaz_typ_id).maybeSingle();
   if (!typ) return res.status(404).json({ chyba: 'Tato varianta poukazu nebyla nalezena.' });
@@ -248,7 +248,7 @@ app.post('/api/admin/poukazy', async (req, res) => {
     hodnota: typ.hodnota, zustatek: typ.hodnota,
     platnost_do: platnostDo.toISOString().slice(0, 10),
     zakoupeno_kde: zakoupeno_kde || 'osobne',
-    kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho,
+    kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, konkretni_masaz,
     stav: 'aktivni'
   }).select().single();
   if (error) return res.status(500).json({ chyba: error.message });

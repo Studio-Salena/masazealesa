@@ -76,9 +76,10 @@ create table if not exists poukazy_typy (
   poradi integer not null default 0
 );
 insert into poukazy_typy (hodnota, platnost_mesicu, poradi) values
-  (500, 6, 1),
-  (890, 12, 2),
-  (1500, 24, 3)
+  (500, 3, 1),
+  (1000, 6, 2),
+  (1500, 12, 3),
+  (2000, 12, 4)
 on conflict do nothing;
 
 -- Vydané dárkové poukazy
@@ -94,6 +95,7 @@ create table if not exists poukazy (
   kupujici_email text,
   kupujici_telefon text,
   pro_koho text,
+  konkretni_masaz text, -- nepovinné: pokud poukaz platí jen na jednu konkrétní masáž, ne na libovolnou částku
   stav text not null default 'aktivni', -- aktivni | pouzity | zruseny
   vytvoreno timestamptz not null default now()
 );
