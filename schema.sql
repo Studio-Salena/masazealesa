@@ -1,6 +1,7 @@
 -- ══════════════════════════════════════════════════════════
--- Masáže Alesa — databázové schéma pro Supabase (PostgreSQL)
--- Spusť celé v Supabase → SQL Editor → New query → Run
+-- Masáže Alesa — databázové schéma pro vlastní PostgreSQL
+-- Spusť celé přes psql nebo jiného klienta připojeného k databázi
+-- (např. psql -U uzivatel -d masaze_alesa -f schema.sql)
 --
 -- Pokud jsi předtím spustila starší verzi tohoto souboru, spusť
 -- nejdřív (smaže staré tabulky a data v nich):
@@ -136,12 +137,7 @@ insert into cenik (skupina, emoji, varianta, delka_min, cena, rezervovatelna, po
   ('Kineziotaping', '🩹', 'Samostatně (do 30 min, + 150 Kč/dalších 30 min + materiál)', 30, 150, false, 6, 2)
 on conflict do nothing;
 
--- Row Level Security: zapnuto, ale veškerý přístup jde přes backend
--- (service role klíč obchází RLS), takže z prohlížeče napřímo nikdo nic nepřečte/nezapíše
-alter table pracovni_doba enable row level security;
-alter table rezervace enable row level security;
-alter table cenik enable row level security;
-alter table poukazy_typy enable row level security;
-alter table poukazy enable row level security;
-alter table poukazy_zadosti enable row level security;
-alter table prodeje enable row level security;
+-- Poznámka k zabezpečení: databáze není přístupná z prohlížeče — s ní mluví jen
+-- backend (server.js) přes DATABASE_URL, takže cizí čtení/zápis jde jen přes API
+-- chráněné heslem (x-admin-heslo). Řádkové zabezpečení (RLS) tu záměrně není —
+-- to dává smysl jen u Supabase, kde databáze byla přímo za veřejným REST API.
