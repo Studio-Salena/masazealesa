@@ -101,6 +101,15 @@ create table if not exists poukazy (
   vytvoreno timestamptz not null default now()
 );
 
+-- Poznámky k zákaznicím (ručně psané, klíčované podle telefonu). Samotný seznam
+-- zákaznic v adminu se odvozuje z rezervací a poukazů — tahle tabulka slouží
+-- jen k uložení volitelné poznámky u konkrétního telefonního čísla.
+create table if not exists zakaznici (
+  telefon text primary key,
+  poznamka text,
+  upraveno timestamptz not null default now()
+);
+
 -- Žádosti o poukaz z veřejného webového formuláře
 create table if not exists poukazy_zadosti (
   id serial primary key,

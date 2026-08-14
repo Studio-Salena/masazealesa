@@ -332,6 +332,74 @@ app.patch('/api/admin/poukazy/zadosti/:id/stav', async (req, res) => {
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
+// -- Zákazníci (odvozeno z rezervací a poukazů, seskupeno podle telefonu) --
+app.get('/api/admin/zakaznici', async (req, res) => {
+  try {
+    const [rez, pouk, pozn] = await Promise.all([
+      db.query('SELECT jmeno, telefon, email, datum, cena, stav FROM rezervace'),
+      db.query('SELECT kupujici_jmeno, kupujici_telefon, kupujici_email, hodnota, stav FROM poukazy'),
+      db.query('SELECT telefon, poznamka FROM zakaznici')
+    ]);
+
+    const poznamky = {};
+    pozn.rows.forEach(p => { poznamky[p.telefon] = p.poznamka; });
+
+    const zakaznici = {};
+    function najit(telefon) {
+      const klic = (telefon || '').trim();
+      if (!klic) return null;
+      if (!zakaznici[klic]) {
+        zakaznici[klic] = {
+          telefon: klic, jmeno: null, email: null,
+          pocetNavstev: 0, celkemUtraceno: 0, posledniNavstiva: null,
+          aktivniPoukazy: 0, poznamka: poznamky[klic] || ''
+        };
+      }
+      return zakaznici[klic];
+    }
+
+    rez.rows.forEach(r => {
+      const z = najit(r.telefon);
+      if (!z) return;
+      if (r.jmeno) z.jmeno = r.jmeno;
+      if (r.email) z.email = r.email;
+      if (r.stav !== 'zrusena') {
+        z.pocetNavstev++;
+        z.celkemUtraceno += Number(r.cena) || 0;
+        if (!z.posledniNavstiva || r.datum > z.posledniNavstiva) z.posledniNavstiva = r.datum;
+      }
+    });
+    pouk.rows.forEach(p => {
+      const z = najit(p.kupujici_telefon);
+      if (!z) return;
+      if (p.kupujici_jmeno && !z.jmeno) z.jmeno = p.kupujici_jmeno;
+      if (p.kupujici_email && !z.email) z.email = p.kupujici_email;
+      z.celkemUtraceno += Number(p.hodnota) || 0;
+      if (p.stav === 'aktivni') z.aktivniPoukazy++;
+    });
+
+    const seznam = Object.values(zakaznici).sort((a, b) => {
+      if (!a.posledniNavstiva) return 1;
+      if (!b.posledniNavstiva) return -1;
+      return b.posledniNavstiva.localeCompare(a.posledniNavstiva);
+    });
+    res.json(seznam);
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
+app.put('/api/admin/zakaznici/poznamka', async (req, res) => {
+  const { telefon, poznamka } = req.body || {};
+  if (!telefon) return res.status(400).json({ chyba: 'Chybí telefon.' });
+  try {
+    await db.query(
+      `INSERT INTO zakaznici (telefon, poznamka, upraveno) VALUES ($1, $2, now())
+       ON CONFLICT (telefon) DO UPDATE SET poznamka = $2, upraveno = now()`,
+      [telefon.trim(), poznamka || null]
+    );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
 // -- Ceník --
 app.get('/api/admin/cenik', async (req, res) => {
   try {

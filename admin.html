@@ -198,6 +198,7 @@ tr:hover td{background:#fffaf5}
     <div class="nav-label">Provoz</div>
     <div class="nav-item" onclick="showPage('rezervace',this)"><span class="icon">📅</span> Rezervace <span class="nav-badge" id="navBadgeRez" style="display:none">0</span></div>
     <div class="nav-item" onclick="showPage('poukazy',this)"><span class="icon">🎁</span> Poukazy <span class="nav-badge" id="navBadgePoukazy" style="display:none">0</span></div>
+    <div class="nav-item" onclick="showPage('zakaznici',this)"><span class="icon">👥</span> Zákazníci</div>
     <div class="nav-item" onclick="showPage('cenik',this)"><span class="icon">💰</span> Ceník</div>
     <div class="nav-label">Prodejna</div>
     <div class="nav-item" onclick="showPage('masaze',this)"><span class="icon">🧖</span> Masáže</div>
@@ -303,6 +304,29 @@ tr:hover td{background:#fffaf5}
         <div class="table-header"><h3>🎁 Vydané poukazy</h3></div>
         <div id="poukazyTable"><div class="loading">Načítám...</div></div>
       </div>
+    </div>
+
+    <!-- ZÁKAZNÍCI -->
+    <div class="page" id="page-zakaznici">
+      <div class="page-header">
+        <div class="page-title">👥 Zákazníci</div>
+        <div class="table-actions">
+          <button class="refresh-btn" onclick="loadZakaznici()">↻ Obnovit</button>
+        </div>
+      </div>
+      <div class="stats-grid" style="grid-template-columns:repeat(3,1fr)">
+        <div class="stat-card"><div class="stat-label">Celkem zákaznic</div><div class="stat-value" id="zakCelkem">—</div></div>
+        <div class="stat-card"><div class="stat-label">Průměrně utraceno</div><div class="stat-value" id="zakPrumer">—</div></div>
+        <div class="stat-card"><div class="stat-label">S aktivním poukazem</div><div class="stat-value stat-green" id="zakAktivniPoukaz">—</div></div>
+      </div>
+      <div class="table-wrap">
+        <div class="table-header">
+          <h3>📋 Seznam zákaznic</h3>
+          <input type="text" id="zakazniciHledat" placeholder="Hledat podle jména nebo telefonu…" oninput="vykreslitZakazniky()" style="padding:7px 12px;border:2px solid var(--tan-light);border-radius:8px;font-family:'Nunito',sans-serif;font-size:0.85rem;outline:none;min-width:220px">
+        </div>
+        <div id="zakazniciTable"><div class="loading">Načítám...</div></div>
+      </div>
+      <p style="padding:0 4px;font-size:0.78rem;color:var(--text-light)">Seznam se sestavuje automaticky z rezervací a poukazů (podle telefonu) — nikam se ručně nepřidává.</p>
     </div>
 
     <!-- CENÍK -->
@@ -521,6 +545,7 @@ function showPage(name, el) {
   if (name === 'prehled') loadPrehled();
   if (name === 'rezervace') loadRezervace();
   if (name === 'poukazy') loadPoukazy();
+  if (name === 'zakaznici') loadZakaznici();
   if (name === 'cenik') loadCenik();
   if (name === 'masaze') loadProdejna();
   if (name === 'ucetnictvi') loadUcetnictvi();
@@ -881,6 +906,43 @@ function vykreslitNahledPoukazu() {
       </div>` : ''}
     </div>
   `;
+}
+
+// ── ZÁKAZNÍCI ── (odvozeno z rezervací a poukazů podle telefonu, viz /api/admin/zakaznici)
+let posledniZakaznici = [];
+async function loadZakaznici() {
+  try {
+    posledniZakaznici = await adminFetch(API + '/admin/zakaznici').then(r => r.json());
+    const sAktivnim = posledniZakaznici.filter(z => z.aktivniPoukazy > 0).length;
+    const celkemUtraceno = posledniZakaznici.reduce((s, z) => s + Number(z.celkemUtraceno), 0);
+    document.getElementById('zakCelkem').textContent = posledniZakaznici.length;
+    document.getElementById('zakPrumer').textContent = posledniZakaznici.length ? Math.round(celkemUtraceno / posledniZakaznici.length).toLocaleString('cs-CZ') + ' Kč' : '0 Kč';
+    document.getElementById('zakAktivniPoukaz').textContent = sAktivnim;
+    vykreslitZakazniky();
+  } catch (e) { document.getElementById('zakazniciTable').innerHTML = '<div class="error-msg">Chyba načítání.</div>'; }
+}
+function vykreslitZakazniky() {
+  const hledat = document.getElementById('zakazniciHledat').value.trim().toLowerCase();
+  const seznam = posledniZakaznici.filter(z => !hledat || (z.jmeno || '').toLowerCase().includes(hledat) || z.telefon.includes(hledat));
+  if (!seznam.length) { document.getElementById('zakazniciTable').innerHTML = '<div class="empty">Žádné zákaznice nenalezeny</div>'; return; }
+  document.getElementById('zakazniciTable').innerHTML = `
+    <table><thead><tr><th>Jméno</th><th>Kontakt</th><th>Návštěvy</th><th>Celkem utraceno</th><th>Poslední návštěva</th><th>Aktivní poukazy</th><th>Poznámka</th></tr></thead>
+    <tbody>${seznam.map(z => `<tr>
+      <td>${z.jmeno || '—'}</td>
+      <td>${z.telefon}${z.email ? '<br><small>' + z.email + '</small>' : ''}</td>
+      <td>${z.pocetNavstev}</td>
+      <td><strong>${Number(z.celkemUtraceno).toLocaleString('cs-CZ')} Kč</strong></td>
+      <td>${z.posledniNavstiva ? new Date(z.posledniNavstiva).toLocaleDateString('cs-CZ') : '—'}</td>
+      <td>${z.aktivniPoukazy > 0 ? '🎁 ' + z.aktivniPoukazy : '—'}</td>
+      <td style="display:flex;gap:4px">
+        <input type="text" value="${(z.poznamka || '').replace(/"/g, '&quot;')}" placeholder="Poznámka…" style="border:1px solid var(--tan-light);border-radius:6px;padding:5px 8px;width:140px;font-family:'Nunito',sans-serif">
+        <button class="btn btn-green btn-sm" onclick="ulozitPoznamkuZakaznice(this,'${z.telefon.replace(/'/g, "\\'")}')">💾</button>
+      </td>
+    </tr>`).join('')}</tbody></table>`;
+}
+async function ulozitPoznamkuZakaznice(btn, telefon) {
+  const poznamka = btn.previousElementSibling.value;
+  await adminFetch(API + '/admin/zakaznici/poznamka', { method: 'PUT', body: JSON.stringify({ telefon, poznamka }) });
 }
 
 // ── CENÍK ── (skupiny masáží s variantami)
