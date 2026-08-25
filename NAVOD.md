@@ -4,7 +4,7 @@
 - **Backend (server.js)** běží na **Render** (Node.js proces)
 - **Databáze** je **Supabase** — ale připojujeme se přímo přes PostgreSQL (ne přes jejich REST API/knihovnu)
 - **Web (index.html, admin.html, assets/)** je nahraný na **GitHub Pages**, přímo z tohoto repozitáře
-- Kód je na GitHubu: [hasalovaalena-glitch/masazealesa](https://github.com/hasalovaalena-glitch/masazealesa)
+- Kód je na GitHubu: [Studio-Salena/masazealesa](https://github.com/Studio-Salena/masazealesa)
 
 ## 1. Supabase — databáze
 1. Otevři svůj Supabase projekt → **SQL Editor** → **New query**
@@ -38,7 +38,7 @@ URL z Render (bez lomítka na konci) patří na dvě místa:
 1. Na GitHubu otevři repozitář `masazealesa` → **Settings → Pages**
 2. V sekci **Build and deployment** vyber **Source: Deploy from a branch**
 3. **Branch:** `master`, složka **/ (root)** → **Save**
-4. Za pár desítek vteřin bude web dostupný na `https://hasalovaalena-glitch.github.io/masazealesa/`
-5. Administrace bude na `https://hasalovaalena-glitch.github.io/masazealesa/admin.html`
+4. Za pár desítek vteřin bude web dostupný na `https://studio-salena.github.io/masazealesa/`
+5. Administrace bude na `https://studio-salena.github.io/masazealesa/admin.html`
 
 ⚠️ **Poznámka k free tieru Renderu:** zdarma server po ~15 minutách nečinnosti "usne" a první požadavek po probuzení trvá pár sekund déle.
