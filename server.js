@@ -2,7 +2,7 @@
 // Masáže Alesa — backend API
 // Veřejné endpointy: ceník, volné termíny, vytvoření rezervace, žádost o poukaz
 // Admin endpointy (chráněné heslem): správa rezervací, termínů, poukazů, ceníku
-// Databáze: vlastní PostgreSQL (žádný Supabase) — připojení přes DATABASE_URL
+// Databáze: PostgreSQL (Supabase) — připojení přes DATABASE_URL
 // ══════════════════════════════════════════════════════════
 const express = require('express');
 const cors = require('cors');
