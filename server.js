@@ -523,17 +523,22 @@ app.get('/api/admin/ucetnictvi', async (req, res) => {
     const trzbyDnes = polozky.filter(p => p.datum.slice(0, 10) === dnes).reduce((s, p) => s + p.castka, 0);
 
     const poMesicich = {};
+    const poDnech = {};
     polozky.forEach(p => {
       const mesic = p.datum.slice(0, 7); // YYYY-MM
+      const den = p.datum.slice(0, 10); // YYYY-MM-DD
       poMesicich[mesic] = (poMesicich[mesic] || 0) + p.castka;
+      poDnech[den] = (poDnech[den] || 0) + p.castka;
     });
     const mesicniPrehled = Object.entries(poMesicich).sort((a, b) => b[0].localeCompare(a[0])).map(([mesic, castka]) => ({ mesic, castka }));
+    const denniPrehled = Object.entries(poDnech).sort((a, b) => b[0].localeCompare(a[0])).map(([den, castka]) => ({ den, castka }));
 
     res.json({
       trzbyCelkem, trzbyDnes,
       pocetPolozek: polozky.length,
       prumernaPolozka: polozky.length ? trzbyCelkem / polozky.length : 0,
       mesicniPrehled,
+      denniPrehled,
       polozky: polozky.sort((a, b) => b.datum.localeCompare(a.datum))
     });
   } catch (e) { res.status(500).json({ chyba: e.message }); }

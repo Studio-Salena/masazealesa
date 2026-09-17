@@ -387,9 +387,15 @@ tr:hover td{background:#fffaf5}
         <div class="stat-card"><div class="stat-label">Počet položek</div><div class="stat-value" id="ucetPocet">—</div></div>
         <div class="stat-card"><div class="stat-label">Průměrná položka</div><div class="stat-value" id="ucetPrumer">—</div></div>
       </div>
-      <div class="table-wrap">
-        <div class="table-header"><h3>📅 Tržby po měsících</h3></div>
-        <div id="ucetMesice"><div class="loading">Načítám...</div></div>
+      <div class="form-grid-2">
+        <div class="table-wrap">
+          <div class="table-header"><h3>📅 Tržby po měsících</h3></div>
+          <div id="ucetMesice"><div class="loading">Načítám...</div></div>
+        </div>
+        <div class="table-wrap">
+          <div class="table-header"><h3>🗓️ Tržby po dnech</h3></div>
+          <div id="ucetDny"><div class="loading">Načítám...</div></div>
+        </div>
       </div>
       <div class="table-wrap">
         <div class="table-header"><h3>📋 Všechny položky (rezervace, prodejna, poukazy)</h3></div>
@@ -1148,6 +1154,10 @@ async function loadUcetnictvi() {
     document.getElementById('ucetMesice').innerHTML = !d.mesicniPrehled.length ? '<div class="empty">Zatím žádná data</div>' : `
       <table><thead><tr><th>Měsíc</th><th>Tržby</th></tr></thead>
       <tbody>${d.mesicniPrehled.map(m => `<tr><td>${m.mesic}</td><td><strong>${Math.round(m.castka).toLocaleString('cs-CZ')} Kč</strong></td></tr>`).join('')}</tbody></table>`;
+
+    document.getElementById('ucetDny').innerHTML = !d.denniPrehled.length ? '<div class="empty">Zatím žádná data</div>' : `
+      <table><thead><tr><th>Den</th><th>Tržby</th></tr></thead>
+      <tbody>${d.denniPrehled.slice(0, 31).map(den => `<tr><td>${new Date(den.den).toLocaleDateString('cs-CZ')}</td><td><strong>${Math.round(den.castka).toLocaleString('cs-CZ')} Kč</strong></td></tr>`).join('')}</tbody></table>`;
 
     const zdrojLabel = { rezervace: '📅 Rezervace', prodejna: '🧖 Prodejna', poukaz: '🎁 Poukaz' };
     document.getElementById('ucetPolozky').innerHTML = !d.polozky.length ? '<div class="empty">Zatím žádné položky</div>' : `
