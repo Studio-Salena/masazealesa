@@ -206,6 +206,13 @@ app.patch('/api/admin/rezervace/:id/stav', async (req, res) => {
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
+app.delete('/api/admin/rezervace/:id', async (req, res) => {
+  try {
+    await db.query('DELETE FROM rezervace WHERE id = $1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
 // -- Pracovní doba --
 app.get('/api/admin/pracovni-doba', async (req, res) => {
   try {

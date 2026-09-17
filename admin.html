@@ -627,6 +627,7 @@ function vykreslitRezervace(filtr) {
       <td style="display:flex;gap:4px">
         ${r.stav !== 'potvrzena' ? `<button class="btn btn-green btn-sm" onclick="zmenitStavRez(${r.id},'potvrzena')">✅</button>` : ''}
         ${r.stav !== 'zrusena' ? `<button class="btn btn-red btn-sm" onclick="zmenitStavRez(${r.id},'zrusena')">❌</button>` : ''}
+        <button class="btn btn-red btn-sm" onclick="smazatRezervaci(${r.id})">🗑️</button>
       </td>
     </tr>`).join('')}</tbody></table>`;
 }
@@ -637,6 +638,11 @@ function filtrovatRez(f, el) {
 }
 async function zmenitStavRez(id, stav) {
   await adminFetch(API + '/admin/rezervace/' + id + '/stav', { method: 'PATCH', body: JSON.stringify({ stav }) });
+  loadRezervace();
+}
+async function smazatRezervaci(id) {
+  if (!confirm('Trvale smazat tuto rezervaci?')) return;
+  await adminFetch(API + '/admin/rezervace/' + id, { method: 'DELETE' });
   loadRezervace();
 }
 
