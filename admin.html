@@ -85,6 +85,7 @@ tr:hover td{background:#fffaf5}
 .btn-sm{padding:4px 9px;font-size:0.73rem}
 .btn-green{background:var(--sage);color:#fff}
 .btn-red{background:var(--red);color:#fff}
+.prodej-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px 24px}
 .btn-outline{background:none;border:2px solid var(--tan-light);color:var(--text-light)}
 .btn-outline:hover{border-color:var(--tan);color:var(--brown)}
 .refresh-btn{background:none;border:2px solid var(--tan-light);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:0.8rem;color:var(--text-light);font-family:'Nunito',sans-serif;transition:all 0.2s}
@@ -123,7 +124,7 @@ tr:hover td{background:#fffaf5}
   .main{margin-left:0;padding:70px 14px 14px}
   .menu-toggle{display:block}
   .stats-grid{grid-template-columns:repeat(2,1fr)}
-  .form-grid-2,.form-grid-3{grid-template-columns:1fr}
+  .form-grid-2,.form-grid-3,.prodej-grid{grid-template-columns:1fr}
   .table-header{flex-direction:column;align-items:flex-start}
   .page-header{flex-direction:column;align-items:flex-start}
   table{font-size:0.78rem}
@@ -1061,9 +1062,17 @@ async function loadProdejna() {
   if (wrap) {
     try {
       const cenik = await adminFetch(API + '/admin/cenik').then(r => r.json());
+      const skupiny = {};
+      cenik.forEach(c => { (skupiny[c.skupina] = skupiny[c.skupina] || []).push(c); });
       wrap.innerHTML = `
-        <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px">
-          ${cenik.map(c => `<button class="btn btn-outline" onclick="otevritProdej(${c.id},'${(c.skupina + ' – ' + c.varianta).replace(/'/g,"\\'")}',${c.cena})">${c.emoji} ${c.skupina} — ${c.varianta} — ${c.cena} Kč</button>`).join('')}
+        <div class="prodej-grid" style="margin-bottom:14px">
+          ${Object.entries(skupiny).map(([nazev, varianty]) => `
+            <div>
+              <div style="font-family:'Cormorant',serif;font-size:1.05rem;color:var(--brown);margin:10px 0 6px">${varianty[0].emoji} ${nazev}</div>
+              <div style="display:flex;flex-direction:column;gap:6px">
+                ${varianty.map(c => `<button class="btn btn-outline" style="display:flex;justify-content:space-between;gap:10px;width:100%;text-align:left" onclick="otevritProdej(${c.id},'${(c.skupina + ' – ' + c.varianta).replace(/'/g,"\\'")}',${c.cena})"><span>${c.varianta}</span><strong>${c.cena} Kč</strong></button>`).join('')}
+              </div>
+            </div>`).join('')}
         </div>
         <div id="prodejForm" style="display:none;background:var(--cream);border-radius:12px;padding:16px;margin-top:8px">
           <div class="form-group"><label id="prodejNazev"></label></div>
