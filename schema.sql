@@ -39,7 +39,8 @@ create table if not exists cenik (
   cena integer not null,
   rezervovatelna boolean not null default true, -- false = jen se zobrazí v ceníku, nejde na ni rezervovat (např. kineziotaping)
   poradi_skupiny integer not null default 0,
-  poradi_varianty integer not null default 0
+  poradi_varianty integer not null default 0,
+  unique (skupina, varianta, delka_min)
 );
 
 -- Jednotlivé rezervace klientek — termín se počítá dynamicky (datum + čas + délka masáže z ceníku)
@@ -74,14 +75,15 @@ create table if not exists poukazy_typy (
   id serial primary key,
   hodnota numeric not null,
   platnost_mesicu integer not null default 12,
-  poradi integer not null default 0
+  poradi integer not null default 0,
+  unique (hodnota, platnost_mesicu)
 );
 insert into poukazy_typy (hodnota, platnost_mesicu, poradi) values
   (500, 3, 1),
   (1000, 6, 2),
   (1500, 12, 3),
   (2000, 12, 4)
-on conflict do nothing;
+on conflict (hodnota, platnost_mesicu) do nothing;
 
 -- Vydané dárkové poukazy
 create table if not exists poukazy (
@@ -144,7 +146,7 @@ insert into cenik (skupina, emoji, varianta, delka_min, cena, rezervovatelna, po
 
   ('Kineziotaping', '🩹', 'Při masáži – aplikace ZDARMA (materiál 5 Kč/cm)', 0, 0, false, 6, 1),
   ('Kineziotaping', '🩹', 'Samostatně (do 30 min, + 150 Kč/dalších 30 min + materiál)', 30, 150, false, 6, 2)
-on conflict do nothing;
+on conflict (skupina, varianta, delka_min) do nothing;
 
 -- Poznámka k zabezpečení: databáze není přístupná z prohlížeče — s ní mluví jen
 -- backend (server.js) přes DATABASE_URL, takže cizí čtení/zápis jde jen přes API
