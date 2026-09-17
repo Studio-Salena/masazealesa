@@ -340,31 +340,34 @@ app.patch('/api/admin/poukazy/zadosti/:id/stav', async (req, res) => {
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
-// -- Zákazníci (odvozeno z rezervací a poukazů, seskupeno podle telefonu) --
+// -- Zákazníci (ručně přidané + odvozené z rezervací a poukazů, seskupeno podle telefonu) --
 app.get('/api/admin/zakaznici', async (req, res) => {
   try {
-    const [rez, pouk, pozn] = await Promise.all([
+    const [rez, pouk, zak] = await Promise.all([
       db.query('SELECT jmeno, telefon, email, datum, cena, stav FROM rezervace'),
       db.query('SELECT kupujici_jmeno, kupujici_telefon, kupujici_email, hodnota, stav FROM poukazy'),
-      db.query('SELECT telefon, poznamka FROM zakaznici')
+      db.query('SELECT telefon, jmeno, email, poznamka FROM zakaznici')
     ]);
 
-    const poznamky = {};
-    pozn.rows.forEach(p => { poznamky[p.telefon] = p.poznamka; });
+    const rucne = {};
+    zak.rows.forEach(z => { rucne[z.telefon] = z; });
 
     const zakaznici = {};
     function najit(telefon) {
       const klic = (telefon || '').trim();
       if (!klic) return null;
       if (!zakaznici[klic]) {
+        const r = rucne[klic];
         zakaznici[klic] = {
-          telefon: klic, jmeno: null, email: null,
+          telefon: klic, jmeno: r?.jmeno || null, email: r?.email || null,
           pocetNavstev: 0, celkemUtraceno: 0, posledniNavstiva: null,
-          aktivniPoukazy: 0, poznamka: poznamky[klic] || ''
+          aktivniPoukazy: 0, poznamka: r?.poznamka || ''
         };
       }
       return zakaznici[klic];
     }
+
+    zak.rows.forEach(z => najit(z.telefon));
 
     rez.rows.forEach(r => {
       const z = najit(r.telefon);
@@ -404,6 +407,32 @@ app.put('/api/admin/zakaznici/poznamka', async (req, res) => {
        ON CONFLICT (telefon) DO UPDATE SET poznamka = $2, upraveno = now()`,
       [telefon.trim(), poznamka || null]
     );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
+// Ruční přidání zákaznice bez rezervace (nebo doplnění jména/e-mailu k existující)
+app.post('/api/admin/zakaznici', async (req, res) => {
+  const { telefon, jmeno, email, poznamka } = req.body || {};
+  if (!telefon) return res.status(400).json({ chyba: 'Chybí telefon.' });
+  try {
+    const { rows: [zakaznice] } = await db.query(
+      `INSERT INTO zakaznici (telefon, jmeno, email, poznamka, upraveno) VALUES ($1,$2,$3,$4,now())
+       ON CONFLICT (telefon) DO UPDATE SET
+         jmeno = COALESCE($2, zakaznici.jmeno),
+         email = COALESCE($3, zakaznici.email),
+         poznamka = COALESCE($4, zakaznici.poznamka),
+         upraveno = now()
+       RETURNING *`,
+      [telefon.trim(), jmeno || null, email || null, poznamka || null]
+    );
+    res.json({ ok: true, zakaznice });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
+app.delete('/api/admin/zakaznici/:telefon', async (req, res) => {
+  try {
+    await db.query('DELETE FROM zakaznici WHERE telefon = $1', [req.params.telefon]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });

@@ -311,6 +311,7 @@ tr:hover td{background:#fffaf5}
       <div class="page-header">
         <div class="page-title">👥 Zákazníci</div>
         <div class="table-actions">
+          <button class="btn btn-primary" onclick="openModal('modalNovaZakaznice')">+ Přidat zákaznici</button>
           <button class="refresh-btn" onclick="loadZakaznici()">↻ Obnovit</button>
         </div>
       </div>
@@ -326,7 +327,7 @@ tr:hover td{background:#fffaf5}
         </div>
         <div id="zakazniciTable"><div class="loading">Načítám...</div></div>
       </div>
-      <p style="padding:0 4px;font-size:0.78rem;color:var(--text-light)">Seznam se sestavuje automaticky z rezervací a poukazů (podle telefonu) — nikam se ručně nepřidává.</p>
+      <p style="padding:0 4px;font-size:0.78rem;color:var(--text-light)">Seznam se sestavuje z rezervací a poukazů (podle telefonu), zákaznice lze i přidat ručně.</p>
     </div>
 
     <!-- CENÍK -->
@@ -491,6 +492,24 @@ tr:hover td{background:#fffaf5}
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal('modalNovaPolozka')">Zrušit</button>
       <button class="btn btn-primary" onclick="pridatPolozkuCeniku()">Přidat</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Nová zákaznice -->
+<div class="modal-overlay" id="modalNovaZakaznice">
+  <div class="modal">
+    <h3>+ Přidat zákaznici</h3>
+    <div id="novaZakazniceMsg"></div>
+    <div class="form-group"><label>Jméno</label><input type="text" id="zkJmeno" placeholder="např. Jana Nováková"></div>
+    <div class="form-grid-2">
+      <div class="form-group"><label>Telefon</label><input type="text" id="zkTelefon" placeholder="777 123 456"></div>
+      <div class="form-group"><label>E-mail</label><input type="text" id="zkEmail" placeholder="nepovinné"></div>
+    </div>
+    <div class="form-group"><label>Poznámka</label><input type="text" id="zkPoznamka" placeholder="nepovinné"></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modalNovaZakaznice')">Zrušit</button>
+      <button class="btn btn-primary" onclick="pridatZakaznici()">Přidat</button>
     </div>
   </div>
 </div>
@@ -943,12 +962,36 @@ function vykreslitZakazniky() {
       <td style="display:flex;gap:4px">
         <input type="text" value="${(z.poznamka || '').replace(/"/g, '&quot;')}" placeholder="Poznámka…" style="border:1px solid var(--tan-light);border-radius:6px;padding:5px 8px;width:140px;font-family:'Nunito',sans-serif">
         <button class="btn btn-green btn-sm" onclick="ulozitPoznamkuZakaznice(this,'${z.telefon.replace(/'/g, "\\'")}')">💾</button>
+        <button class="btn btn-red btn-sm" onclick="smazatZakaznici('${z.telefon.replace(/'/g, "\\'")}')">🗑️</button>
       </td>
     </tr>`).join('')}</tbody></table>`;
 }
 async function ulozitPoznamkuZakaznice(btn, telefon) {
   const poznamka = btn.previousElementSibling.value;
   await adminFetch(API + '/admin/zakaznici/poznamka', { method: 'PUT', body: JSON.stringify({ telefon, poznamka }) });
+}
+async function pridatZakaznici() {
+  const jmeno = document.getElementById('zkJmeno').value.trim();
+  const telefon = document.getElementById('zkTelefon').value.trim();
+  const email = document.getElementById('zkEmail').value.trim();
+  const poznamka = document.getElementById('zkPoznamka').value.trim();
+  const msg = document.getElementById('novaZakazniceMsg');
+  if (!telefon) { msg.innerHTML = '<div class="error-msg">Vyplňte telefon.</div>'; return; }
+  try {
+    const res = await adminFetch(API + '/admin/zakaznici', { method: 'POST', body: JSON.stringify({ jmeno, telefon, email, poznamka }) });
+    if (res.ok) {
+      closeModal('modalNovaZakaznice');
+      document.getElementById('zkJmeno').value = ''; document.getElementById('zkTelefon').value = '';
+      document.getElementById('zkEmail').value = ''; document.getElementById('zkPoznamka').value = '';
+      msg.innerHTML = '';
+      loadZakaznici();
+    } else msg.innerHTML = '<div class="error-msg">Nepodařilo se přidat.</div>';
+  } catch (e) { msg.innerHTML = '<div class="error-msg">Nejde se připojit k serveru.</div>'; }
+}
+async function smazatZakaznici(telefon) {
+  if (!confirm('Smazat tuto zákaznici ze seznamu? (Pokud má rezervace nebo poukazy, znovu se objeví při dalším načtení.)')) return;
+  await adminFetch(API + '/admin/zakaznici/' + encodeURIComponent(telefon), { method: 'DELETE' });
+  loadZakaznici();
 }
 
 // ── CENÍK ── (skupiny masáží s variantami)

@@ -103,11 +103,13 @@ create table if not exists poukazy (
   vytvoreno timestamptz not null default now()
 );
 
--- Poznámky k zákaznicím (ručně psané, klíčované podle telefonu). Samotný seznam
--- zákaznic v adminu se odvozuje z rezervací a poukazů — tahle tabulka slouží
--- jen k uložení volitelné poznámky u konkrétního telefonního čísla.
+-- Zákaznice zadané ručně v adminu (bez rezervace) + poznámky, klíčované podle
+-- telefonu. Seznam zákaznic v adminu je sloučením téhle tabulky s tím, co lze
+-- odvodit z rezervací a poukazů (podle telefonu).
 create table if not exists zakaznici (
   telefon text primary key,
+  jmeno text,
+  email text,
   poznamka text,
   upraveno timestamptz not null default now()
 );
