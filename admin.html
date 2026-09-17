@@ -613,9 +613,10 @@ async function loadRezervace() {
 async function loadPracovniDoba() {
   try {
     vsechnyDnyPD = await adminFetch(API + '/admin/pracovni-doba').then(r => r.json());
+    const dnyPoNe = [...vsechnyDnyPD].sort((a, b) => (a.den_v_tydnu + 6) % 7 - (b.den_v_tydnu + 6) % 7);
     document.getElementById('pracovniDobaTable').innerHTML = `
       <table><thead><tr><th>Den</th><th>Otevřeno</th><th>Od</th><th>Do</th><th></th></tr></thead>
-      <tbody>${vsechnyDnyPD.map(d => `<tr>
+      <tbody>${dnyPoNe.map(d => `<tr>
         <td><strong>${NAZVY_DNU[d.den_v_tydnu]}</strong></td>
         <td><input type="checkbox" id="pd-akt-${d.den_v_tydnu}" ${d.aktivni ? 'checked' : ''} style="width:18px;height:18px"></td>
         <td><input type="time" id="pd-od-${d.den_v_tydnu}" value="${d.otevreno_od.slice(0,5)}" style="border:1px solid var(--tan-light);border-radius:6px;padding:5px 8px"></td>
