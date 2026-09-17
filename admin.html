@@ -200,6 +200,7 @@ tr:hover td{background:#fffaf5}
     <div class="nav-item" onclick="showPage('rezervace',this)"><span class="icon">📅</span> Rezervace <span class="nav-badge" id="navBadgeRez" style="display:none">0</span></div>
     <div class="nav-item" onclick="showPage('poukazy',this)"><span class="icon">🎁</span> Poukazy <span class="nav-badge" id="navBadgePoukazy" style="display:none">0</span></div>
     <div class="nav-item" onclick="showPage('zakaznici',this)"><span class="icon">👥</span> Zákazníci</div>
+    <div class="nav-item" onclick="showPage('newsletter',this)"><span class="icon">💌</span> Newsletter</div>
     <div class="nav-item" onclick="showPage('cenik',this)"><span class="icon">💰</span> Ceník</div>
     <div class="nav-label">Prodejna</div>
     <div class="nav-item" onclick="showPage('masaze',this)"><span class="icon">🧖</span> Masáže</div>
@@ -329,6 +330,30 @@ tr:hover td{background:#fffaf5}
         <div id="zakazniciTable"><div class="loading">Načítám...</div></div>
       </div>
       <p style="padding:0 4px;font-size:0.78rem;color:var(--text-light)">Seznam se sestavuje z rezervací a poukazů (podle telefonu), zákaznice lze i přidat ručně.</p>
+    </div>
+
+    <!-- NEWSLETTER -->
+    <div class="page" id="page-newsletter">
+      <div class="page-header">
+        <div class="page-title">💌 Newsletter</div>
+        <div class="table-actions">
+          <button class="btn btn-primary" onclick="otevritNovyNewsletter()">✉️ Napsat newsletter</button>
+          <button class="refresh-btn" onclick="loadNewsletter()">↻ Obnovit</button>
+        </div>
+      </div>
+      <div class="stats-grid" style="grid-template-columns:repeat(2,1fr)">
+        <div class="stat-card"><div class="stat-label">Odběratelek celkem</div><div class="stat-value" id="nlCelkem">—</div></div>
+        <div class="stat-card"><div class="stat-label">Aktivních</div><div class="stat-value stat-green" id="nlAktivnich">—</div></div>
+      </div>
+      <div class="table-wrap">
+        <div class="table-header"><h3>📋 Odběratelky</h3></div>
+        <div id="newsletterTable"><div class="loading">Načítám...</div></div>
+      </div>
+      <div class="table-wrap">
+        <div class="table-header"><h3>🕓 Historie odeslaných newsletterů</h3></div>
+        <div id="newsletterHistorie"><div class="loading">Načítám...</div></div>
+      </div>
+      <p style="padding:0 4px;font-size:0.78rem;color:var(--text-light)">Přihlašují se samy přes formulář "Tipy a novinky přímo do e-mailu" na webu. Rozesílání vyžaduje na Renderu nastavenou proměnnou RESEND_API_KEY.</p>
     </div>
 
     <!-- CENÍK -->
@@ -521,6 +546,21 @@ tr:hover td{background:#fffaf5}
   </div>
 </div>
 
+<!-- MODAL: Napsat a odeslat newsletter -->
+<div class="modal-overlay" id="modalNovyNewsletter">
+  <div class="modal">
+    <h3>✉️ Napsat newsletter</h3>
+    <div id="novyNewsletterMsg"></div>
+    <p id="nlPocetPrijemcu" style="font-size:0.82rem;color:var(--text-light);margin-bottom:10px"></p>
+    <div class="form-group"><label>Předmět</label><input type="text" id="nlPredmet" placeholder="např. Novinky ze salónu 🌸"></div>
+    <div class="form-group"><label>Obsah</label><textarea id="nlObsah" rows="8" placeholder="Text newsletteru…"></textarea></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modalNovyNewsletter')">Zrušit</button>
+      <button class="btn btn-primary" onclick="odeslatNewsletter()">Odeslat</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ⚠️ Jakmile zprovozníš backend na Renderu, sem doplň jeho URL adresu:
 const API = 'https://masazealesa.onrender.com/api';
@@ -572,6 +612,7 @@ function showPage(name, el) {
   if (name === 'rezervace') loadRezervace();
   if (name === 'poukazy') loadPoukazy();
   if (name === 'zakaznici') loadZakaznici();
+  if (name === 'newsletter') loadNewsletter();
   if (name === 'cenik') loadCenik();
   if (name === 'masaze') loadProdejna();
   if (name === 'ucetnictvi') loadUcetnictvi();
@@ -1000,6 +1041,68 @@ async function smazatZakaznici(telefon) {
   if (!confirm('Smazat tuto zákaznici ze seznamu? (Pokud má rezervace nebo poukazy, znovu se objeví při dalším načtení.)')) return;
   await adminFetch(API + '/admin/zakaznici/' + encodeURIComponent(telefon), { method: 'DELETE' });
   loadZakaznici();
+}
+
+// ── NEWSLETTER ──
+let posledniNewsletter = [];
+async function loadNewsletter() {
+  try {
+    posledniNewsletter = await adminFetch(API + '/admin/newsletter').then(r => r.json());
+    document.getElementById('nlCelkem').textContent = posledniNewsletter.length;
+    document.getElementById('nlAktivnich').textContent = posledniNewsletter.filter(n => n.aktivni).length;
+    document.getElementById('newsletterTable').innerHTML = !posledniNewsletter.length ? '<div class="empty">Zatím žádné odběratelky</div>' : `
+      <table><thead><tr><th>E-mail</th><th>Jméno</th><th>Přihlášena</th><th>Stav</th><th></th></tr></thead>
+      <tbody>${posledniNewsletter.map(n => `<tr>
+        <td>${n.email}</td>
+        <td>${n.jmeno || '—'}</td>
+        <td>${new Date(n.vytvoreno).toLocaleDateString('cs-CZ')}</td>
+        <td>${n.aktivni ? '<span class="badge badge-ok">✅ Aktivní</span>' : '<span class="badge badge-zruseno">❌ Odhlášena</span>'}</td>
+        <td><button class="btn btn-red btn-sm" onclick="smazatOdberatelku(${n.id})">🗑️</button></td>
+      </tr>`).join('')}</tbody></table>`;
+  } catch (e) { document.getElementById('newsletterTable').innerHTML = '<div class="error-msg">Chyba načítání.</div>'; }
+
+  try {
+    const historie = await adminFetch(API + '/admin/newsletter/historie').then(r => r.json());
+    document.getElementById('newsletterHistorie').innerHTML = !historie.length ? '<div class="empty">Zatím žádný newsletter nebyl odeslán</div>' : `
+      <table><thead><tr><th>Odesláno</th><th>Předmět</th><th>Počet příjemců</th></tr></thead>
+      <tbody>${historie.map(h => `<tr>
+        <td>${new Date(h.odeslano).toLocaleDateString('cs-CZ')} ${new Date(h.odeslano).toLocaleTimeString('cs-CZ',{hour:'2-digit',minute:'2-digit'})}</td>
+        <td>${h.predmet}</td>
+        <td>${h.pocet_prijemcu}</td>
+      </tr>`).join('')}</tbody></table>`;
+  } catch (e) { document.getElementById('newsletterHistorie').innerHTML = '<div class="error-msg">Chyba načítání.</div>'; }
+}
+async function smazatOdberatelku(id) {
+  if (!confirm('Smazat tuto odběratelku ze seznamu?')) return;
+  await adminFetch(API + '/admin/newsletter/' + id, { method: 'DELETE' });
+  loadNewsletter();
+}
+function otevritNovyNewsletter() {
+  const pocet = posledniNewsletter.filter(n => n.aktivni).length;
+  document.getElementById('nlPocetPrijemcu').textContent = pocet
+    ? `Aktivních odběratelek: ${pocet} — newsletter se odešle všem.`
+    : 'Zatím nemáš žádné aktivní odběratelky.';
+  document.getElementById('novyNewsletterMsg').innerHTML = '';
+  openModal('modalNovyNewsletter');
+}
+async function odeslatNewsletter() {
+  const predmet = document.getElementById('nlPredmet').value.trim();
+  const obsah = document.getElementById('nlObsah').value.trim();
+  const msg = document.getElementById('novyNewsletterMsg');
+  if (!predmet || !obsah) { msg.innerHTML = '<div class="error-msg">Vyplňte prosím předmět i obsah.</div>'; return; }
+  if (!confirm('Opravdu odeslat tento newsletter všem aktivním odběratelkám?')) return;
+  msg.innerHTML = '<div class="loading">Odesílám...</div>';
+  try {
+    const obsahHtml = obsah.replace(/\n/g, '<br>');
+    const res = await adminFetch(API + '/admin/newsletter/odeslat', { method: 'POST', body: JSON.stringify({ predmet, obsah: obsahHtml }) });
+    const data = await res.json();
+    if (data.ok) {
+      closeModal('modalNovyNewsletter');
+      document.getElementById('nlPredmet').value = ''; document.getElementById('nlObsah').value = '';
+      alert(`Odesláno ${data.odeslano} z ${data.celkem} odběratelek.`);
+      loadNewsletter();
+    } else msg.innerHTML = '<div class="error-msg">' + (data.chyba || 'Nepodařilo se odeslat.') + '</div>';
+  } catch (e) { msg.innerHTML = '<div class="error-msg">Nejde se připojit k serveru.</div>'; }
 }
 
 // ── CENÍK ── (skupiny masáží s variantami)

@@ -1,12 +1,15 @@
 // ══════════════════════════════════════════════════════════
 // Masáže Alesa — backend API
-// Veřejné endpointy: ceník, volné termíny, vytvoření rezervace, žádost o poukaz
-// Admin endpointy (chráněné heslem): správa rezervací, termínů, poukazů, ceníku
+// Veřejné endpointy: ceník, volné termíny, vytvoření rezervace, žádost o poukaz, newsletter
+// Admin endpointy (chráněné heslem): správa rezervací, termínů, poukazů, ceníku, newsletteru
 // Databáze: PostgreSQL (Supabase) — připojení přes DATABASE_URL
 // ══════════════════════════════════════════════════════════
 const express = require('express');
 const cors = require('cors');
+const crypto = require('crypto');
 const { Pool, types } = require('pg');
+
+const API_URL = process.env.API_URL || 'https://masazealesa.onrender.com';
 
 // numeric sloupce (cena, hodnota, zůstatek...) ať chodí jako číslo, ne jako řetězec
 types.setTypeParser(1700, val => (val === null ? null : parseFloat(val)));
@@ -162,6 +165,36 @@ app.post('/api/poukazy/zadost', async (req, res) => {
     );
     res.json({ ok: true, zadost });
   } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
+// Přihlášení k newsletteru z webového formuláře ("Tipy a novinky přímo do e-mailu")
+app.post('/api/newsletter', async (req, res) => {
+  const { email, jmeno } = req.body || {};
+  if (!email || !email.includes('@')) return res.status(400).json({ chyba: 'Zadejte prosím platný e-mail.' });
+  try {
+    const token = crypto.randomBytes(20).toString('hex');
+    await db.query(
+      `INSERT INTO newsletter_odberatele (email, jmeno, odhlasovaci_token)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (email) DO UPDATE SET aktivni = true, jmeno = COALESCE($2, newsletter_odberatele.jmeno)`,
+      [email.trim().toLowerCase(), jmeno || null, token]
+    );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
+// Odhlášení z newsletteru přes odkaz v e-mailu (otevírá se přímo v prohlížeči)
+app.get('/api/newsletter/odhlasit', async (req, res) => {
+  const { token } = req.query;
+  if (!token) return res.status(400).send('Chybí odhlašovací odkaz.');
+  try {
+    const { rowCount } = await db.query(
+      'UPDATE newsletter_odberatele SET aktivni = false WHERE odhlasovaci_token = $1', [token]
+    );
+    res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:60px">
+      <h2>${rowCount ? 'Byli jste odhlášeni z newsletteru.' : 'Odkaz nenalezen (možná už jste odhlášeni).'}</h2>
+    </body></html>`);
+  } catch (e) { res.status(500).send('Chyba serveru.'); }
 });
 
 // ══════════════ ADMIN ENDPOINTY (heslo v hlavičce x-admin-heslo) ══════════════
@@ -434,6 +467,66 @@ app.delete('/api/admin/zakaznici/:telefon', async (req, res) => {
   try {
     await db.query('DELETE FROM zakaznici WHERE telefon = $1', [req.params.telefon]);
     res.json({ ok: true });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
+// -- Newsletter --
+app.get('/api/admin/newsletter', async (req, res) => {
+  try {
+    const { rows } = await db.query('SELECT id, email, jmeno, aktivni, vytvoreno FROM newsletter_odberatele ORDER BY vytvoreno DESC');
+    res.json(rows);
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
+app.delete('/api/admin/newsletter/:id', async (req, res) => {
+  try {
+    await db.query('DELETE FROM newsletter_odberatele WHERE id = $1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
+app.get('/api/admin/newsletter/historie', async (req, res) => {
+  try {
+    const { rows } = await db.query('SELECT * FROM newsletter_zpravy ORDER BY odeslano DESC');
+    res.json(rows);
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
+// Odešle newsletter všem aktivním odběratelkám přes Resend (RESEND_API_KEY v env)
+app.post('/api/admin/newsletter/odeslat', async (req, res) => {
+  const { predmet, obsah } = req.body || {};
+  if (!predmet || !obsah) return res.status(400).json({ chyba: 'Vyplňte prosím předmět a obsah.' });
+  if (!process.env.RESEND_API_KEY) {
+    return res.status(500).json({ chyba: 'Rozesílání e-mailů zatím není nastavené (na Renderu chybí RESEND_API_KEY).' });
+  }
+  try {
+    const { rows: odberatele } = await db.query(
+      'SELECT email, odhlasovaci_token FROM newsletter_odberatele WHERE aktivni = true'
+    );
+    if (!odberatele.length) return res.status(400).json({ chyba: 'Nejsou žádné aktivní odběratelky.' });
+
+    const from = process.env.RESEND_FROM || 'Masáže Alesa <onboarding@resend.dev>';
+    let odeslano = 0;
+    for (const o of odberatele) {
+      const odhlasitUrl = `${API_URL}/api/newsletter/odhlasit?token=${o.odhlasovaci_token}`;
+      const html = `${obsah}<hr style="margin-top:30px;border:none;border-top:1px solid #ddd">
+        <p style="font-size:12px;color:#999">Nechcete už tyto e-maily dostávat?
+        <a href="${odhlasitUrl}">Odhlásit se z newsletteru</a></p>`;
+      try {
+        const resp = await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ from, to: o.email, subject: predmet, html })
+        });
+        if (resp.ok) odeslano++;
+      } catch { /* jednotlivé selhání nepřeruší zbytek rozesílání */ }
+    }
+
+    await db.query(
+      'INSERT INTO newsletter_zpravy (predmet, obsah, pocet_prijemcu) VALUES ($1,$2,$3)',
+      [predmet, obsah, odeslano]
+    );
+    res.json({ ok: true, odeslano, celkem: odberatele.length });
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 

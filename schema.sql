@@ -127,6 +127,25 @@ create table if not exists poukazy_zadosti (
   vytvoreno timestamptz not null default now()
 );
 
+-- Odběratelky newsletteru z formuláře na webu ("Tipy a novinky přímo do e-mailu")
+create table if not exists newsletter_odberatele (
+  id serial primary key,
+  email text not null unique,
+  jmeno text,
+  odhlasovaci_token text not null unique,
+  aktivni boolean not null default true,
+  vytvoreno timestamptz not null default now()
+);
+
+-- Historie newsletterů odeslaných z administrace (jen pro přehled, ne fronta)
+create table if not exists newsletter_zpravy (
+  id serial primary key,
+  predmet text not null,
+  obsah text not null,
+  pocet_prijemcu integer not null default 0,
+  odeslano timestamptz not null default now()
+);
+
 -- Počáteční ceník podle skutečného obsahu webu
 insert into cenik (skupina, emoji, varianta, delka_min, cena, rezervovatelna, poradi_skupiny, poradi_varianty) values
   ('Rekondiční masáž', '💪', 'Záda + šíje', 45, 630, true, 1, 1),

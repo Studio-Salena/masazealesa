@@ -2242,9 +2242,17 @@ function kvizReset() {
 function submitNewsletter() {
   var email = document.getElementById('newsletter-email').value;
   if (!email || email.indexOf('@') === -1) { alert('Prosím zadejte platný e-mail.'); return; }
-  window.location.href = 'mailto:masaze.hasalova@gmail.com?subject=' + encodeURIComponent('Newsletter') + '&body=' + encodeURIComponent('Nový odběratel: ' + email);
-  document.querySelector('.newsletter-form').style.display = 'none';
-  document.getElementById('newsletter-success').style.display = 'block';
+  fetch(API + '/newsletter', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: email })
+  }).then(function(r) { return r.json(); }).then(function(d) {
+    if (!d.ok) { alert(d.chyba || 'Přihlášení se nepovedlo, zkuste to prosím znovu.'); return; }
+    document.querySelector('.newsletter-form').style.display = 'none';
+    document.getElementById('newsletter-success').style.display = 'block';
+  }).catch(function() {
+    alert('Nejde se připojit k serveru, zkuste to prosím později.');
+  });
 }
 
 // ── COOKIES ──
