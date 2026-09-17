@@ -17,12 +17,13 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Pokud DATABASE_URL obsahuje "sslmode=require", připojíme se přes SSL (doporučeno,
-// když databáze běží na jiném serveru než backend — např. vlastní VPS)
-const pouzitSsl = !!(process.env.DATABASE_URL && process.env.DATABASE_URL.includes('sslmode=require'));
+// Databáze běží na jiném serveru než backend (Supabase), proto vždy přes SSL.
+// Pozor: DATABASE_URL nesmí obsahovat "sslmode=..." — knihovna pg by si ho sama
+// naparsovala a přepsala by tím rejectUnauthorized na true (ověřování certifikátu
+// pak selže na "self-signed certificate in certificate chain").
 const db = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: pouzitSsl ? { rejectUnauthorized: false } : false
+  ssl: { rejectUnauthorized: false }
 });
 db.on('error', (err) => console.error('Neočekávaná chyba databázového spojení:', err.message));
 

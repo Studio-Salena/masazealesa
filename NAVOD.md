@@ -13,7 +13,7 @@
 4. Vyber formát **URI** a zkopíruj si připojovací řetězec — vypadá nějak takhle:
    `postgresql://postgres:[TVOJE-HESLO]@db.xxxxxxxxxxxx.supabase.co:5432/postgres`
    (heslo je to, které sis nastavila při založení projektu — pokud ho nemáš, dá se v Database nastavení resetovat)
-5. Na konec připoj `?sslmode=require` — Supabase vyžaduje šifrované spojení
+5. **Nepřidávej** na konec `?sslmode=require` — backend se šifrovaně připojuje vždy sám (viz `server.js`), a tenhle parametr by způsobil chybu "self-signed certificate in certificate chain"
 
 Žádné `SUPABASE_URL` ani `service_role` klíč už nepotřebuješ — backend mluví s databází přímo.
 
