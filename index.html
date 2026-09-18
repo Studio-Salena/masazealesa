@@ -590,12 +590,15 @@
     background: var(--gold);
     color: var(--brown);
     padding: 0.9rem 2.2rem;
+    border: none;
     border-radius: 50px;
     text-decoration: none;
+    font-family: 'Nunito', sans-serif;
     font-size: 0.9rem;
     font-weight: 700;
     letter-spacing: 0.05em;
     display: inline-block;
+    cursor: pointer;
     transition: filter 0.2s, transform 0.2s;
     box-shadow: 0 4px 20px rgba(196,147,58,0.4);
   }
@@ -1589,7 +1592,7 @@
           Dárkový poukaz na masáž je ten nejhezčí dárek — darujete čas pro sebe. Ideální pro narozeniny, Vánoce nebo jen tak.
         </p>
         <br>
-        <a href="tel:736734951" class="btn-gold">Objednat poukaz</a>
+        <button type="button" class="btn-gold" onclick="otevritPkForm()">Objednat poukaz</button>
       </div>
       <div class="voucher-card reveal">
         <h3>Dárkový poukaz</h3>
@@ -2064,14 +2067,21 @@ async function nacistCenikZAdministrace() {
     var rezDatum = document.getElementById('rezDatum');
     if (rezDatum) rezDatum.min = new Date().toISOString().slice(0, 10);
 
-    // Backend běží → odemknout online formuláře
+    // Backend běží → odemknout formulář rezervace (poukaz se zobrazuje až na kliknutí, viz otevritPkForm)
     var rezCard = document.getElementById('rezFormCard');
-    var pkCard = document.getElementById('pkFormCard');
     if (rezCard) rezCard.style.display = 'block';
-    if (pkCard) pkCard.style.display = 'block';
-  } catch (e) { /* necháme napevno zapsaný ceník jako zálohu, formuláře zůstanou skryté */ }
+  } catch (e) { /* necháme napevno zapsaný ceník jako zálohu, formulář rezervace zůstane skrytý */ }
 }
 document.addEventListener('DOMContentLoaded', nacistCenikZAdministrace);
+
+// Zobrazí formulář žádosti o poukaz po kliknutí na "Objednat poukaz"
+function otevritPkForm() {
+  var pkCard = document.getElementById('pkFormCard');
+  if (!pkCard) return;
+  pkCard.style.display = 'block';
+  var y = pkCard.getBoundingClientRect().top + window.pageYOffset - 90; // odsazení kvůli fixní navigaci nahoře
+  window.scrollTo({ top: y, behavior: 'smooth' });
+}
 
 // ── REZERVACE ONLINE ──
 var rezVybranyCas = null;
