@@ -123,6 +123,7 @@ create table if not exists poukazy_zadosti (
   kupujici_telefon text,
   pro_koho text,
   vzkaz text,
+  konkretni_masaz text, -- nepovinné: pokud si nezvolili částku, ale konkrétní masáž
   stav text not null default 'nova', -- nova | vyrizena | zamitnuta
   vytvoreno timestamptz not null default now()
 );

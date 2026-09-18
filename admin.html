@@ -807,7 +807,7 @@ async function loadPoukazyZadosti() {
       <table><thead><tr><th>Datum</th><th>Hodnota</th><th>Kupující</th><th>Pro koho</th><th>Stav</th><th>Akce</th></tr></thead>
       <tbody>${seznam.map(z => `<tr>
         <td>${new Date(z.vytvoreno).toLocaleDateString('cs-CZ')}</td>
-        <td><strong>${Number(z.hodnota).toLocaleString('cs-CZ')} Kč</strong></td>
+        <td><strong>${Number(z.hodnota).toLocaleString('cs-CZ')} Kč</strong>${z.konkretni_masaz ? `<br><small style="color:var(--text-light)">🧖 ${z.konkretni_masaz}</small>` : ''}</td>
         <td>${z.kupujici_jmeno}<br><small>${z.kupujici_email}${z.kupujici_telefon ? ' | ' + z.kupujici_telefon : ''}</small></td>
         <td>${z.pro_koho || '—'}</td>
         <td>${stavBadge[z.stav] || z.stav}</td>

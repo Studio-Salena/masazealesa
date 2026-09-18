@@ -796,25 +796,55 @@
   .rez-slot-btn.selected { background: var(--terracotta); color: var(--white); border-color: var(--terracotta); }
   .rez-hint { font-size: 0.85rem; color: var(--text-light); text-align: center; margin: 0.5rem 0; }
 
-  .pk-form-card {
-    grid-column: 1 / -1;
-    margin-top: 2rem;
+  .pk-modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(58,36,16,0.55);
+    z-index: 9990;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+  }
+  .pk-modal-overlay.open { display: flex; }
+  .pk-modal {
     background: var(--white);
     border: 1px solid rgba(196,122,74,0.15);
     border-radius: 24px;
     padding: 2.2rem;
-    box-shadow: 0 12px 40px rgba(90,50,20,0.08);
+    max-width: 640px;
+    width: 100%;
+    max-height: 90vh;
+    overflow-y: auto;
     position: relative;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+    text-align: left;
   }
-  .pk-form-card h3 {
+  .pk-modal h3 {
     font-family: 'Cormorant', Georgia, serif;
-    font-size: 1.4rem;
+    font-size: 1.5rem;
     color: var(--brown);
     margin-bottom: 1.2rem;
   }
-  .pk-form-card .form-field label { color: var(--text-light); }
-  .pk-form-card .form-msg.ok { color: #8ee6a8; }
-  .pk-form-card .form-msg.err { color: #ffb3a3; }
+  .pk-modal .form-field label { color: var(--text-light); }
+  .pk-modal-close {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(196,122,74,0.12);
+    color: var(--brown);
+    font-size: 1rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s;
+  }
+  .pk-modal-close:hover { background: rgba(196,122,74,0.25); }
 
   @media (max-width: 768px) {
     .form-row { grid-template-columns: 1fr; }
@@ -1605,42 +1635,56 @@
         <p>Poukazy vystavujeme na konkrétní masáž nebo na vybranou částku. Kontaktujte nás telefonicky nebo e-mailem.</p>
       </div>
 
-      <div id="pkFormCard" class="pk-form-card" style="display:none;">
-        <h3>Nebo požádejte o poukaz online</h3>
-        <div class="form-row">
-          <div class="form-field">
-            <label for="pkHodnota">Hodnota poukazu (Kč)*</label>
-            <input type="number" id="pkHodnota" class="form-input" min="100" step="50" placeholder="např. 800">
-          </div>
-          <div class="form-field">
-            <label for="pkProKoho">Pro koho je poukaz</label>
-            <input type="text" id="pkProKoho" class="form-input" placeholder="např. pro maminku">
-          </div>
-          <div class="form-field">
-            <label for="pkJmeno">Vaše jméno*</label>
-            <input type="text" id="pkJmeno" class="form-input" placeholder="Jana Nováková">
-          </div>
-          <div class="form-field">
-            <label for="pkEmail">Váš e-mail*</label>
-            <input type="email" id="pkEmail" class="form-input" placeholder="jana@example.cz">
-          </div>
-          <div class="form-field">
-            <label for="pkTelefon">Telefon</label>
-            <input type="tel" id="pkTelefon" class="form-input" placeholder="Nepovinné">
-          </div>
-          <div class="form-field form-field-full">
-            <label for="pkVzkaz">Vzkaz</label>
-            <textarea id="pkVzkaz" class="form-textarea" placeholder="Nepovinné"></textarea>
-          </div>
-        </div>
-        <div style="text-align:center; margin-top:1.2rem;">
-          <button type="button" class="btn-gold" onclick="pkOdeslat()">Odeslat žádost</button>
-        </div>
-        <p id="pkZprava" class="form-msg"></p>
-      </div>
     </div>
   </div>
 </section>
+
+<!-- MODAL: Žádost o poukaz -->
+<div id="pkModalOverlay" class="pk-modal-overlay" onclick="if(event.target===this) zavritPkForm()">
+  <div class="pk-modal">
+    <button type="button" class="pk-modal-close" onclick="zavritPkForm()" aria-label="Zavřít">✕</button>
+    <h3>Objednat poukaz</h3>
+    <div class="form-field form-field-full" style="margin-bottom:1.1rem">
+      <label>Hodnota poukazu*</label>
+      <div class="rez-slots" style="justify-content:flex-start">
+        <button type="button" class="rez-slot-btn" onclick="pkVybratHodnotu(500,this)">500 Kč</button>
+        <button type="button" class="rez-slot-btn" onclick="pkVybratHodnotu(1000,this)">1 000 Kč</button>
+        <button type="button" class="rez-slot-btn" onclick="pkVybratHodnotu(1500,this)">1 500 Kč</button>
+        <button type="button" class="rez-slot-btn" onclick="pkVybratKonkretni(this)">Konkrétní masáž</button>
+      </div>
+    </div>
+    <div class="form-field form-field-full" id="pkMasazWrap" style="display:none;margin-bottom:1.1rem">
+      <label for="pkMasazSelect">Vyberte masáž</label>
+      <select id="pkMasazSelect" class="form-select" onchange="pkMasazZmenena()"><option value="">Načítám…</option></select>
+    </div>
+    <div class="form-row">
+      <div class="form-field">
+        <label for="pkProKoho">Pro koho je poukaz</label>
+        <input type="text" id="pkProKoho" class="form-input" placeholder="např. pro maminku">
+      </div>
+      <div class="form-field">
+        <label for="pkJmeno">Vaše jméno*</label>
+        <input type="text" id="pkJmeno" class="form-input" placeholder="Jana Nováková">
+      </div>
+      <div class="form-field">
+        <label for="pkEmail">Váš e-mail*</label>
+        <input type="email" id="pkEmail" class="form-input" placeholder="jana@example.cz">
+      </div>
+      <div class="form-field">
+        <label for="pkTelefon">Telefon</label>
+        <input type="tel" id="pkTelefon" class="form-input" placeholder="Nepovinné">
+      </div>
+      <div class="form-field form-field-full">
+        <label for="pkVzkaz">Vzkaz</label>
+        <textarea id="pkVzkaz" class="form-textarea" placeholder="Nepovinné"></textarea>
+      </div>
+    </div>
+    <div style="text-align:center; margin-top:1.2rem;">
+      <button type="button" class="btn-gold" onclick="pkOdeslat()">Odeslat žádost</button>
+    </div>
+    <p id="pkZprava" class="form-msg"></p>
+  </div>
+</div>
 
 <!-- PRODUKTY -->
 <section id="produkty">
@@ -2067,6 +2111,14 @@ async function nacistCenikZAdministrace() {
     var rezDatum = document.getElementById('rezDatum');
     if (rezDatum) rezDatum.min = new Date().toISOString().slice(0, 10);
 
+    // Naplnit select masáží ve formuláři poukazu na konkrétní masáž
+    var pkSelect = document.getElementById('pkMasazSelect');
+    if (pkSelect && rezervovatelne.length) {
+      pkSelect.innerHTML = '<option value="">Vyberte masáž…</option>' + rezervovatelne.map(function(c) {
+        return '<option value="' + c.id + '">' + c.emoji + ' ' + c.skupina + ' – ' + c.varianta + ' (' + c.cena.toLocaleString('cs-CZ') + ' Kč)</option>';
+      }).join('');
+    }
+
     // Backend běží → odemknout formulář rezervace (poukaz se zobrazuje až na kliknutí, viz otevritPkForm)
     var rezCard = document.getElementById('rezFormCard');
     if (rezCard) rezCard.style.display = 'block';
@@ -2074,14 +2126,18 @@ async function nacistCenikZAdministrace() {
 }
 document.addEventListener('DOMContentLoaded', nacistCenikZAdministrace);
 
-// Zobrazí formulář žádosti o poukaz po kliknutí na "Objednat poukaz"
+// Otevře okno se žádostí o poukaz po kliknutí na "Objednat poukaz"
 function otevritPkForm() {
-  var pkCard = document.getElementById('pkFormCard');
-  if (!pkCard) return;
-  pkCard.style.display = 'block';
-  var y = pkCard.getBoundingClientRect().top + window.pageYOffset - 90; // odsazení kvůli fixní navigaci nahoře
-  window.scrollTo({ top: y, behavior: 'smooth' });
+  document.getElementById('pkModalOverlay').classList.add('open');
+  document.body.style.overflow = 'hidden';
 }
+function zavritPkForm() {
+  document.getElementById('pkModalOverlay').classList.remove('open');
+  document.body.style.overflow = '';
+}
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') zavritPkForm();
+});
 
 // ── REZERVACE ONLINE ──
 var rezVybranyCas = null;
@@ -2159,35 +2215,69 @@ async function rezOdeslat() {
 }
 
 // ── ŽÁDOST O POUKAZ ──
+var pkVybranaHodnota = null;
+var pkVybranyKonkretniMasaz = null;
+
+function pkOznacitTlacitko(btn) {
+  document.querySelectorAll('#pkModalOverlay .rez-slot-btn').forEach(function(b) { b.classList.remove('selected'); });
+  if (btn) btn.classList.add('selected');
+}
+function pkVybratHodnotu(hodnota, btn) {
+  pkVybranaHodnota = hodnota;
+  pkVybranyKonkretniMasaz = null;
+  pkOznacitTlacitko(btn);
+  document.getElementById('pkMasazWrap').style.display = 'none';
+}
+function pkVybratKonkretni(btn) {
+  pkVybranaHodnota = null;
+  pkVybranyKonkretniMasaz = null;
+  pkOznacitTlacitko(btn);
+  document.getElementById('pkMasazWrap').style.display = 'block';
+  document.getElementById('pkMasazSelect').value = '';
+}
+function pkMasazZmenena() {
+  var vybraneId = document.getElementById('pkMasazSelect').value;
+  var masaz = cenikData.filter(function(c) { return String(c.id) === vybraneId; })[0];
+  if (masaz) {
+    pkVybranaHodnota = masaz.cena;
+    pkVybranyKonkretniMasaz = masaz.skupina + ' – ' + masaz.varianta;
+  } else {
+    pkVybranaHodnota = null;
+    pkVybranyKonkretniMasaz = null;
+  }
+}
+
 async function pkOdeslat() {
   var zprava = document.getElementById('pkZprava');
   zprava.className = 'form-msg';
-  var hodnota = document.getElementById('pkHodnota').value;
   var proKoho = document.getElementById('pkProKoho').value.trim();
   var jmeno = document.getElementById('pkJmeno').value.trim();
   var email = document.getElementById('pkEmail').value.trim();
   var telefon = document.getElementById('pkTelefon').value.trim();
   var vzkaz = document.getElementById('pkVzkaz').value.trim();
 
-  if (!hodnota || Number(hodnota) <= 0) { zprava.textContent = 'Zadejte prosím hodnotu poukazu.'; zprava.className = 'form-msg err'; return; }
+  if (!pkVybranaHodnota) { zprava.textContent = 'Vyberte prosím hodnotu poukazu, nebo konkrétní masáž.'; zprava.className = 'form-msg err'; return; }
   if (!jmeno || !email) { zprava.textContent = 'Vyplňte prosím jméno a e-mail.'; zprava.className = 'form-msg err'; return; }
 
   try {
     var res = await fetch(API + '/poukazy/zadost', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ hodnota: hodnota, kupujici_jmeno: jmeno, kupujici_email: email, kupujici_telefon: telefon, pro_koho: proKoho, vzkaz: vzkaz })
+      body: JSON.stringify({ hodnota: pkVybranaHodnota, kupujici_jmeno: jmeno, kupujici_email: email, kupujici_telefon: telefon, pro_koho: proKoho, vzkaz: vzkaz, konkretni_masaz: pkVybranyKonkretniMasaz })
     });
     var vysledek = await res.json();
     if (!res.ok) { zprava.textContent = vysledek.chyba || 'Žádost se nepodařilo odeslat.'; zprava.className = 'form-msg err'; return; }
     zprava.textContent = '🌸 Žádost odeslána! Ozveme se vám s dalšími kroky.';
     zprava.className = 'form-msg ok';
-    document.getElementById('pkHodnota').value = '';
     document.getElementById('pkProKoho').value = '';
     document.getElementById('pkJmeno').value = '';
     document.getElementById('pkEmail').value = '';
     document.getElementById('pkTelefon').value = '';
     document.getElementById('pkVzkaz').value = '';
+    document.getElementById('pkMasazWrap').style.display = 'none';
+    pkOznacitTlacitko(null);
+    pkVybranaHodnota = null;
+    pkVybranyKonkretniMasaz = null;
   } catch (e) {
     zprava.textContent = 'Žádost se nepodařilo odeslat, zkuste to prosím znovu nebo zavolejte.';
     zprava.className = 'form-msg err';

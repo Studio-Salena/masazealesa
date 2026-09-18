@@ -153,15 +153,15 @@ app.post('/api/rezervace', async (req, res) => {
 
 // Žádost o dárkový poukaz z webového formuláře
 app.post('/api/poukazy/zadost', async (req, res) => {
-  const { hodnota, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, vzkaz } = req.body || {};
+  const { hodnota, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, vzkaz, konkretni_masaz } = req.body || {};
   if (!hodnota || !kupujici_jmeno || !kupujici_email) {
     return res.status(400).json({ chyba: 'Vyplňte prosím hodnotu poukazu, jméno a e-mail.' });
   }
   try {
     const { rows: [zadost] } = await db.query(
-      `INSERT INTO poukazy_zadosti (hodnota, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, vzkaz, stav)
-       VALUES ($1,$2,$3,$4,$5,$6,'nova') RETURNING *`,
-      [hodnota, kupujici_jmeno, kupujici_email, kupujici_telefon || null, pro_koho || null, vzkaz || null]
+      `INSERT INTO poukazy_zadosti (hodnota, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, vzkaz, konkretni_masaz, stav)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'nova') RETURNING *`,
+      [hodnota, kupujici_jmeno, kupujici_email, kupujici_telefon || null, pro_koho || null, vzkaz || null, konkretni_masaz || null]
     );
     res.json({ ok: true, zadost });
   } catch (e) { res.status(500).json({ chyba: e.message }); }
@@ -363,9 +363,9 @@ app.patch('/api/admin/poukazy/zadosti/:id/stav', async (req, res) => {
       const platnostDo = new Date();
       platnostDo.setFullYear(platnostDo.getFullYear() + 1);
       const { rows: [poukaz] } = await db.query(
-        `INSERT INTO poukazy (kod, ean, hodnota, zustatek, platnost_do, zakoupeno_kde, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, stav)
-         VALUES ($1,$2,$3,$4,$5,'web',$6,$7,$8,$9,'aktivni') RETURNING *`,
-        [vygenerovatKod(), vygenerovatEan(), zadost.hodnota, zadost.hodnota, platnostDo.toISOString().slice(0, 10), zadost.kupujici_jmeno, zadost.kupujici_email, zadost.kupujici_telefon, zadost.pro_koho]
+        `INSERT INTO poukazy (kod, ean, hodnota, zustatek, platnost_do, zakoupeno_kde, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, konkretni_masaz, stav)
+         VALUES ($1,$2,$3,$4,$5,'web',$6,$7,$8,$9,$10,'aktivni') RETURNING *`,
+        [vygenerovatKod(), vygenerovatEan(), zadost.hodnota, zadost.hodnota, platnostDo.toISOString().slice(0, 10), zadost.kupujici_jmeno, zadost.kupujici_email, zadost.kupujici_telefon, zadost.pro_koho, zadost.konkretni_masaz]
       );
       return res.json({ ok: true, poukaz });
     }
