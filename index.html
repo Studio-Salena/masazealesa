@@ -845,6 +845,17 @@
     transition: background 0.2s;
   }
   .pk-modal-close:hover { background: rgba(196,122,74,0.25); }
+  .pk-platba-box {
+    background: var(--cream);
+    border: 1px solid rgba(196,122,74,0.2);
+    border-radius: 16px;
+    padding: 1.2rem;
+    text-align: center;
+    margin-bottom: 1.1rem;
+  }
+  .pk-platba-box svg { width: 160px; height: 160px; margin: 0 auto 0.7rem; display: block; }
+  .pk-platba-ucet { font-size: 1rem; font-weight: 700; color: var(--brown); letter-spacing: 0.02em; }
+  .pk-platba-hint { font-size: 0.82rem; color: var(--text-light); margin-top: 0.4rem; }
 
   @media (max-width: 768px) {
     .form-row { grid-template-columns: 1fr; }
@@ -1646,7 +1657,7 @@
     <h3>Objednat poukaz</h3>
     <div class="form-field form-field-full" style="margin-bottom:1.1rem">
       <label>Hodnota poukazu*</label>
-      <div class="rez-slots" style="justify-content:flex-start">
+      <div class="rez-slots" id="pkHodnotaSlots" style="justify-content:flex-start">
         <button type="button" class="rez-slot-btn" onclick="pkVybratHodnotu(500,this)">500 Kč</button>
         <button type="button" class="rez-slot-btn" onclick="pkVybratHodnotu(1000,this)">1 000 Kč</button>
         <button type="button" class="rez-slot-btn" onclick="pkVybratHodnotu(1500,this)">1 500 Kč</button>
@@ -1679,8 +1690,20 @@
         <textarea id="pkVzkaz" class="form-textarea" placeholder="Nepovinné"></textarea>
       </div>
     </div>
+
+    <div class="form-field form-field-full" style="margin-top:1.1rem">
+      <label>Způsob platby*</label>
+      <div class="rez-slots" id="pkPlatbaSlots" style="justify-content:flex-start">
+        <button type="button" class="rez-slot-btn" onclick="pkVybratPlatbu('qr',this)">📱 QR kód</button>
+        <button type="button" class="rez-slot-btn" onclick="pkVybratPlatbu('prevodem',this)">🏦 Převodem</button>
+        <button type="button" class="rez-slot-btn" onclick="pkVybratPlatbu('pri_prevzeti',this)">🤝 Při převzetí</button>
+      </div>
+    </div>
+
+    <div id="pkPlatbaBox" class="pk-platba-box" style="display:none;margin-top:1rem"></div>
+
     <div style="text-align:center; margin-top:1.2rem;">
-      <button type="button" class="btn-gold" onclick="pkOdeslat()">Odeslat žádost</button>
+      <button type="button" class="btn-gold" onclick="pkOdeslat()">Koupit poukaz</button>
     </div>
     <p id="pkZprava" class="form-msg"></p>
   </div>
@@ -2043,6 +2066,7 @@
 </div>
 
 
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
 <script>
 
 // ── ANIMOVANÝ HERO NADPIS ──
@@ -2217,23 +2241,28 @@ async function rezOdeslat() {
 // ── ŽÁDOST O POUKAZ ──
 var pkVybranaHodnota = null;
 var pkVybranyKonkretniMasaz = null;
+var pkVybranyZpusobPlatby = null;
+var PK_UCET_IBAN = 'CZ6708000000003181537133';
+var PK_UCET_ZOBRAZENI = '3181537133/0800';
 
-function pkOznacitTlacitko(btn) {
-  document.querySelectorAll('#pkModalOverlay .rez-slot-btn').forEach(function(b) { b.classList.remove('selected'); });
+function pkOznacitTlacitko(skupinaId, btn) {
+  document.querySelectorAll('#' + skupinaId + ' .rez-slot-btn').forEach(function(b) { b.classList.remove('selected'); });
   if (btn) btn.classList.add('selected');
 }
 function pkVybratHodnotu(hodnota, btn) {
   pkVybranaHodnota = hodnota;
   pkVybranyKonkretniMasaz = null;
-  pkOznacitTlacitko(btn);
+  pkOznacitTlacitko('pkHodnotaSlots', btn);
   document.getElementById('pkMasazWrap').style.display = 'none';
+  pkRenderPlatbaBox();
 }
 function pkVybratKonkretni(btn) {
   pkVybranaHodnota = null;
   pkVybranyKonkretniMasaz = null;
-  pkOznacitTlacitko(btn);
+  pkOznacitTlacitko('pkHodnotaSlots', btn);
   document.getElementById('pkMasazWrap').style.display = 'block';
   document.getElementById('pkMasazSelect').value = '';
+  pkRenderPlatbaBox();
 }
 function pkMasazZmenena() {
   var vybraneId = document.getElementById('pkMasazSelect').value;
@@ -2245,7 +2274,59 @@ function pkMasazZmenena() {
     pkVybranaHodnota = null;
     pkVybranyKonkretniMasaz = null;
   }
+  pkRenderPlatbaBox();
 }
+
+// Odstraní diakritiku a znaky, které SPAYD (QR platba) formát nepovoluje v hodnotách polí
+function pkOcistitProSpayd(text) {
+  return (text || '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[*+]/g, ' ')
+    .trim();
+}
+function pkVybratPlatbu(zpusob, btn) {
+  pkVybranyZpusobPlatby = zpusob;
+  pkOznacitTlacitko('pkPlatbaSlots', btn);
+  pkRenderPlatbaBox();
+}
+function pkRenderPlatbaBox() {
+  var box = document.getElementById('pkPlatbaBox');
+  if (!pkVybranyZpusobPlatby) { box.style.display = 'none'; box.innerHTML = ''; return; }
+
+  if (pkVybranyZpusobPlatby === 'pri_prevzeti') {
+    box.style.display = 'block';
+    box.innerHTML = '<p class="pk-platba-hint">Zaplatíte hotově nebo QR kódem přímo v salonu při vyzvednutí poukazu. 🌸</p>';
+    return;
+  }
+
+  if (!pkVybranaHodnota) {
+    box.style.display = 'block';
+    box.innerHTML = '<p class="pk-platba-hint">Nejdřív prosím vyberte hodnotu poukazu výše.</p>';
+    return;
+  }
+
+  var jmeno = pkOcistitProSpayd(document.getElementById('pkJmeno').value) || 'Darkovy poukaz';
+  var zprava = ('Darkovy poukaz ' + jmeno).slice(0, 60);
+  var spayd = 'SPD*1.0*ACC:' + PK_UCET_IBAN + '*AM:' + Number(pkVybranaHodnota).toFixed(2) + '*CC:CZK*MSG:' + zprava;
+
+  box.style.display = 'block';
+  try {
+    var qr = qrcode(0, 'M');
+    qr.addData(spayd);
+    qr.make();
+    box.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 2 }) +
+      '<div class="pk-platba-ucet">' + PK_UCET_ZOBRAZENI + '</div>' +
+      '<div class="pk-platba-hint">Naskenujte QR kód v bankovní aplikaci, nebo zadejte platbu ručně na účet výše — částka ' + Number(pkVybranaHodnota).toLocaleString('cs-CZ') + ' Kč se doplní automaticky. Jakmile platbu přijmeme, pošleme poukaz na e-mail.</div>';
+  } catch (e) {
+    box.innerHTML = '<div class="pk-platba-ucet">' + PK_UCET_ZOBRAZENI + '</div><div class="pk-platba-hint">Částka: ' + Number(pkVybranaHodnota).toLocaleString('cs-CZ') + ' Kč. Jakmile platbu přijmeme, pošleme poukaz na e-mail.</div>';
+  }
+}
+document.addEventListener('DOMContentLoaded', function() {
+  var jmenoPole = document.getElementById('pkJmeno');
+  if (jmenoPole) jmenoPole.addEventListener('input', function() {
+    if (pkVybranyZpusobPlatby === 'qr' || pkVybranyZpusobPlatby === 'prevodem') pkRenderPlatbaBox();
+  });
+});
 
 async function pkOdeslat() {
   var zprava = document.getElementById('pkZprava');
@@ -2258,16 +2339,17 @@ async function pkOdeslat() {
 
   if (!pkVybranaHodnota) { zprava.textContent = 'Vyberte prosím hodnotu poukazu, nebo konkrétní masáž.'; zprava.className = 'form-msg err'; return; }
   if (!jmeno || !email) { zprava.textContent = 'Vyplňte prosím jméno a e-mail.'; zprava.className = 'form-msg err'; return; }
+  if (!pkVybranyZpusobPlatby) { zprava.textContent = 'Vyberte prosím způsob platby.'; zprava.className = 'form-msg err'; return; }
 
   try {
     var res = await fetch(API + '/poukazy/zadost', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ hodnota: pkVybranaHodnota, kupujici_jmeno: jmeno, kupujici_email: email, kupujici_telefon: telefon, pro_koho: proKoho, vzkaz: vzkaz, konkretni_masaz: pkVybranyKonkretniMasaz })
+      body: JSON.stringify({ hodnota: pkVybranaHodnota, kupujici_jmeno: jmeno, kupujici_email: email, kupujici_telefon: telefon, pro_koho: proKoho, vzkaz: vzkaz, konkretni_masaz: pkVybranyKonkretniMasaz, zpusob_platby: pkVybranyZpusobPlatby })
     });
     var vysledek = await res.json();
     if (!res.ok) { zprava.textContent = vysledek.chyba || 'Žádost se nepodařilo odeslat.'; zprava.className = 'form-msg err'; return; }
-    zprava.textContent = '🌸 Žádost odeslána! Ozveme se vám s dalšími kroky.';
+    zprava.textContent = '🌸 Objednávka odeslána! Jakmile přijmeme platbu, pošleme poukaz na e-mail.';
     zprava.className = 'form-msg ok';
     document.getElementById('pkProKoho').value = '';
     document.getElementById('pkJmeno').value = '';
@@ -2275,9 +2357,12 @@ async function pkOdeslat() {
     document.getElementById('pkTelefon').value = '';
     document.getElementById('pkVzkaz').value = '';
     document.getElementById('pkMasazWrap').style.display = 'none';
-    pkOznacitTlacitko(null);
+    pkOznacitTlacitko('pkHodnotaSlots', null);
+    pkOznacitTlacitko('pkPlatbaSlots', null);
     pkVybranaHodnota = null;
     pkVybranyKonkretniMasaz = null;
+    pkVybranyZpusobPlatby = null;
+    pkRenderPlatbaBox();
   } catch (e) {
     zprava.textContent = 'Žádost se nepodařilo odeslat, zkuste to prosím znovu nebo zavolejte.';
     zprava.className = 'form-msg err';

@@ -98,6 +98,7 @@ create table if not exists poukazy (
   kupujici_telefon text,
   pro_koho text,
   konkretni_masaz text, -- nepovinné: pokud poukaz platí jen na jednu konkrétní masáž, ne na libovolnou částku
+  zpusob_platby text, -- qr | prevodem | pri_prevzeti | hotove (nepovinné, jen u poukazů z webu)
   stav text not null default 'aktivni', -- aktivni | pouzity | zruseny
   vytvoreno timestamptz not null default now()
 );
@@ -123,6 +124,7 @@ create table if not exists poukazy_zadosti (
   pro_koho text,
   vzkaz text,
   konkretni_masaz text, -- nepovinné: pokud si nezvolili částku, ale konkrétní masáž
+  zpusob_platby text, -- qr | prevodem | pri_prevzeti
   stav text not null default 'nova', -- nova | vyrizena | zamitnuta
   vytvoreno timestamptz not null default now()
 );

@@ -803,13 +803,15 @@ async function loadPoukazyZadosti() {
     const seznam = await adminFetch(API + '/admin/poukazy/zadosti').then(r => r.json());
     if (!seznam.length) { document.getElementById('poukazyZadostiTable').innerHTML = '<div class="empty">Žádné žádosti</div>'; return; }
     const stavBadge = { nova: '<span class="badge badge-nova">🆕 Nová</span>', vyrizena: '<span class="badge badge-ok">✅ Vyřízena</span>', zamitnuta: '<span class="badge badge-zruseno">❌ Zamítnuta</span>' };
+    const platbaLabel = { qr: '📱 QR kód', prevodem: '🏦 Převodem', pri_prevzeti: '🤝 Při převzetí' };
     document.getElementById('poukazyZadostiTable').innerHTML = `
-      <table><thead><tr><th>Datum</th><th>Hodnota</th><th>Kupující</th><th>Pro koho</th><th>Stav</th><th>Akce</th></tr></thead>
+      <table><thead><tr><th>Datum</th><th>Hodnota</th><th>Kupující</th><th>Pro koho</th><th>Platba</th><th>Stav</th><th>Akce</th></tr></thead>
       <tbody>${seznam.map(z => `<tr>
         <td>${new Date(z.vytvoreno).toLocaleDateString('cs-CZ')}</td>
         <td><strong>${Number(z.hodnota).toLocaleString('cs-CZ')} Kč</strong>${z.konkretni_masaz ? `<br><small style="color:var(--text-light)">🧖 ${z.konkretni_masaz}</small>` : ''}</td>
         <td>${z.kupujici_jmeno}<br><small>${z.kupujici_email}${z.kupujici_telefon ? ' | ' + z.kupujici_telefon : ''}</small></td>
         <td>${z.pro_koho || '—'}</td>
+        <td>${platbaLabel[z.zpusob_platby] || '—'}</td>
         <td>${stavBadge[z.stav] || z.stav}</td>
         <td style="display:flex;gap:4px">
           ${z.stav === 'nova' ? `<button class="btn btn-green btn-sm" onclick="vyriditZadost(${z.id},'vyrizena')">✅ Schválit</button><button class="btn btn-red btn-sm" onclick="vyriditZadost(${z.id},'zamitnuta')">❌</button>` : ''}
