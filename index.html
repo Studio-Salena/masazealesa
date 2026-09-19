@@ -590,8 +590,6 @@
   .poukaz-ukazka {
     position: relative;
     width: 100%;
-    aspect-ratio: 916/520;
-    background-image: url('assets/poukaz.jpg');
     background-size: cover;
     background-position: center;
     border-radius: 14px;
@@ -617,7 +615,26 @@
   .pu-barcode-col { display: flex; flex-direction: column; align-items: center; gap: 2px; }
   .pu-barcode { width: 100%; max-width: 150px; line-height: 0; }
   .pu-ean { font-family: monospace; font-size: 0.62rem; color: var(--text-light); letter-spacing: 0.06em; }
+  .pu-text-shadow { text-shadow: 0 0 4px rgba(255,255,255,0.9), 0 0 8px rgba(255,255,255,0.7); }
+  .pu-logo-overlay { position: absolute; text-align: center; line-height: 1.15; }
+  .pu-logo-text { font-family: 'Cormorant', Georgia, serif; font-size: 1.1rem; color: var(--brown); }
+  .pu-title-text { font-size: 0.65rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--gold); font-weight: 700; margin-top: 1px; }
   @media (max-width: 480px) { .pu-radek { font-size: 0.68rem; } }
+  .pu-sablony { display: flex; gap: 0.5rem; justify-content: center; margin-bottom: 0.9rem; }
+  .pu-sablona-btn {
+    padding: 0.4rem 0.9rem;
+    border-radius: 50px;
+    border: 1.5px solid rgba(255,255,255,0.25);
+    background: transparent;
+    color: rgba(255,255,255,0.7);
+    font-weight: 700;
+    font-size: 0.78rem;
+    cursor: pointer;
+    font-family: 'Nunito', sans-serif;
+    transition: all 0.2s;
+  }
+  .pu-sablona-btn:hover { border-color: var(--gold); }
+  .pu-sablona-btn.selected { background: var(--gold); color: var(--brown); border-color: var(--gold); }
 
   .btn-gold {
     background: var(--gold);
@@ -1670,6 +1687,10 @@
       </div>
       <div class="voucher-card reveal">
         <h3>Dárkový poukaz</h3>
+        <div class="pu-sablony" id="puSablonyTlacitka">
+          <button type="button" class="pu-sablona-btn selected" onclick="vybratUkazkovouSablonu('klasicky',this)">🌸 Klasický</button>
+          <button type="button" class="pu-sablona-btn" onclick="vybratUkazkovouSablonu('vanocni',this)">🎄 Vánoční</button>
+        </div>
         <div class="poukaz-ukazka" id="poukazUkazka"></div>
         <p style="font-size:0.72rem;text-align:center;opacity:0.7;margin:-0.9rem 0 0">Ukázka vzhledu — čárový kód je neplatný.</p>
       </div>
@@ -2285,14 +2306,49 @@ function eanBarcodeSvg(ean13, barH) {
   for (var k = 0; k < bits.length; k++) { if (bits[k] === '1') rects += '<rect x="' + (k * moduleW).toFixed(2) + '" y="0" width="' + moduleW + '" height="' + barH + '" fill="#000"/>'; }
   return '<svg viewBox="0 0 ' + width + ' ' + barH + '" width="100%" height="' + barH + '" xmlns="http://www.w3.org/2000/svg" style="display:block">' + rects + '</svg>';
 }
+var UKAZKA_SABLONY = {
+  klasicky: {
+    obrazek: 'assets/poukaz.jpg',
+    pomer: '916/520',
+    logo: false,
+    box: { left: '30%', right: '8%' },
+    radky: { pro: '50%', hodnota: '58%', platnost: '66%' },
+    spodek: { top: '78%', left: '34%', right: '14%' }
+  },
+  vanocni: {
+    obrazek: 'assets/vanocni-poukaz.jpg',
+    pomer: '1024/558',
+    logo: true,
+    stin: true,
+    logoBox: { top: '14%', left: '40%', right: '6%' },
+    box: { left: '40%', right: '6%' },
+    radky: { pro: '38%', hodnota: '47%', platnost: '56%' },
+    spodek: { top: '66%', left: '40%', right: '8%' }
+  }
+};
+var ukazkaAktivniSablona = 'klasicky';
+function vybratUkazkovouSablonu(nazev, btn) {
+  ukazkaAktivniSablona = nazev;
+  document.querySelectorAll('#puSablonyTlacitka .pu-sablona-btn').forEach(function(b) { b.classList.remove('selected'); });
+  if (btn) btn.classList.add('selected');
+  vykreslitUkazkuPoukazu();
+}
 function vykreslitUkazkuPoukazu() {
   var el = document.getElementById('poukazUkazka');
   if (!el) return;
+  var s = UKAZKA_SABLONY[ukazkaAktivniSablona];
+  el.style.backgroundImage = "url('" + s.obrazek + "')";
+  el.style.aspectRatio = s.pomer;
+  var stin = s.stin ? ' pu-text-shadow' : '';
   el.innerHTML =
-    '<div class="pu-radek" style="top:50%;left:30%;right:8%">Pro: <strong>— — —</strong></div>' +
-    '<div class="pu-radek" style="top:58%;left:30%;right:8%">Hodnota: <strong>1 000 Kč</strong></div>' +
-    '<div class="pu-radek" style="top:66%;left:30%;right:8%">Platnost: <strong>31. 12. 2027</strong></div>' +
-    '<div class="pu-bottom" style="top:78%;left:34%;right:14%">' +
+    (s.logo ? '<div class="pu-logo-overlay' + stin + '" style="top:' + s.logoBox.top + ';left:' + s.logoBox.left + ';right:' + s.logoBox.right + '">' +
+      '<div class="pu-logo-text">🌸 Masáže Alesa</div>' +
+      '<div class="pu-title-text">Dárkový poukaz</div>' +
+    '</div>' : '') +
+    '<div class="pu-radek' + stin + '" style="top:' + s.radky.pro + ';left:' + s.box.left + ';right:' + s.box.right + '">Pro: <strong>— — —</strong></div>' +
+    '<div class="pu-radek' + stin + '" style="top:' + s.radky.hodnota + ';left:' + s.box.left + ';right:' + s.box.right + '">Hodnota: <strong>1 000 Kč</strong></div>' +
+    '<div class="pu-radek' + stin + '" style="top:' + s.radky.platnost + ';left:' + s.box.left + ';right:' + s.box.right + '">Platnost: <strong>31. 12. 2027</strong></div>' +
+    '<div class="pu-bottom" style="top:' + s.spodek.top + ';left:' + s.spodek.left + ';right:' + s.spodek.right + '">' +
       '<div class="pu-barcode-col">' +
         '<div class="pu-barcode">' + eanBarcodeSvg('2000000000008', 24) + '</div>' +
         '<div class="pu-ean">UKÁZKA — neplatný kód</div>' +
