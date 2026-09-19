@@ -586,6 +586,39 @@
   }
   .voucher-dashed small { color: rgba(255,255,255,0.4); font-size: 0.75rem; }
 
+  /* Statická ukázka grafické podoby poukazu (stejný vzhled jako tiskový náhled v adminu) */
+  .poukaz-ukazka {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 916/520;
+    background-image: url('assets/poukaz.jpg');
+    background-size: cover;
+    background-position: center;
+    border-radius: 14px;
+    overflow: hidden;
+    margin-bottom: 1rem;
+  }
+  .pu-radek {
+    position: absolute;
+    font-family: 'Nunito', sans-serif;
+    font-size: 0.85rem;
+    color: var(--brown);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .pu-radek strong { font-weight: 800; }
+  .pu-bottom {
+    position: absolute;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    background: rgba(255,255,255,0.9);
+    border-radius: 8px;
+    padding: 4px 8px;
+  }
+  .pu-barcode-col { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .pu-barcode { width: 100%; max-width: 150px; line-height: 0; }
+  .pu-ean { font-family: monospace; font-size: 0.62rem; color: var(--text-light); letter-spacing: 0.06em; }
+  @media (max-width: 480px) { .pu-radek { font-size: 0.68rem; } }
+
   .btn-gold {
     background: var(--gold);
     color: var(--brown);
@@ -1638,11 +1671,8 @@
       <div class="voucher-card reveal">
         <h3>Dárkový poukaz</h3>
         <p>Platný na libovolnou masáž dle výběru obdarované.</p>
-        <div class="voucher-dashed">
-          <span>Masáže Alesa</span>
-          <span style="font-size:1.5rem; margin:0.5rem 0; display:block;">🌸</span>
-          <small>Hulín · masazealesa.cz</small>
-        </div>
+        <div class="poukaz-ukazka" id="poukazUkazka"></div>
+        <p style="font-size:0.72rem;text-align:center;opacity:0.7;margin:-0.9rem 0 1.5rem">Ukázka vzhledu — čárový kód je neplatný.</p>
         <p>Poukazy vystavujeme na konkrétní masáž nebo na vybranou částku. Kontaktujte nás telefonicky nebo e-mailem.</p>
       </div>
 
@@ -2237,6 +2267,41 @@ async function rezOdeslat() {
     btn.disabled = false; btn.textContent = 'Odeslat rezervaci';
   }
 }
+
+// ── STATICKÁ UKÁZKA VZHLEDU POUKAZU (na webu, čárový kód je záměrně neplatný) ──
+var EAN_L = ['0001101','0011001','0010011','0111101','0100011','0110001','0101111','0111011','0110111','0001011'];
+var EAN_G = ['0100111','0110011','0011011','0100001','0011101','0111001','0000101','0010001','0001001','0010111'];
+var EAN_R = ['1110010','1100110','1101100','1000010','1011100','1001110','1010000','1000100','1001000','1110100'];
+var EAN_PARITY = ['LLLLLL','LLGLGG','LLGGLG','LLGGGL','LGLLGG','LGGLLG','LGGGLL','LGLGLG','LGLGGL','LGGLGL'];
+function eanBarcodeSvg(ean13, barH) {
+  if (!ean13 || ean13.length !== 13) return '';
+  barH = barH || 64;
+  var parity = EAN_PARITY[Number(ean13[0])];
+  var bits = '101';
+  for (var i = 0; i < 6; i++) { var d = Number(ean13[1 + i]); bits += parity[i] === 'L' ? EAN_L[d] : EAN_G[d]; }
+  bits += '01010';
+  for (var j = 0; j < 6; j++) { var d2 = Number(ean13[7 + j]); bits += EAN_R[d2]; }
+  bits += '101';
+  var moduleW = 2.2, width = bits.length * moduleW;
+  var rects = '';
+  for (var k = 0; k < bits.length; k++) { if (bits[k] === '1') rects += '<rect x="' + (k * moduleW).toFixed(2) + '" y="0" width="' + moduleW + '" height="' + barH + '" fill="#000"/>'; }
+  return '<svg viewBox="0 0 ' + width + ' ' + barH + '" width="100%" height="' + barH + '" xmlns="http://www.w3.org/2000/svg" style="display:block">' + rects + '</svg>';
+}
+function vykreslitUkazkuPoukazu() {
+  var el = document.getElementById('poukazUkazka');
+  if (!el) return;
+  el.innerHTML =
+    '<div class="pu-radek" style="top:50%;left:30%;right:8%">Pro: <strong>Jana Nováková</strong></div>' +
+    '<div class="pu-radek" style="top:58%;left:30%;right:8%">Hodnota: <strong>1 000 Kč</strong></div>' +
+    '<div class="pu-radek" style="top:66%;left:30%;right:8%">Platnost: <strong>31. 12. 2027</strong></div>' +
+    '<div class="pu-bottom" style="top:78%;left:34%;right:14%">' +
+      '<div class="pu-barcode-col">' +
+        '<div class="pu-barcode">' + eanBarcodeSvg('2000000000008', 24) + '</div>' +
+        '<div class="pu-ean">UKÁZKA — neplatný kód</div>' +
+      '</div>' +
+    '</div>';
+}
+document.addEventListener('DOMContentLoaded', vykreslitUkazkuPoukazu);
 
 // ── ŽÁDOST O POUKAZ ──
 var pkVybranaHodnota = null;
