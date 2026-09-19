@@ -373,6 +373,13 @@ app.patch('/api/admin/poukazy/zadosti/:id/stav', async (req, res) => {
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
+app.delete('/api/admin/poukazy/zadosti/:id', async (req, res) => {
+  try {
+    await db.query('DELETE FROM poukazy_zadosti WHERE id = $1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
 // -- Zákazníci (ručně přidané + odvozené z rezervací a poukazů, seskupeno podle telefonu) --
 app.get('/api/admin/zakaznici', async (req, res) => {
   try {
