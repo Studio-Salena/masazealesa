@@ -79,10 +79,9 @@ create table if not exists poukazy_typy (
   unique (hodnota, platnost_mesicu)
 );
 insert into poukazy_typy (hodnota, platnost_mesicu, poradi) values
-  (500, 3, 1),
-  (1000, 6, 2),
-  (1500, 12, 3),
-  (2000, 12, 4)
+  (500, 12, 1),
+  (1000, 12, 2),
+  (1500, 12, 3)
 on conflict (hodnota, platnost_mesicu) do nothing;
 
 -- Vydané dárkové poukazy
