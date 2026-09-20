@@ -627,7 +627,6 @@
     border-radius: 10px;
   }
   .pu-logo-img { max-width: 100%; max-height: 52px; display: block; margin: 0 auto; }
-  .pu-logo-text { font-family: 'Cormorant', Georgia, serif; font-size: 1.1rem; color: var(--brown); }
   .pu-title-text { font-size: 0.65rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--gold); font-weight: 700; margin-top: 1px; }
   @media (max-width: 480px) { .pu-radek { font-size: 0.68rem; } }
   .pu-sablony { display: flex; gap: 0.5rem; justify-content: center; margin-bottom: 0.9rem; }
@@ -2357,7 +2356,7 @@ function vykreslitUkazkuPoukazu() {
   var logoStyl = bezPodkladu ? 'background:none;padding:0;' : '';
   el.innerHTML =
     (s.logo ? '<div class="pu-logo-overlay" style="' + logoStyl + 'top:' + s.logoBox.top + ';left:' + s.logoBox.left + ';right:' + s.logoBox.right + '">' +
-      '<div class="pu-logo-text">🌸 Masáže Alesa</div>' +
+      '<img class="pu-logo-img" src="assets/logo.png" alt="Masáže Alesa">' +
       '<div class="pu-title-text">Dárkový poukaz</div>' +
     '</div>' : '') +
     '<div class="pu-radek" style="' + radekStyl + 'top:' + s.radky.pro + ';left:' + s.box.left + ';right:' + s.box.right + '">Pro: <strong>— — —</strong></div>' +
