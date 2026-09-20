@@ -850,56 +850,53 @@
   .rez-tyden-nav button:hover { border-color: var(--terracotta); }
   .rez-tyden-nav button:disabled { opacity: 0.3; cursor: not-allowed; }
   .rez-tyden-label { font-weight: 700; color: var(--brown); font-size: 0.88rem; }
-  .rez-kalendar {
-    display: flex;
-    gap: 0.4rem;
-    overflow-x: auto;
-    padding-bottom: 0.5rem;
-  }
-  .rez-den-sloupec {
-    flex: 1 0 auto;
-    min-width: 88px;
-    display: flex;
-    flex-direction: column;
-    gap: 0.3rem;
-  }
-  .rez-den-hlavicka {
-    text-align: center;
-    font-weight: 700;
-    color: var(--brown);
-    font-size: 0.8rem;
-    padding-bottom: 0.4rem;
-    border-bottom: 1.5px solid rgba(196,122,74,0.2);
-    margin-bottom: 0.2rem;
-  }
-  .rez-den-hlavicka small { display: block; font-weight: 400; color: var(--text-light); font-size: 0.7rem; }
-  .rez-den-hlavicka.dnes { color: var(--terracotta); }
-  .rez-den-cas {
-    padding: 0.4rem 0.3rem;
-    border-radius: 8px;
-    border: 1.5px solid rgba(196,122,74,0.25);
-    background: var(--white);
-    color: var(--brown);
-    font-weight: 700;
-    font-size: 0.75rem;
-    cursor: pointer;
-    text-align: center;
-    font-family: 'Nunito', sans-serif;
-  }
-  .rez-den-cas:hover { border-color: var(--terracotta); }
-  .rez-den-cas.selected { background: var(--terracotta); color: var(--white); border-color: var(--terracotta); }
-  .rez-den-cas:disabled {
-    background: rgba(200,60,60,0.1);
-    border-color: rgba(200,60,60,0.25);
-    color: #b8402a;
-    cursor: not-allowed;
-    text-decoration: line-through;
-    opacity: 0.8;
-  }
-  .rez-den-cas:disabled:hover { border-color: rgba(200,60,60,0.25); }
-  .rez-den-zavreno { font-size: 0.72rem; color: var(--text-light); text-align: center; padding: 0.6rem 0; }
-  @media (max-width: 480px) { .rez-den-sloupec { min-width: 76px; } .rez-den-cas { font-size: 0.7rem; padding: 0.35rem 0.2rem; } }
   .rez-hint { font-size: 0.85rem; color: var(--text-light); text-align: center; margin: 0.5rem 0; }
+
+  /* Týdenní kalendář — mřížka: hodiny vlevo, dny ve sloupcích */
+  #rezModalOverlay .pk-modal { max-width: 920px; }
+  .rez-grid-wrap { overflow-x: auto; border: 1px solid rgba(196,122,74,0.2); border-radius: 12px; }
+  .rez-grid {
+    display: grid;
+    grid-template-columns: 52px repeat(7, 1fr);
+    min-width: 620px;
+  }
+  .rez-grid-hlavicka {
+    position: sticky; top: 0; z-index: 2;
+    background: var(--cream);
+    padding: 0.5rem 0.3rem;
+    text-align: center;
+    font-weight: 700;
+    color: var(--brown);
+    font-size: 0.72rem;
+    border-bottom: 1.5px solid rgba(196,122,74,0.2);
+    border-left: 1px solid rgba(196,122,74,0.12);
+  }
+  .rez-grid-hlavicka:first-child { border-left: none; }
+  .rez-grid-hlavicka small { display: block; font-weight: 400; color: var(--text-light); font-size: 0.65rem; }
+  .rez-grid-hlavicka.dnes { color: var(--terracotta); }
+  .rez-grid-roh { border-bottom: 1.5px solid rgba(196,122,74,0.2); }
+  .rez-grid-hodina {
+    font-size: 0.62rem;
+    color: var(--text-light);
+    text-align: right;
+    padding: 0 5px;
+    border-top: 1px solid rgba(196,122,74,0.1);
+    white-space: nowrap;
+  }
+  .rez-grid-bunka {
+    border-left: 1px solid rgba(196,122,74,0.08);
+    border-top: 1px solid rgba(196,122,74,0.08);
+    min-height: 16px;
+    position: relative;
+  }
+  .rez-grid-bunka.volno { cursor: pointer; }
+  .rez-grid-bunka.volno:hover { background: rgba(212,133,106,0.18); }
+  .rez-grid-bunka.obsazeno { background: rgba(200,60,60,0.16); cursor: not-allowed; }
+  .rez-grid-bunka.mimo { background: repeating-linear-gradient(135deg, rgba(0,0,0,0.02) 0 6px, rgba(0,0,0,0.05) 6px 12px); }
+  .rez-grid-bunka.selected { background: var(--terracotta) !important; }
+  .rez-legenda { display: flex; gap: 1rem; justify-content: center; margin-top: 0.7rem; font-size: 0.72rem; color: var(--text-light); flex-wrap: wrap; }
+  .rez-legenda span { display: inline-flex; align-items: center; gap: 0.3rem; }
+  .rez-legenda i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
 
   .pk-modal-overlay {
     display: none;
@@ -1887,7 +1884,12 @@
       <span class="rez-tyden-label" id="rezTydenLabel"></span>
       <button type="button" onclick="rezPosunTyden(1)">▶</button>
     </div>
-    <div id="rezKalendar" class="rez-kalendar"></div>
+    <div class="rez-grid-wrap"><div id="rezKalendar" class="rez-grid"></div></div>
+    <div class="rez-legenda">
+      <span><i style="background:var(--white);border:1px solid rgba(196,122,74,0.3)"></i> Volno</span>
+      <span><i style="background:rgba(200,60,60,0.35)"></i> Obsazeno</span>
+      <span><i style="background:var(--terracotta)"></i> Vybráno</span>
+    </div>
 
     <div id="rezFormFields" style="display:none;">
       <div class="form-row" style="margin-top:1rem;">
@@ -2317,28 +2319,48 @@ async function rezNacistTyden() {
     if (!res.ok) { kalendar.innerHTML = '<p class="rez-hint">' + (dny.chyba || 'Kalendář se nepodařilo načíst.') + '</p>'; return; }
     var NAZVY = ['Ne', 'Po', 'Út', 'St', 'Čt', 'Pá', 'So'];
     var dnesIso = new Date().toISOString().slice(0, 10);
-    kalendar.innerHTML = dny.map(function(den) {
+
+    // Sjednocený seznam všech časů napříč týdnem (různé dny mohou mít různou otevírací dobu)
+    var casySet = {};
+    dny.forEach(function(den) { den.terminy.forEach(function(t) { casySet[t.cas] = true; }); });
+    var vsechnyCasy = Object.keys(casySet).sort();
+
+    if (!vsechnyCasy.length) {
+      kalendar.innerHTML = '<p class="rez-hint" style="padding:1rem">Tento týden bohužel nemáme na vybranou masáž volný termín. Zkuste prosím jiný týden.</p>';
+      return;
+    }
+
+    var mapyDnu = dny.map(function(den) {
+      var m = {};
+      den.terminy.forEach(function(t) { m[t.cas] = t.volno; });
+      return m;
+    });
+
+    var html = '<div class="rez-grid-hlavicka rez-grid-roh"></div>';
+    dny.forEach(function(den) {
       var d = new Date(den.datum + 'T12:00:00');
       var jeDnes = den.datum === dnesIso;
-      var obsah = !den.terminy.length
-        ? '<div class="rez-den-zavreno">Zavřeno</div>'
-        : den.terminy.map(function(t) {
-            if (t.volno) return '<button type="button" class="rez-den-cas" onclick="rezVybratSlot(this, \'' + den.datum + '\', \'' + t.cas + '\')">' + t.cas + '</button>';
-            return '<button type="button" class="rez-den-cas" disabled title="Obsazeno">' + t.cas + '</button>';
-          }).join('');
-      return '<div class="rez-den-sloupec">' +
-        '<div class="rez-den-hlavicka' + (jeDnes ? ' dnes' : '') + '">' + NAZVY[d.getDay()] + '<small>' + d.getDate() + '.' + (d.getMonth() + 1) + '.</small></div>' +
-        obsah +
-      '</div>';
-    }).join('');
+      html += '<div class="rez-grid-hlavicka' + (jeDnes ? ' dnes' : '') + '">' + NAZVY[d.getDay()] + '<small>' + d.getDate() + '.' + (d.getMonth() + 1) + '.</small></div>';
+    });
+    vsechnyCasy.forEach(function(cas) {
+      var jeCelaHodina = cas.slice(3) === '00';
+      html += '<div class="rez-grid-hodina">' + (jeCelaHodina ? cas : '') + '</div>';
+      dny.forEach(function(den, i) {
+        var stav = mapyDnu[i][cas]; // true=volno, false=obsazeno, undefined=mimo otevírací dobu pro tenhle den
+        if (stav === undefined) html += '<div class="rez-grid-bunka mimo"></div>';
+        else if (stav) html += '<div class="rez-grid-bunka volno" onclick="rezVybratSlot(this,\'' + den.datum + '\',\'' + cas + '\')" title="' + cas + '"></div>';
+        else html += '<div class="rez-grid-bunka obsazeno" title="Obsazeno"></div>';
+      });
+    });
+    kalendar.innerHTML = html;
   } catch (e) {
     kalendar.innerHTML = '<p class="rez-hint">Kalendář se nepodařilo načíst, zkuste to prosím znovu.</p>';
   }
 }
 
-function rezVybratSlot(btn, datum, cas) {
-  document.querySelectorAll('.rez-den-cas.selected').forEach(function(b) { b.classList.remove('selected'); });
-  btn.classList.add('selected');
+function rezVybratSlot(bunka, datum, cas) {
+  document.querySelectorAll('.rez-grid-bunka.selected').forEach(function(b) { b.classList.remove('selected'); });
+  bunka.classList.add('selected');
   rezVybranyDatum = datum;
   rezVybranyCas = cas;
   document.getElementById('rezFormFields').style.display = 'block';
