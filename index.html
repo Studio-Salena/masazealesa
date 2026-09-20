@@ -764,6 +764,24 @@
     font-weight: 400;
     margin-top: 0.2rem;
   }
+  .rez-form-card {
+    background: var(--white);
+    border-radius: 24px;
+    padding: 2.2rem;
+    margin-top: 2.5rem;
+    text-align: left;
+    border: 1px solid rgba(196,122,74,0.15);
+    box-shadow: 0 12px 40px rgba(90,50,20,0.08);
+    scroll-margin-top: 90px;
+  }
+  .rez-form-card h3 {
+    font-family: 'Cormorant', Georgia, serif;
+    font-size: 1.5rem;
+    color: var(--brown);
+    margin-bottom: 1.2rem;
+    text-align: center;
+  }
+  @media (max-width: 600px) { .rez-form-card { padding: 1.4rem; } }
 
 
   /* ── FORMULÁŘE (rezervace online + žádost o poukaz) ── */
@@ -854,7 +872,6 @@
   .rez-grid .rez-hint { grid-column: 1 / -1; }
 
   /* Týdenní kalendář — mřížka: hodiny vlevo, dny ve sloupcích */
-  #rezModalOverlay .pk-modal { max-width: 920px; }
   .rez-grid-wrap { overflow-x: auto; border: 1px solid rgba(196,122,74,0.2); border-radius: 12px; }
   .rez-grid {
     display: grid;
@@ -1557,7 +1574,7 @@
     <li><a href="#recenze">Recenze</a></li>
     <li><a href="#faq">Časté dotazy</a></li>
     <li><a href="#kontakt">Kontakt</a></li>
-    <li><a href="#" onclick="otevritRezForm();return false;" class="nav-cta" style="animation:navPulse 3s ease-in-out infinite;">📅 Rezervovat</a></li>
+    <li><a href="#rezervace-kalendar" class="nav-cta" style="animation:navPulse 3s ease-in-out infinite;">📅 Rezervovat</a></li>
   </ul>
   <div class="hamburger" id="hamburger" onclick="toggleMenu()">
     <span></span><span></span><span></span>
@@ -1584,7 +1601,7 @@
     <h1>Zastavte se na chvilku<br><em id="hero-word">relaxace</em><span class="hero-cursor">.</span></h1>
     <p class="hero-desc">Každý den běžíme, staráme se, dáváme ze sebe všechno.<br>Přijďte si načerpat sílu — v klidném prostředí s péčí přesně pro vás. 🌸</p>
     <div class="hero-btns">
-      <a href="#" onclick="otevritRezForm();return false;" class="btn-primary">Rezervovat termín</a>
+      <a href="#rezervace-kalendar" class="btn-primary">Rezervovat termín</a>
       <a href="#masaze" class="btn-secondary">Prohlédnout masáže</a>
     </div>
   </div>
@@ -1848,7 +1865,7 @@
       </p>
 
       <div class="rezervace-options">
-        <a href="#" onclick="otevritRezForm();return false;" class="rezervace-option">
+        <a href="#rezervace-kalendar" class="rezervace-option">
           <span class="ro-icon">🗓️</span>
           <span class="ro-label">Online</span>
           <span class="ro-value">Rezervace</span>
@@ -1864,60 +1881,56 @@
           <span class="ro-value">napsat zprávu</span>
         </a>
       </div>
+
+      <div class="rez-form-card" id="rezervace-kalendar">
+        <h3>Rezervovat termín</h3>
+        <div class="form-field">
+          <label for="rezMasaz">Masáž</label>
+          <select id="rezMasaz" class="form-select" onchange="rezNacistTyden()">
+            <option value="">Načítám ceník…</option>
+          </select>
+        </div>
+
+        <div class="rez-tyden-nav">
+          <button type="button" onclick="rezPosunTyden(-1)" id="rezTydenZpet">◀</button>
+          <span class="rez-tyden-label" id="rezTydenLabel"></span>
+          <button type="button" onclick="rezPosunTyden(1)">▶</button>
+        </div>
+        <div class="rez-grid-wrap"><div id="rezKalendar" class="rez-grid"></div></div>
+        <div class="rez-legenda">
+          <span><i style="background:var(--white);border:1px solid rgba(196,122,74,0.3)"></i> Volno</span>
+          <span><i style="background:rgba(200,60,60,0.35)"></i> Obsazeno</span>
+          <span><i style="background:var(--terracotta)"></i> Vybráno</span>
+        </div>
+
+        <div id="rezFormFields" style="display:none;">
+          <div class="form-row" style="margin-top:1rem;">
+            <div class="form-field">
+              <label for="rezJmeno">Jméno a příjmení*</label>
+              <input type="text" id="rezJmeno" class="form-input" placeholder="Jana Nováková">
+            </div>
+            <div class="form-field">
+              <label for="rezTelefon">Telefon*</label>
+              <input type="tel" id="rezTelefon" class="form-input" placeholder="736 734 951">
+            </div>
+            <div class="form-field">
+              <label for="rezEmail">E-mail</label>
+              <input type="email" id="rezEmail" class="form-input" placeholder="jana@example.cz">
+            </div>
+            <div class="form-field form-field-full">
+              <label for="rezPoznamka">Poznámka</label>
+              <textarea id="rezPoznamka" class="form-textarea" placeholder="Nepovinné"></textarea>
+            </div>
+          </div>
+          <div style="text-align:center; margin-top:1.2rem;">
+            <button type="button" id="rezSubmitBtn" class="btn-gold" onclick="rezOdeslat()">Odeslat rezervaci</button>
+          </div>
+        </div>
+        <p id="rezZprava" class="form-msg"></p>
+      </div>
     </div>
   </div>
 </section>
-
-<!-- MODAL: Rezervace -->
-<div id="rezModalOverlay" class="pk-modal-overlay" onclick="if(event.target===this) zavritRezForm()">
-  <div class="pk-modal">
-    <button type="button" class="pk-modal-close" onclick="zavritRezForm()" aria-label="Zavřít">✕</button>
-    <h3>Rezervovat termín</h3>
-    <div class="form-field">
-      <label for="rezMasaz">Masáž</label>
-      <select id="rezMasaz" class="form-select" onchange="rezNacistTyden()">
-        <option value="">Načítám ceník…</option>
-      </select>
-    </div>
-
-    <div class="rez-tyden-nav">
-      <button type="button" onclick="rezPosunTyden(-1)" id="rezTydenZpet">◀</button>
-      <span class="rez-tyden-label" id="rezTydenLabel"></span>
-      <button type="button" onclick="rezPosunTyden(1)">▶</button>
-    </div>
-    <div class="rez-grid-wrap"><div id="rezKalendar" class="rez-grid"></div></div>
-    <div class="rez-legenda">
-      <span><i style="background:var(--white);border:1px solid rgba(196,122,74,0.3)"></i> Volno</span>
-      <span><i style="background:rgba(200,60,60,0.35)"></i> Obsazeno</span>
-      <span><i style="background:var(--terracotta)"></i> Vybráno</span>
-    </div>
-
-    <div id="rezFormFields" style="display:none;">
-      <div class="form-row" style="margin-top:1rem;">
-        <div class="form-field">
-          <label for="rezJmeno">Jméno a příjmení*</label>
-          <input type="text" id="rezJmeno" class="form-input" placeholder="Jana Nováková">
-        </div>
-        <div class="form-field">
-          <label for="rezTelefon">Telefon*</label>
-          <input type="tel" id="rezTelefon" class="form-input" placeholder="736 734 951">
-        </div>
-        <div class="form-field">
-          <label for="rezEmail">E-mail</label>
-          <input type="email" id="rezEmail" class="form-input" placeholder="jana@example.cz">
-        </div>
-        <div class="form-field form-field-full">
-          <label for="rezPoznamka">Poznámka</label>
-          <textarea id="rezPoznamka" class="form-textarea" placeholder="Nepovinné"></textarea>
-        </div>
-      </div>
-      <div style="text-align:center; margin-top:1.2rem;">
-        <button type="button" id="rezSubmitBtn" class="btn-gold" onclick="rezOdeslat()">Odeslat rezervaci</button>
-      </div>
-    </div>
-    <p id="rezZprava" class="form-msg"></p>
-  </div>
-</div>
 
 <!-- KONTAKT -->
 
@@ -2258,7 +2271,7 @@ function zavritPkForm() {
   document.body.style.overflow = '';
 }
 document.addEventListener('keydown', function(e) {
-  if (e.key === 'Escape') { zavritPkForm(); zavritRezForm(); }
+  if (e.key === 'Escape') zavritPkForm();
 });
 
 // ── REZERVACE ONLINE (týdenní kalendář) ──
@@ -2266,16 +2279,10 @@ var rezVybranyCas = null;
 var rezVybranyDatum = null;
 var rezTydenZacatek = null; // Date — pondělí aktuálně zobrazeného týdne
 
-function otevritRezForm() {
-  document.getElementById('rezModalOverlay').classList.add('open');
-  document.body.style.overflow = 'hidden';
+document.addEventListener('DOMContentLoaded', function() {
   rezTydenZacatek = rezPondeliTydne(new Date());
   rezNacistTyden();
-}
-function zavritRezForm() {
-  document.getElementById('rezModalOverlay').classList.remove('open');
-  document.body.style.overflow = '';
-}
+});
 
 function rezPondeliTydne(d) {
   var den = d.getDay(); // 0=neděle..6=sobota
