@@ -145,7 +145,6 @@ tr:hover td{background:#fffaf5}
 }
 .pp-text-shadow{text-shadow:0 0 4px rgba(255,255,255,0.9), 0 0 8px rgba(255,255,255,0.7)}
 .pp-logo-overlay{position:absolute;text-align:center;line-height:1.15}
-.pp-logo-text{font-family:'Dancing Script',cursive;font-size:1.05rem;color:var(--brown)}
 .pp-title-text{font-size:0.62rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--gold);font-weight:700;margin-top:1px}
 .pp-radek{
   position:absolute;
@@ -934,21 +933,22 @@ function eanBarcodeSvg(ean13, barH) {
 const POUKAZ_SABLONY = {
   klasicky: {
     obrazek: 'assets/poukaz.jpg',
-    pomer: '916/520',
+    pomer: '795/532',
     logo: false,
-    box: { left: '30%', right: '8%' },
-    radky: { pro: '50%', hodnota: '58%', platnost: '66%' },
-    spodek: { top: '78%', left: '34%', right: '14%' }
+    stin: true,
+    box: { left: '10%', right: '10%' },
+    radky: { pro: '53%', hodnota: '60%', platnost: '67%' },
+    spodek: { top: '78%', left: '35%', right: '35%' }
   },
   vanocni: {
     obrazek: 'assets/vanocni-poukaz.jpg',
-    pomer: '1024/558',
+    pomer: '1024/559',
     logo: true,
     stin: true,
-    logoBox: { top: '14%', left: '40%', right: '6%' },
-    box: { left: '40%', right: '6%' },
-    radky: { pro: '38%', hodnota: '47%', platnost: '56%' },
-    spodek: { top: '66%', left: '40%', right: '8%' }
+    logoBox: { top: '8%', left: '32%', right: '15%' },
+    box: { left: '32%', right: '15%' },
+    radky: { pro: '34%', hodnota: '44%', platnost: '54%' },
+    spodek: { top: '64%', left: '36%', right: '18%' }
   }
 };
 
@@ -975,7 +975,7 @@ function vykreslitNahledPoukazu() {
   const stin = s.stin ? ' pp-text-shadow' : '';
   card.innerHTML = `
     ${s.logo ? `<div class="pp-logo-overlay${stin}" style="top:${s.logoBox.top};left:${s.logoBox.left};right:${s.logoBox.right}">
-      <div class="pp-logo-text">🌸 Masáže Alesa</div>
+      <img src="assets/logo.png" alt="Masáže Alesa" style="max-width:100%;max-height:44px;display:block;margin:0 auto">
       <div class="pp-title-text">Dárkový poukaz</div>
     </div>` : ''}
     <div class="pp-radek${stin}" style="top:${s.radky.pro};left:${s.box.left};right:${s.box.right}">Pro: <strong>${p.pro_koho || p.kupujici_jmeno || ''}</strong></div>
