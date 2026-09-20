@@ -2276,12 +2276,14 @@ function rezPosunTyden(smer) {
   rezNacistTyden();
 }
 
-async function rezNacistTyden() {
+async function rezNacistTyden(zachovatZpravu) {
   rezVybranyCas = null;
   rezVybranyDatum = null;
   document.getElementById('rezFormFields').style.display = 'none';
-  document.getElementById('rezZprava').textContent = '';
-  document.getElementById('rezZprava').className = 'form-msg';
+  if (!zachovatZpravu) {
+    document.getElementById('rezZprava').textContent = '';
+    document.getElementById('rezZprava').className = 'form-msg';
+  }
   var cenikId = document.getElementById('rezMasaz').value;
   var kalendar = document.getElementById('rezKalendar');
   if (!rezTydenZacatek) rezTydenZacatek = rezPondeliTydne(new Date());
@@ -2371,7 +2373,10 @@ async function rezOdeslat() {
     });
     var vysledek = await res.json();
     if (!res.ok) { zprava.textContent = vysledek.chyba || 'Rezervaci se nepodařilo odeslat.'; zprava.className = 'form-msg err'; return; }
-    zprava.textContent = '🌸 Rezervace odeslána! Ozveme se vám s potvrzením.';
+    var r = vysledek.rezervace;
+    var [rok, mesic, den] = r.datum.split('-');
+    var datumCz = Number(den) + '. ' + Number(mesic) + '. ' + rok;
+    zprava.textContent = '🌸 Rezervace na ' + datumCz + ' od ' + r.cas_od.slice(0, 5) + ' do ' + r.cas_do.slice(0, 5) + ' byla odeslána! Ozveme se vám s potvrzením.';
     zprava.className = 'form-msg ok';
     document.getElementById('rezJmeno').value = '';
     document.getElementById('rezTelefon').value = '';
@@ -2380,7 +2385,7 @@ async function rezOdeslat() {
     document.getElementById('rezFormFields').style.display = 'none';
     rezVybranyCas = null;
     rezVybranyDatum = null;
-    rezNacistTyden();
+    rezNacistTyden(true);
   } catch (e) {
     zprava.textContent = 'Rezervaci se nepodařilo odeslat, zkuste to prosím znovu nebo zavolejte.';
     zprava.className = 'form-msg err';

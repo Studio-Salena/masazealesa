@@ -61,6 +61,26 @@ function vygenerovatEan() {
 function casNaMinuty(cas) { const [h, m] = cas.split(':').map(Number); return h * 60 + m; }
 function minutyNaCas(min) { const h = Math.floor(min / 60), m = min % 60; return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0'); }
 
+// Pošle e-mail přes Resend (RESEND_API_KEY v env). Nikdy nevyhazuje výjimku, jen vrátí true/false.
+async function odeslatEmail(to, subject, html) {
+  if (!process.env.RESEND_API_KEY || !to) return false;
+  const from = process.env.RESEND_FROM || 'Masáže Alesa <onboarding@resend.dev>';
+  try {
+    const resp = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from, to, subject, html })
+    });
+    return resp.ok;
+  } catch {
+    return false;
+  }
+}
+function formatDatumCz(datumIso) {
+  const [rok, mesic, den] = datumIso.split('-');
+  return `${Number(den)}. ${Number(mesic)}. ${rok}`;
+}
+
 // ── LOGIN (admin) ──
 app.post('/api/login', (req, res) => {
   const { heslo } = req.body || {};
@@ -173,6 +193,21 @@ app.post('/api/rezervace', async (req, res) => {
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'cekajici',$10) RETURNING *`,
       [cenik_id, datum, cas_od, cas_do, jmeno, telefon, email || null, nazevMasaze, poznamka || null, polozkaCeniku.cena]
     );
+
+    if (email) {
+      odeslatEmail(email, 'Rezervace přijata – Masáže Alesa', `
+        <p>Dobrý den ${jmeno},</p>
+        <p>děkujeme za rezervaci. Přijali jsme ji a brzy vám ji telefonicky nebo e-mailem potvrdíme.</p>
+        <p>
+          <strong>Masáž:</strong> ${nazevMasaze}<br>
+          <strong>Datum:</strong> ${formatDatumCz(datum)}<br>
+          <strong>Čas:</strong> ${cas_od}–${cas_do}
+        </p>
+        <p>V případě potřeby nás prosím kontaktujte na tel. 736 734 951.</p>
+        <p>🌸 Masáže Alesa</p>
+      `);
+    }
+
     res.json({ ok: true, rezervace });
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
@@ -541,21 +576,13 @@ app.post('/api/admin/newsletter/odeslat', async (req, res) => {
     );
     if (!odberatele.length) return res.status(400).json({ chyba: 'Nejsou žádné aktivní odběratelky.' });
 
-    const from = process.env.RESEND_FROM || 'Masáže Alesa <onboarding@resend.dev>';
     let odeslano = 0;
     for (const o of odberatele) {
       const odhlasitUrl = `${API_URL}/api/newsletter/odhlasit?token=${o.odhlasovaci_token}`;
       const html = `${obsah}<hr style="margin-top:30px;border:none;border-top:1px solid #ddd">
         <p style="font-size:12px;color:#999">Nechcete už tyto e-maily dostávat?
         <a href="${odhlasitUrl}">Odhlásit se z newsletteru</a></p>`;
-      try {
-        const resp = await fetch('https://api.resend.com/emails', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ from, to: o.email, subject: predmet, html })
-        });
-        if (resp.ok) odeslano++;
-      } catch { /* jednotlivé selhání nepřeruší zbytek rozesílání */ }
+      if (await odeslatEmail(o.email, predmet, html)) odeslano++;
     }
 
     await db.query(
