@@ -246,9 +246,25 @@ tr:hover td{background:#fffaf5}
       <div class="table-wrap">
         <div class="table-header">
           <h3>🕐 Pracovní doba (podle ní se počítají volné termíny na webu)</h3>
-          <span style="font-size:0.72rem;color:var(--text-light)">Mezi masážemi se automaticky nechává 30minutová mezera</span>
+          <span style="font-size:0.72rem;color:var(--text-light)">Mezera mezi masážemi se nastavuje níž v sekci Nastavení provozu</span>
         </div>
         <div id="pracovniDobaTable"><div class="loading">Načítám...</div></div>
+      </div>
+      <div class="table-wrap">
+        <div class="table-header"><h3>⚙️ Nastavení provozu</h3></div>
+        <div style="padding:16px;display:flex;align-items:center;gap:10px">
+          <label style="font-size:0.85rem;color:var(--text-light)">Mezera mezi masážemi (na úklid a vyvětrání)</label>
+          <input type="number" id="nastaveniBuffer" min="0" step="5" style="width:80px;border:1px solid var(--tan-light);border-radius:6px;padding:6px 8px">
+          <span style="font-size:0.85rem;color:var(--text-light)">minut</span>
+          <button class="btn btn-green btn-sm" onclick="ulozitBuffer()">💾 Uložit</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <div class="table-header">
+          <h3>🏖️ Výjimky provozu (dovolená, svátky)</h3>
+          <button class="btn btn-primary btn-sm" onclick="openModal('modalNovaVyjimka')">+ Přidat výjimku</button>
+        </div>
+        <div id="vyjimkyTable"><div class="loading">Načítám...</div></div>
       </div>
       <div class="table-wrap">
         <div class="table-header">
@@ -257,6 +273,8 @@ tr:hover td{background:#fffaf5}
             <span class="pill active" onclick="filtrovatRez('vse',this)">Vše</span>
             <span class="pill" onclick="filtrovatRez('cekajici',this)">⏳ Čekající</span>
             <span class="pill" onclick="filtrovatRez('potvrzena',this)">✅ Potvrzené</span>
+            <span class="pill" onclick="filtrovatRez('dokoncena',this)">🌸 Dokončené</span>
+            <span class="pill" onclick="filtrovatRez('nedostavila_se',this)">🚫 Nedostavila se</span>
             <span class="pill" onclick="filtrovatRez('zrusena',this)">❌ Zrušené</span>
           </div>
         </div>
@@ -537,10 +555,31 @@ tr:hover td{background:#fffaf5}
       <div class="form-group"><label>Telefon</label><input type="text" id="zkTelefon" placeholder="777 123 456"></div>
       <div class="form-group"><label>E-mail</label><input type="text" id="zkEmail" placeholder="nepovinné"></div>
     </div>
+    <div class="form-grid-2">
+      <div class="form-group"><label>Alergie (např. na oleje)</label><input type="text" id="zkAlergie" placeholder="nepovinné"></div>
+      <div class="form-group"><label>Preference (síla tlaku apod.)</label><input type="text" id="zkPreference" placeholder="nepovinné"></div>
+    </div>
     <div class="form-group"><label>Poznámka</label><input type="text" id="zkPoznamka" placeholder="nepovinné"></div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal('modalNovaZakaznice')">Zrušit</button>
       <button class="btn btn-primary" onclick="pridatZakaznici()">Přidat</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Nová výjimka provozu -->
+<div class="modal-overlay" id="modalNovaVyjimka">
+  <div class="modal">
+    <h3>+ Přidat výjimku provozu</h3>
+    <div id="novaVyjimkaMsg"></div>
+    <div class="form-grid-2">
+      <div class="form-group"><label>Od</label><input type="date" id="vyDatumOd"></div>
+      <div class="form-group"><label>Do</label><input type="date" id="vyDatumDo"></div>
+    </div>
+    <div class="form-group"><label>Popis</label><input type="text" id="vyPopis" placeholder="např. Dovolená"></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modalNovaVyjimka')">Zrušit</button>
+      <button class="btn btn-primary" onclick="pridatVyjimku()">Přidat</button>
     </div>
   </div>
 </div>
@@ -654,6 +693,8 @@ async function loadRezervace() {
     document.getElementById('rezervaceTable').innerHTML = '<div class="error-msg">Chyba načítání — zkontroluj, že je vyplněná adresa API a backend běží.</div>';
   }
   loadPracovniDoba();
+  loadNastaveni();
+  loadVyjimky();
 }
 
 async function loadPracovniDoba() {
@@ -682,23 +723,83 @@ async function ulozitPracovniDobu(den) {
   await adminFetch(API + '/admin/pracovni-doba/' + den, { method: 'PUT', body: JSON.stringify({ otevreno_od, otevreno_do, pauza_od, pauza_do, aktivni }) });
 }
 
+// ── NASTAVENÍ PROVOZU (buffer) ──
+async function loadNastaveni() {
+  try {
+    const nastaveni = await adminFetch(API + '/admin/nastaveni').then(r => r.json());
+    const buffer = nastaveni.find(n => n.klic === 'buffer_minut');
+    document.getElementById('nastaveniBuffer').value = buffer ? buffer.hodnota : 30;
+  } catch (e) { /* necháme prázdné, chyba se ukáže až při uložení */ }
+}
+async function ulozitBuffer() {
+  const hodnota = document.getElementById('nastaveniBuffer').value;
+  if (!hodnota) return;
+  await adminFetch(API + '/admin/nastaveni/buffer_minut', { method: 'PUT', body: JSON.stringify({ hodnota }) });
+}
+
+// ── VÝJIMKY PROVOZU (dovolená, svátky) ──
+let posledniVyjimky = [];
+async function loadVyjimky() {
+  try {
+    posledniVyjimky = await adminFetch(API + '/admin/vyjimky').then(r => r.json());
+    if (!posledniVyjimky.length) { document.getElementById('vyjimkyTable').innerHTML = '<div class="empty">Žádné výjimky</div>'; return; }
+    document.getElementById('vyjimkyTable').innerHTML = `
+      <table><thead><tr><th>Od</th><th>Do</th><th>Popis</th><th></th></tr></thead>
+      <tbody>${posledniVyjimky.map(v => `<tr>
+        <td>${new Date(v.datum_od).toLocaleDateString('cs-CZ')}</td>
+        <td>${new Date(v.datum_do).toLocaleDateString('cs-CZ')}</td>
+        <td>${v.popis || '—'}</td>
+        <td><button class="btn btn-red btn-sm" onclick="smazatVyjimku(${v.id})">🗑️</button></td>
+      </tr>`).join('')}</tbody></table>`;
+  } catch (e) { document.getElementById('vyjimkyTable').innerHTML = '<div class="error-msg">Chyba načítání.</div>'; }
+}
+async function pridatVyjimku() {
+  const datum_od = document.getElementById('vyDatumOd').value;
+  const datum_do = document.getElementById('vyDatumDo').value;
+  const popis = document.getElementById('vyPopis').value.trim();
+  const msg = document.getElementById('novaVyjimkaMsg');
+  if (!datum_od || !datum_do) { msg.innerHTML = '<div class="error-msg">Vyplňte datum od a do.</div>'; return; }
+  try {
+    const res = await adminFetch(API + '/admin/vyjimky', { method: 'POST', body: JSON.stringify({ datum_od, datum_do, popis }) });
+    if (res.ok) {
+      closeModal('modalNovaVyjimka');
+      document.getElementById('vyDatumOd').value = ''; document.getElementById('vyDatumDo').value = ''; document.getElementById('vyPopis').value = '';
+      msg.innerHTML = '';
+      loadVyjimky();
+    } else msg.innerHTML = '<div class="error-msg">Nepodařilo se přidat.</div>';
+  } catch (e) { msg.innerHTML = '<div class="error-msg">Nejde se připojit k serveru.</div>'; }
+}
+async function smazatVyjimku(id) {
+  if (!confirm('Smazat tuto výjimku?')) return;
+  await adminFetch(API + '/admin/vyjimky/' + id, { method: 'DELETE' });
+  loadVyjimky();
+}
+
 function vykreslitRezervace(filtr) {
   let seznam = [...vsechnyRezervace];
   if (filtr !== 'vse') seznam = seznam.filter(r => r.stav === filtr);
   if (!seznam.length) { document.getElementById('rezervaceTable').innerHTML = '<div class="empty">Žádné rezervace</div>'; return; }
-  const stavBadge = { cekajici: '<span class="badge badge-cekajici">⏳ Čeká</span>', potvrzena: '<span class="badge badge-ok">✅ Potvrzena</span>', zrusena: '<span class="badge badge-zruseno">❌ Zrušena</span>' };
+  const stavBadge = {
+    cekajici: '<span class="badge badge-cekajici">⏳ Čeká</span>',
+    potvrzena: '<span class="badge badge-ok">✅ Potvrzena</span>',
+    dokoncena: '<span class="badge badge-ok">🌸 Dokončena</span>',
+    nedostavila_se: '<span class="badge badge-zruseno">🚫 Nedostavila se</span>',
+    zrusena: '<span class="badge badge-zruseno">❌ Zrušena</span>'
+  };
   document.getElementById('rezervaceTable').innerHTML = `
     <table><thead><tr><th>Termín</th><th>Jméno</th><th>Kontakt</th><th>Masáž</th><th>Stav</th><th>Akce</th></tr></thead>
     <tbody>${seznam.map(r => `<tr>
       <td>${new Date(r.datum).toLocaleDateString('cs-CZ')} ${r.cas_od.slice(0,5)}–${r.cas_do.slice(0,5)}</td>
       <td>${r.jmeno}</td>
       <td>${r.telefon}${r.email ? '<br><small>' + r.email + '</small>' : ''}</td>
-      <td>${r.masaz}</td>
+      <td>${r.masaz}${r.poukaz_kod ? '<br><small>🎁 ' + r.poukaz_kod + '</small>' : ''}${r.poznamka ? '<br><small style="color:var(--text-light)">' + r.poznamka + '</small>' : ''}</td>
       <td>${stavBadge[r.stav] || r.stav}</td>
-      <td style="display:flex;gap:4px">
-        ${r.stav !== 'potvrzena' ? `<button class="btn btn-green btn-sm" onclick="zmenitStavRez(${r.id},'potvrzena')">✅</button>` : ''}
-        ${r.stav !== 'zrusena' ? `<button class="btn btn-red btn-sm" onclick="zmenitStavRez(${r.id},'zrusena')">❌</button>` : ''}
-        <button class="btn btn-red btn-sm" onclick="smazatRezervaci(${r.id})">🗑️</button>
+      <td style="display:flex;gap:4px;flex-wrap:wrap">
+        ${r.stav !== 'potvrzena' ? `<button class="btn btn-green btn-sm" onclick="zmenitStavRez(${r.id},'potvrzena')" title="Potvrdit">✅</button>` : ''}
+        ${r.stav !== 'dokoncena' ? `<button class="btn btn-green btn-sm" onclick="zmenitStavRez(${r.id},'dokoncena')" title="Dokončeno">🌸</button>` : ''}
+        ${r.stav !== 'nedostavila_se' ? `<button class="btn btn-red btn-sm" onclick="zmenitStavRez(${r.id},'nedostavila_se')" title="Nedostavila se">🚫</button>` : ''}
+        ${r.stav !== 'zrusena' ? `<button class="btn btn-red btn-sm" onclick="zmenitStavRez(${r.id},'zrusena')" title="Zrušit">❌</button>` : ''}
+        <button class="btn btn-red btn-sm" onclick="smazatRezervaci(${r.id})" title="Smazat">🗑️</button>
       </td>
     </tr>`).join('')}</tbody></table>`;
 }
@@ -1012,7 +1113,7 @@ function vykreslitZakazniky() {
   const seznam = posledniZakaznici.filter(z => !hledat || (z.jmeno || '').toLowerCase().includes(hledat) || z.telefon.includes(hledat));
   if (!seznam.length) { document.getElementById('zakazniciTable').innerHTML = '<div class="empty">Žádné zákaznice nenalezeny</div>'; return; }
   document.getElementById('zakazniciTable').innerHTML = `
-    <table><thead><tr><th>Jméno</th><th>Kontakt</th><th>Návštěvy</th><th>Celkem utraceno</th><th>Poslední návštěva</th><th>Aktivní poukazy</th><th>Poznámka</th></tr></thead>
+    <table><thead><tr><th>Jméno</th><th>Kontakt</th><th>Návštěvy</th><th>Celkem utraceno</th><th>Poslední návštěva</th><th>Aktivní poukazy</th><th>Poznámka / alergie / preference</th></tr></thead>
     <tbody>${seznam.map(z => `<tr>
       <td>${z.jmeno || '—'}</td>
       <td>${z.telefon}${z.email ? '<br><small>' + z.email + '</small>' : ''}</td>
@@ -1020,30 +1121,44 @@ function vykreslitZakazniky() {
       <td><strong>${Number(z.celkemUtraceno).toLocaleString('cs-CZ')} Kč</strong></td>
       <td>${z.posledniNavstiva ? new Date(z.posledniNavstiva).toLocaleDateString('cs-CZ') : '—'}</td>
       <td>${z.aktivniPoukazy > 0 ? '🎁 ' + z.aktivniPoukazy : '—'}</td>
-      <td style="display:flex;gap:4px">
-        <input type="text" value="${(z.poznamka || '').replace(/"/g, '&quot;')}" placeholder="Poznámka…" style="border:1px solid var(--tan-light);border-radius:6px;padding:5px 8px;width:140px;font-family:'Nunito',sans-serif">
-        <button class="btn btn-green btn-sm" onclick="ulozitPoznamkuZakaznice(this,'${z.telefon.replace(/'/g, "\\'")}')">💾</button>
-        <button class="btn btn-red btn-sm" onclick="smazatZakaznici('${z.telefon.replace(/'/g, "\\'")}')">🗑️</button>
+      <td>
+        <div style="display:flex;flex-direction:column;gap:4px;min-width:260px">
+          <input type="text" class="zk-poznamka" value="${(z.poznamka || '').replace(/"/g, '&quot;')}" placeholder="Poznámka…" style="border:1px solid var(--tan-light);border-radius:6px;padding:5px 8px;font-family:'Nunito',sans-serif">
+          <div style="display:flex;gap:4px">
+            <input type="text" class="zk-alergie" value="${(z.alergie || '').replace(/"/g, '&quot;')}" placeholder="Alergie…" style="border:1px solid var(--tan-light);border-radius:6px;padding:5px 8px;font-family:'Nunito',sans-serif;flex:1">
+            <input type="text" class="zk-preference" value="${(z.preference || '').replace(/"/g, '&quot;')}" placeholder="Preference…" style="border:1px solid var(--tan-light);border-radius:6px;padding:5px 8px;font-family:'Nunito',sans-serif;flex:1">
+          </div>
+          <div style="display:flex;gap:4px">
+            <button class="btn btn-green btn-sm" onclick="ulozitZakaznici(this,'${z.telefon.replace(/'/g, "\\'")}')">💾 Uložit</button>
+            <button class="btn btn-red btn-sm" onclick="smazatZakaznici('${z.telefon.replace(/'/g, "\\'")}')">🗑️</button>
+          </div>
+        </div>
       </td>
     </tr>`).join('')}</tbody></table>`;
 }
-async function ulozitPoznamkuZakaznice(btn, telefon) {
-  const poznamka = btn.previousElementSibling.value;
-  await adminFetch(API + '/admin/zakaznici/poznamka', { method: 'PUT', body: JSON.stringify({ telefon, poznamka }) });
+async function ulozitZakaznici(btn, telefon) {
+  const td = btn.closest('td');
+  const poznamka = td.querySelector('.zk-poznamka').value;
+  const alergie = td.querySelector('.zk-alergie').value;
+  const preference = td.querySelector('.zk-preference').value;
+  await adminFetch(API + '/admin/zakaznici/poznamka', { method: 'PUT', body: JSON.stringify({ telefon, poznamka, alergie, preference }) });
 }
 async function pridatZakaznici() {
   const jmeno = document.getElementById('zkJmeno').value.trim();
   const telefon = document.getElementById('zkTelefon').value.trim();
   const email = document.getElementById('zkEmail').value.trim();
+  const alergie = document.getElementById('zkAlergie').value.trim();
+  const preference = document.getElementById('zkPreference').value.trim();
   const poznamka = document.getElementById('zkPoznamka').value.trim();
   const msg = document.getElementById('novaZakazniceMsg');
   if (!telefon) { msg.innerHTML = '<div class="error-msg">Vyplňte telefon.</div>'; return; }
   try {
-    const res = await adminFetch(API + '/admin/zakaznici', { method: 'POST', body: JSON.stringify({ jmeno, telefon, email, poznamka }) });
+    const res = await adminFetch(API + '/admin/zakaznici', { method: 'POST', body: JSON.stringify({ jmeno, telefon, email, poznamka, alergie, preference }) });
     if (res.ok) {
       closeModal('modalNovaZakaznice');
       document.getElementById('zkJmeno').value = ''; document.getElementById('zkTelefon').value = '';
       document.getElementById('zkEmail').value = ''; document.getElementById('zkPoznamka').value = '';
+      document.getElementById('zkAlergie').value = ''; document.getElementById('zkPreference').value = '';
       msg.innerHTML = '';
       loadZakaznici();
     } else msg.innerHTML = '<div class="error-msg">Nepodařilo se přidat.</div>';

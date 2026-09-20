@@ -31,7 +31,15 @@ const db = new Pool({
 db.on('error', (err) => console.error('Neočekávaná chyba databázového spojení:', err.message));
 
 const ADMIN_HESLO = process.env.ADMIN_HESLO;
-const MEZERA_MIN = 30; // mezera mezi masážemi v minutách
+const CRON_KLIC = process.env.CRON_KLIC; // sdílené heslo pro denní úlohu (připomínky, žádosti o recenzi)
+
+async function ziskatBufferMinut() {
+  try {
+    const { rows: [n] } = await db.query("SELECT hodnota FROM nastaveni WHERE klic = 'buffer_minut'");
+    const cislo = n ? parseInt(n.hodnota, 10) : NaN;
+    return Number.isFinite(cislo) ? cislo : 30;
+  } catch { return 30; }
+}
 
 function vyzadovatAdmina(req, res, next) {
   const heslo = req.headers['x-admin-heslo'] || '';
@@ -102,13 +110,18 @@ app.get('/api/cenik', async (req, res) => {
 // bez jakýchkoliv osobních údajů — jen čas.
 async function spocitatTerminyDne(datum, delka, pd) {
   if (!pd || !pd.aktivni) return [];
+  const { rows: [vyjimka] } = await db.query(
+    'SELECT 1 FROM provozni_vyjimky WHERE $1 BETWEEN datum_od AND datum_do LIMIT 1', [datum]
+  );
+  if (vyjimka) return [];
+  const bufferMin = await ziskatBufferMinut();
   const { rows: existujici } = await db.query(
     "SELECT cas_od, cas_do FROM rezervace WHERE datum = $1 AND stav <> 'zrusena'", [datum]
   );
   // Obsazené intervaly rozšířené o mezeru na obě strany
   const obsazeno = existujici.map(r => ({
-    od: casNaMinuty(r.cas_od) - MEZERA_MIN,
-    do: casNaMinuty(r.cas_do) + MEZERA_MIN
+    od: casNaMinuty(r.cas_od) - bufferMin,
+    do: casNaMinuty(r.cas_do) + bufferMin
   }));
   const otevrenoOd = casNaMinuty(pd.otevreno_od);
   const otevrenoDo = casNaMinuty(pd.otevreno_do);
@@ -167,7 +180,7 @@ app.get('/api/rezervace/kalendar', async (req, res) => {
 
 // Vytvoření rezervace klientkou
 app.post('/api/rezervace', async (req, res) => {
-  const { datum, cas_od, jmeno, telefon, email, cenik_id, poznamka } = req.body || {};
+  const { datum, cas_od, jmeno, telefon, email, cenik_id, poznamka, poukaz_kod } = req.body || {};
   if (!datum || !cas_od || !jmeno || !telefon || !cenik_id) {
     return res.status(400).json({ chyba: 'Vyplňte prosím jméno, telefon, masáž, datum a čas.' });
   }
@@ -176,25 +189,42 @@ app.post('/api/rezervace', async (req, res) => {
     if (!polozkaCeniku) return res.status(404).json({ chyba: 'Tato masáž nebyla v ceníku nalezena.' });
     if (!polozkaCeniku.rezervovatelna) return res.status(400).json({ chyba: 'Na tuto položku nelze rezervovat online.' });
 
+    const { rows: [vyjimka] } = await db.query(
+      'SELECT 1 FROM provozni_vyjimky WHERE $1 BETWEEN datum_od AND datum_do LIMIT 1', [datum]
+    );
+    if (vyjimka) return res.status(400).json({ chyba: 'V tento den bohužel nerezervujeme (dovolená/svátek), vyberte prosím jiné datum.' });
+
     const zacatek = casNaMinuty(cas_od);
     const konec = zacatek + polozkaCeniku.delka_min;
     const cas_do = minutyNaCas(konec);
     const nazevMasaze = polozkaCeniku.skupina + ' – ' + polozkaCeniku.varianta;
 
     // Znovu ověřit kolizi (ochrana proti dvěma klientkám, co kliknou zároveň)
+    const bufferMin = await ziskatBufferMinut();
     const { rows: existujici } = await db.query(
       "SELECT cas_od, cas_do FROM rezervace WHERE datum = $1 AND stav <> 'zrusena'", [datum]
     );
     const koliduje = existujici.some(r => {
-      const oOd = casNaMinuty(r.cas_od) - MEZERA_MIN, oDo = casNaMinuty(r.cas_do) + MEZERA_MIN;
+      const oOd = casNaMinuty(r.cas_od) - bufferMin, oDo = casNaMinuty(r.cas_do) + bufferMin;
       return zacatek < oDo && konec > oOd;
     });
     if (koliduje) return res.status(409).json({ chyba: 'Tento termín je již obsazený (nebo příliš blízko jiné rezervaci), vyberte prosím jiný.' });
 
+    let poukazPoznamka = '';
+    if (poukaz_kod && poukaz_kod.trim()) {
+      const { rows: [poukaz] } = await db.query(
+        "SELECT * FROM poukazy WHERE (kod = $1 OR ean = $1) AND stav = 'aktivni'", [poukaz_kod.trim()]
+      );
+      poukazPoznamka = poukaz
+        ? ` Poukaz ${poukaz.kod} ověřen (zůstatek ${poukaz.zustatek} Kč).`
+        : ` Pozor: zadaný poukaz "${poukaz_kod.trim()}" nebyl nalezen nebo není aktivní — ověřit ručně.`;
+    }
+
+    const celaPoznamka = ((poznamka || '') + poukazPoznamka).trim() || null;
     const { rows: [rezervace] } = await db.query(
-      `INSERT INTO rezervace (cenik_id, datum, cas_od, cas_do, jmeno, telefon, email, masaz, poznamka, stav, cena)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'cekajici',$10) RETURNING *`,
-      [cenik_id, datum, cas_od, cas_do, jmeno, telefon, email || null, nazevMasaze, poznamka || null, polozkaCeniku.cena]
+      `INSERT INTO rezervace (cenik_id, datum, cas_od, cas_do, jmeno, telefon, email, masaz, poznamka, poukaz_kod, stav, cena)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'cekajici',$11) RETURNING *`,
+      [cenik_id, datum, cas_od, cas_do, jmeno, telefon, email || null, nazevMasaze, celaPoznamka, poukaz_kod || null, polozkaCeniku.cena]
     );
 
     if (email) {
@@ -297,7 +327,7 @@ app.get('/api/admin/rezervace', async (req, res) => {
 
 app.patch('/api/admin/rezervace/:id/stav', async (req, res) => {
   const { stav } = req.body || {};
-  if (!['cekajici', 'potvrzena', 'zrusena'].includes(stav)) {
+  if (!['cekajici', 'potvrzena', 'dokoncena', 'nedostavila_se', 'zrusena'].includes(stav)) {
     return res.status(400).json({ chyba: 'Neplatný stav.' });
   }
   try {
@@ -328,6 +358,50 @@ app.put('/api/admin/pracovni-doba/:den', async (req, res) => {
       'UPDATE pracovni_doba SET otevreno_od = $1, otevreno_do = $2, pauza_od = $3, pauza_do = $4, aktivni = $5 WHERE den_v_tydnu = $6',
       [otevreno_od, otevreno_do, pauza_od || null, pauza_do || null, aktivni, req.params.den]
     );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
+// -- Nastavení (klíč/hodnota) --
+app.get('/api/admin/nastaveni', async (req, res) => {
+  try {
+    const { rows } = await db.query('SELECT * FROM nastaveni');
+    res.json(rows);
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+app.put('/api/admin/nastaveni/:klic', async (req, res) => {
+  const { hodnota } = req.body || {};
+  if (!hodnota) return res.status(400).json({ chyba: 'Chybí hodnota.' });
+  try {
+    await db.query(
+      'INSERT INTO nastaveni (klic, hodnota) VALUES ($1,$2) ON CONFLICT (klic) DO UPDATE SET hodnota = $2',
+      [req.params.klic, hodnota]
+    );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
+// -- Provozní výjimky (dovolená, svátky) --
+app.get('/api/admin/vyjimky', async (req, res) => {
+  try {
+    const { rows } = await db.query('SELECT * FROM provozni_vyjimky ORDER BY datum_od DESC');
+    res.json(rows);
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+app.post('/api/admin/vyjimky', async (req, res) => {
+  const { datum_od, datum_do, popis } = req.body || {};
+  if (!datum_od || !datum_do) return res.status(400).json({ chyba: 'Zadejte datum od a do.' });
+  try {
+    const { rows: [vyjimka] } = await db.query(
+      'INSERT INTO provozni_vyjimky (datum_od, datum_do, popis) VALUES ($1,$2,$3) RETURNING *',
+      [datum_od, datum_do, popis || null]
+    );
+    res.json({ ok: true, vyjimka });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+app.delete('/api/admin/vyjimky/:id', async (req, res) => {
+  try {
+    await db.query('DELETE FROM provozni_vyjimky WHERE id = $1', [req.params.id]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
@@ -453,7 +527,7 @@ app.get('/api/admin/zakaznici', async (req, res) => {
     const [rez, pouk, zak] = await Promise.all([
       db.query('SELECT jmeno, telefon, email, datum, cena, stav FROM rezervace'),
       db.query('SELECT kupujici_jmeno, kupujici_telefon, kupujici_email, hodnota, stav FROM poukazy'),
-      db.query('SELECT telefon, jmeno, email, poznamka FROM zakaznici')
+      db.query('SELECT telefon, jmeno, email, poznamka, alergie, preference FROM zakaznici')
     ]);
 
     const rucne = {};
@@ -468,7 +542,8 @@ app.get('/api/admin/zakaznici', async (req, res) => {
         zakaznici[klic] = {
           telefon: klic, jmeno: r?.jmeno || null, email: r?.email || null,
           pocetNavstev: 0, celkemUtraceno: 0, posledniNavstiva: null,
-          aktivniPoukazy: 0, poznamka: r?.poznamka || ''
+          aktivniPoukazy: 0, poznamka: r?.poznamka || '',
+          alergie: r?.alergie || '', preference: r?.preference || ''
         };
       }
       return zakaznici[klic];
@@ -481,7 +556,7 @@ app.get('/api/admin/zakaznici', async (req, res) => {
       if (!z) return;
       if (r.jmeno) z.jmeno = r.jmeno;
       if (r.email) z.email = r.email;
-      if (r.stav !== 'zrusena') {
+      if (!['zrusena', 'nedostavila_se'].includes(r.stav)) {
         z.pocetNavstev++;
         z.celkemUtraceno += Number(r.cena) || 0;
         if (!z.posledniNavstiva || r.datum > z.posledniNavstiva) z.posledniNavstiva = r.datum;
@@ -506,13 +581,13 @@ app.get('/api/admin/zakaznici', async (req, res) => {
 });
 
 app.put('/api/admin/zakaznici/poznamka', async (req, res) => {
-  const { telefon, poznamka } = req.body || {};
+  const { telefon, poznamka, alergie, preference } = req.body || {};
   if (!telefon) return res.status(400).json({ chyba: 'Chybí telefon.' });
   try {
     await db.query(
-      `INSERT INTO zakaznici (telefon, poznamka, upraveno) VALUES ($1, $2, now())
-       ON CONFLICT (telefon) DO UPDATE SET poznamka = $2, upraveno = now()`,
-      [telefon.trim(), poznamka || null]
+      `INSERT INTO zakaznici (telefon, poznamka, alergie, preference, upraveno) VALUES ($1,$2,$3,$4,now())
+       ON CONFLICT (telefon) DO UPDATE SET poznamka = $2, alergie = $3, preference = $4, upraveno = now()`,
+      [telefon.trim(), poznamka || null, alergie || null, preference || null]
     );
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ chyba: e.message }); }
@@ -520,18 +595,20 @@ app.put('/api/admin/zakaznici/poznamka', async (req, res) => {
 
 // Ruční přidání zákaznice bez rezervace (nebo doplnění jména/e-mailu k existující)
 app.post('/api/admin/zakaznici', async (req, res) => {
-  const { telefon, jmeno, email, poznamka } = req.body || {};
+  const { telefon, jmeno, email, poznamka, alergie, preference } = req.body || {};
   if (!telefon) return res.status(400).json({ chyba: 'Chybí telefon.' });
   try {
     const { rows: [zakaznice] } = await db.query(
-      `INSERT INTO zakaznici (telefon, jmeno, email, poznamka, upraveno) VALUES ($1,$2,$3,$4,now())
+      `INSERT INTO zakaznici (telefon, jmeno, email, poznamka, alergie, preference, upraveno) VALUES ($1,$2,$3,$4,$5,$6,now())
        ON CONFLICT (telefon) DO UPDATE SET
          jmeno = COALESCE($2, zakaznici.jmeno),
          email = COALESCE($3, zakaznici.email),
          poznamka = COALESCE($4, zakaznici.poznamka),
+         alergie = COALESCE($5, zakaznici.alergie),
+         preference = COALESCE($6, zakaznici.preference),
          upraveno = now()
        RETURNING *`,
-      [telefon.trim(), jmeno || null, email || null, poznamka || null]
+      [telefon.trim(), jmeno || null, email || null, poznamka || null, alergie || null, preference || null]
     );
     res.json({ ok: true, zakaznice });
   } catch (e) { res.status(500).json({ chyba: e.message }); }
@@ -666,7 +743,7 @@ app.delete('/api/admin/prodejna/:id', async (req, res) => {
 app.get('/api/admin/ucetnictvi', async (req, res) => {
   try {
     const [rez, prod, pouk] = await Promise.all([
-      db.query("SELECT cena, vytvoreno FROM rezervace WHERE stav = 'potvrzena'"),
+      db.query("SELECT cena, vytvoreno FROM rezervace WHERE stav IN ('potvrzena', 'dokoncena')"),
       db.query('SELECT cena, vytvoreno FROM prodeje'),
       db.query('SELECT hodnota, vytvoreno FROM poukazy')
     ]);
@@ -700,6 +777,65 @@ app.get('/api/admin/ucetnictvi', async (req, res) => {
       denniPrehled,
       polozky: polozky.sort((a, b) => b.datum.localeCompare(a.datum))
     });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
+// Denní úloha spouštěná zvenčí (cron-job.org apod.) přes tajný klíč v URL:
+// GET /api/cron/denni?klic=...
+// 1) pošle připomínku zítřejších rezervací (jednou, hlídá se přes pripomenuto)
+// 2) pošle žádost o recenzi za včerejší rezervace (jednou, hlídá se přes pozadano_recenze)
+app.get('/api/cron/denni', async (req, res) => {
+  if (!CRON_KLIC || req.query.klic !== CRON_KLIC) {
+    return res.status(401).json({ chyba: 'Neplatný klíč.' });
+  }
+  try {
+    const zitra = new Date(); zitra.setDate(zitra.getDate() + 1);
+    const zitraIso = zitra.toISOString().slice(0, 10);
+    const vcera = new Date(); vcera.setDate(vcera.getDate() - 1);
+    const vceraIso = vcera.toISOString().slice(0, 10);
+
+    let pripomenutoPocet = 0;
+    const { rows: zitrejsi } = await db.query(
+      `SELECT * FROM rezervace WHERE datum = $1 AND stav IN ('cekajici','potvrzena') AND pripomenuto = false AND email IS NOT NULL`,
+      [zitraIso]
+    );
+    for (const r of zitrejsi) {
+      const odeslano = await odeslatEmail(r.email, 'Připomínka rezervace zítra – Masáže Alesa', `
+        <p>Dobrý den ${r.jmeno},</p>
+        <p>připomínáme vaši rezervaci na zítra:</p>
+        <p>
+          <strong>Masáž:</strong> ${r.masaz}<br>
+          <strong>Datum:</strong> ${formatDatumCz(r.datum)}<br>
+          <strong>Čas:</strong> ${String(r.cas_od).slice(0, 5)}–${String(r.cas_do).slice(0, 5)}
+        </p>
+        <p>Pokud se nemůžete dostavit, dejte nám prosím vědět na tel. 736 734 951.</p>
+        <p>🌸 Masáže Alesa</p>
+      `);
+      if (odeslano) {
+        await db.query('UPDATE rezervace SET pripomenuto = true WHERE id = $1', [r.id]);
+        pripomenutoPocet++;
+      }
+    }
+
+    let recenzePocet = 0;
+    const { rows: vcerejsi } = await db.query(
+      `SELECT * FROM rezervace WHERE datum = $1 AND stav IN ('potvrzena','dokoncena') AND pozadano_recenze = false AND email IS NOT NULL`,
+      [vceraIso]
+    );
+    for (const r of vcerejsi) {
+      const odeslano = await odeslatEmail(r.email, 'Jak jste byla spokojená? – Masáže Alesa', `
+        <p>Dobrý den ${r.jmeno},</p>
+        <p>děkujeme, že jste včera navštívila náš salón. Budeme moc rády, když nám napíšete pár slov zpětné vazby nebo necháte recenzi.</p>
+        <p><a href="https://www.facebook.com/masazehasalova">Napsat recenzi na Facebooku</a></p>
+        <p>🌸 Masáže Alesa</p>
+      `);
+      if (odeslano) {
+        await db.query('UPDATE rezervace SET pozadano_recenze = true WHERE id = $1', [r.id]);
+        recenzePocet++;
+      }
+    }
+
+    res.json({ ok: true, pripomenutoOdeslano: pripomenutoPocet, zCelkem: zitrejsi.length, recenzeOdeslano: recenzePocet, zCelkemVcera: vcerejsi.length });
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 

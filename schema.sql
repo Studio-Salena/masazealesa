@@ -30,6 +30,22 @@ insert into pracovni_doba (den_v_tydnu, otevreno_od, otevreno_do, aktivni) value
   (6, '09:00', '13:00', false)  -- sobota
 on conflict (den_v_tydnu) do nothing;
 
+-- Obecná nastavení klíč→hodnota (např. mezera mezi masážemi na úklid/vyvětrání)
+create table if not exists nastaveni (
+  klic text primary key,
+  hodnota text not null
+);
+insert into nastaveni (klic, hodnota) values ('buffer_minut', '30') on conflict (klic) do nothing;
+
+-- Jednorázové výjimky provozu (dovolená, svátek) — blokují celý den(y) mimo týdenní rozvrh
+create table if not exists provozni_vyjimky (
+  id serial primary key,
+  datum_od date not null,
+  datum_do date not null,
+  popis text,
+  vytvoreno timestamptz not null default now()
+);
+
 -- Ceník — každá masáž (skupina) může mít víc variant (různá délka/rozsah/cena)
 -- Zobrazuje se na webu i v adminu; cokoliv tu upravíš, propíše se rovnou na web.
 create table if not exists cenik (
@@ -58,7 +74,10 @@ create table if not exists rezervace (
   masaz text not null, -- snímek názvu v době rezervace (skupina + varianta), pro případ že se ceník později změní
   cena numeric, -- snímek ceny v okamžiku rezervace (pro účetnictví)
   poznamka text,
-  stav text not null default 'cekajici', -- cekajici | potvrzena | zrusena
+  poukaz_kod text, -- nepovinné: kód dárkového poukazu, který chce zákaznice uplatnit na místě
+  stav text not null default 'cekajici', -- cekajici | potvrzena | dokoncena | nedostavila_se | zrusena
+  pripomenuto boolean not null default false, -- už odeslána 24h připomínka (ať se neposílá vícekrát)
+  pozadano_recenze boolean not null default false, -- už odeslána žádost o recenzi
   vytvoreno timestamptz not null default now()
 );
 
@@ -113,6 +132,8 @@ create table if not exists zakaznici (
   jmeno text,
   email text,
   poznamka text,
+  alergie text, -- např. alergie na konkrétní oleje
+  preference text, -- např. preference síly tlaku
   upraveno timestamptz not null default now()
 );
 

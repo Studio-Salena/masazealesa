@@ -1881,6 +1881,10 @@
           <label for="rezEmail">E-mail</label>
           <input type="email" id="rezEmail" class="form-input" placeholder="jana@example.cz">
         </div>
+        <div class="form-field">
+          <label for="rezPoukazKod">Kód dárkového poukazu</label>
+          <input type="text" id="rezPoukazKod" class="form-input" placeholder="Nepovinné">
+        </div>
         <div class="form-field form-field-full">
           <label for="rezPoznamka">Poznámka</label>
           <textarea id="rezPoznamka" class="form-textarea" placeholder="Nepovinné"></textarea>
@@ -2352,6 +2356,7 @@ async function rezOdeslat() {
   var jmeno = document.getElementById('rezJmeno').value.trim();
   var telefon = document.getElementById('rezTelefon').value.trim();
   var email = document.getElementById('rezEmail').value.trim();
+  var poukazKod = document.getElementById('rezPoukazKod').value.trim();
   var poznamka = document.getElementById('rezPoznamka').value.trim();
 
   if (!rezVybranyCas || !rezVybranyDatum || !cenikId) { zprava.textContent = 'Vyberte prosím masáž a čas v kalendáři.'; zprava.className = 'form-msg err'; return; }
@@ -2363,7 +2368,7 @@ async function rezOdeslat() {
     var res = await fetch(API + '/rezervace', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ datum: rezVybranyDatum, cas_od: rezVybranyCas, jmeno: jmeno, telefon: telefon, email: email, cenik_id: cenikId, poznamka: poznamka })
+      body: JSON.stringify({ datum: rezVybranyDatum, cas_od: rezVybranyCas, jmeno: jmeno, telefon: telefon, email: email, cenik_id: cenikId, poznamka: poznamka, poukaz_kod: poukazKod })
     });
     var vysledek = await res.json();
     if (!res.ok) { zprava.textContent = vysledek.chyba || 'Rezervaci se nepodařilo odeslat.'; zprava.className = 'form-msg err'; return; }
@@ -2375,6 +2380,7 @@ async function rezOdeslat() {
     document.getElementById('rezJmeno').value = '';
     document.getElementById('rezTelefon').value = '';
     document.getElementById('rezEmail').value = '';
+    document.getElementById('rezPoukazKod').value = '';
     document.getElementById('rezPoznamka').value = '';
     document.getElementById('rezFormFields').style.display = 'none';
     rezVybranyCas = null;
