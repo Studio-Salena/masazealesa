@@ -393,10 +393,18 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    overflow: hidden;
     font-size: 5rem;
     position: relative;
     animation: morphBlob 12s ease-in-out infinite;
     box-shadow: 0 20px 60px rgba(196,122,74,0.2);
+  }
+  .about-photo-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center 20%;
+    display: block;
   }
 
   .about-badge {
@@ -1692,7 +1700,7 @@
   <div class="container">
     <div class="about-layout">
       <div class="about-visual reveal">
-        <div class="about-photo-frame">🌸</div>
+        <div class="about-photo-frame"><img src="assets/alena.jpg" alt="Alena Hasalová" class="about-photo-img"></div>
         <div class="about-badge">
           <strong>♥</strong>
           <span>S láskou<br>k ženám</span>
