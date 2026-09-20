@@ -819,6 +819,15 @@
   }
   .rez-slot-btn:hover { border-color: var(--terracotta); }
   .rez-slot-btn.selected { background: var(--terracotta); color: var(--white); border-color: var(--terracotta); }
+  .rez-slot-btn:disabled {
+    background: rgba(200,60,60,0.1);
+    border-color: rgba(200,60,60,0.3);
+    color: #b8402a;
+    cursor: not-allowed;
+    text-decoration: line-through;
+    opacity: 0.85;
+  }
+  .rez-slot-btn:disabled:hover { border-color: rgba(200,60,60,0.3); }
   .rez-hint { font-size: 0.85rem; color: var(--text-light); text-align: center; margin: 0.5rem 0; }
 
   .pk-modal-overlay {
@@ -2210,9 +2219,10 @@ async function rezNacistTerminy() {
     var res = await fetch(API + '/rezervace/volne-terminy?datum=' + encodeURIComponent(datum) + '&cenik_id=' + encodeURIComponent(cenikId));
     var terminy = await res.json();
     if (!res.ok) { wrap.innerHTML = '<p class="rez-hint">' + (terminy.chyba || 'Termíny se nepodařilo načíst.') + '</p>'; return; }
-    if (!terminy.length) { wrap.innerHTML = '<p class="rez-hint">Pro tento den už bohužel nejsou volné žádné termíny. Zkuste prosím jiné datum.</p>'; return; }
+    if (!terminy.length) { wrap.innerHTML = '<p class="rez-hint">V tento den bohužel nemáme otevřeno. Zkuste prosím jiné datum.</p>'; return; }
     wrap.innerHTML = terminy.map(function(t) {
-      return '<button type="button" class="rez-slot-btn" onclick="rezVybratSlot(this, \'' + t + '\')">' + t + '</button>';
+      if (t.volno) return '<button type="button" class="rez-slot-btn" onclick="rezVybratSlot(this, \'' + t.cas + '\')">' + t.cas + '</button>';
+      return '<button type="button" class="rez-slot-btn" disabled title="Obsazeno">' + t.cas + '</button>';
     }).join('');
   } catch (e) {
     wrap.innerHTML = '<p class="rez-hint">Termíny se nepodařilo načíst, zkuste to prosím znovu.</p>';

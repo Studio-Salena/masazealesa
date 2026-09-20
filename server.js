@@ -106,13 +106,14 @@ app.get('/api/rezervace/volne-terminy', async (req, res) => {
     const otevrenoDo = casNaMinuty(pd.otevreno_do);
     const KROK = 15; // kandidátní časy po 15 minutách
 
-    const volne = [];
+    // Vrací i obsazené časy (jen čas, žádné jméno/kontakt), ať jde zobrazit celý den jako kalendář
+    const terminy = [];
     for (let start = otevrenoOd; start + delka <= otevrenoDo; start += KROK) {
       const konec = start + delka;
       const koliduje = obsazeno.some(o => start < o.do && konec > o.od);
-      if (!koliduje) volne.push(minutyNaCas(start));
+      terminy.push({ cas: minutyNaCas(start), volno: !koliduje });
     }
-    res.json(volne);
+    res.json(terminy);
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
