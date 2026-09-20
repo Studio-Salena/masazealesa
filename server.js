@@ -112,12 +112,15 @@ async function spocitatTerminyDne(datum, delka, pd) {
   }));
   const otevrenoOd = casNaMinuty(pd.otevreno_od);
   const otevrenoDo = casNaMinuty(pd.otevreno_do);
+  const pauzaOd = pd.pauza_od ? casNaMinuty(pd.pauza_od) : null;
+  const pauzaDo = pd.pauza_do ? casNaMinuty(pd.pauza_do) : null;
   const KROK = 15; // kandidátní časy po 15 minutách
   const terminy = [];
   for (let start = otevrenoOd; start + delka <= otevrenoDo; start += KROK) {
     const konec = start + delka;
     const koliduje = obsazeno.some(o => start < o.do && konec > o.od);
-    terminy.push({ cas: minutyNaCas(start), volno: !koliduje });
+    const vPauze = pauzaOd !== null && pauzaDo !== null && start < pauzaDo && konec > pauzaOd;
+    terminy.push({ cas: minutyNaCas(start), volno: !koliduje && !vPauze });
   }
   return terminy;
 }
@@ -319,11 +322,11 @@ app.get('/api/admin/pracovni-doba', async (req, res) => {
 });
 
 app.put('/api/admin/pracovni-doba/:den', async (req, res) => {
-  const { otevreno_od, otevreno_do, aktivni } = req.body || {};
+  const { otevreno_od, otevreno_do, pauza_od, pauza_do, aktivni } = req.body || {};
   try {
     await db.query(
-      'UPDATE pracovni_doba SET otevreno_od = $1, otevreno_do = $2, aktivni = $3 WHERE den_v_tydnu = $4',
-      [otevreno_od, otevreno_do, aktivni, req.params.den]
+      'UPDATE pracovni_doba SET otevreno_od = $1, otevreno_do = $2, pauza_od = $3, pauza_do = $4, aktivni = $5 WHERE den_v_tydnu = $6',
+      [otevreno_od, otevreno_do, pauza_od || null, pauza_do || null, aktivni, req.params.den]
     );
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ chyba: e.message }); }

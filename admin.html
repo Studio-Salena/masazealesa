@@ -661,12 +661,14 @@ async function loadPracovniDoba() {
     vsechnyDnyPD = await adminFetch(API + '/admin/pracovni-doba').then(r => r.json());
     const dnyPoNe = [...vsechnyDnyPD].sort((a, b) => (a.den_v_tydnu + 6) % 7 - (b.den_v_tydnu + 6) % 7);
     document.getElementById('pracovniDobaTable').innerHTML = `
-      <table><thead><tr><th>Den</th><th>Otevřeno</th><th>Od</th><th>Do</th><th></th></tr></thead>
+      <table><thead><tr><th>Den</th><th>Otevřeno</th><th>Od</th><th>Do</th><th>Pauza od</th><th>Pauza do</th><th></th></tr></thead>
       <tbody>${dnyPoNe.map(d => `<tr>
         <td><strong>${NAZVY_DNU[d.den_v_tydnu]}</strong></td>
         <td><input type="checkbox" id="pd-akt-${d.den_v_tydnu}" ${d.aktivni ? 'checked' : ''} style="width:18px;height:18px"></td>
         <td><input type="time" id="pd-od-${d.den_v_tydnu}" value="${d.otevreno_od.slice(0,5)}" style="border:1px solid var(--tan-light);border-radius:6px;padding:5px 8px"></td>
         <td><input type="time" id="pd-do-${d.den_v_tydnu}" value="${d.otevreno_do.slice(0,5)}" style="border:1px solid var(--tan-light);border-radius:6px;padding:5px 8px"></td>
+        <td><input type="time" id="pd-pauza-od-${d.den_v_tydnu}" value="${d.pauza_od ? d.pauza_od.slice(0,5) : ''}" style="border:1px solid var(--tan-light);border-radius:6px;padding:5px 8px"></td>
+        <td><input type="time" id="pd-pauza-do-${d.den_v_tydnu}" value="${d.pauza_do ? d.pauza_do.slice(0,5) : ''}" style="border:1px solid var(--tan-light);border-radius:6px;padding:5px 8px"></td>
         <td><button class="btn btn-green btn-sm" onclick="ulozitPracovniDobu(${d.den_v_tydnu})">💾</button></td>
       </tr>`).join('')}</tbody></table>`;
   } catch (e) { document.getElementById('pracovniDobaTable').innerHTML = '<div class="error-msg">Chyba načítání.</div>'; }
@@ -675,7 +677,9 @@ async function ulozitPracovniDobu(den) {
   const aktivni = document.getElementById('pd-akt-' + den).checked;
   const otevreno_od = document.getElementById('pd-od-' + den).value;
   const otevreno_do = document.getElementById('pd-do-' + den).value;
-  await adminFetch(API + '/admin/pracovni-doba/' + den, { method: 'PUT', body: JSON.stringify({ otevreno_od, otevreno_do, aktivni }) });
+  const pauza_od = document.getElementById('pd-pauza-od-' + den).value;
+  const pauza_do = document.getElementById('pd-pauza-do-' + den).value;
+  await adminFetch(API + '/admin/pracovni-doba/' + den, { method: 'PUT', body: JSON.stringify({ otevreno_od, otevreno_do, pauza_od, pauza_do, aktivni }) });
 }
 
 function vykreslitRezervace(filtr) {

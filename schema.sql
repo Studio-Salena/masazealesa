@@ -16,6 +16,8 @@ create table if not exists pracovni_doba (
   den_v_tydnu integer primary key,
   otevreno_od time not null,
   otevreno_do time not null,
+  pauza_od time, -- nepovinné: polední pauza, kdy nelze rezervovat
+  pauza_do time,
   aktivni boolean not null default true
 );
 insert into pracovni_doba (den_v_tydnu, otevreno_od, otevreno_do, aktivni) values
