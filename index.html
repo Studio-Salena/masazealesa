@@ -2208,8 +2208,9 @@ async function nacistCenikZAdministrace() {
     var rezervovatelne = data.filter(function(c) { return c.rezervovatelna; });
     var rezSelect = document.getElementById('rezMasaz');
     if (rezSelect && rezervovatelne.length) {
-      rezSelect.innerHTML = '<option value="">Vyberte masáž…</option>' + rezervovatelne.map(function(c) {
-        return '<option value="' + c.id + '">' + c.emoji + ' ' + c.skupina + ' – ' + c.varianta + ' (' + c.delka_min + ' min, ' + c.cena.toLocaleString('cs-CZ') + ' Kč)</option>';
+      // První rezervovatelná položka je předvybraná, ať se kalendář ukáže rovnou bez nutnosti nejdřív něco vybírat
+      rezSelect.innerHTML = rezervovatelne.map(function(c, i) {
+        return '<option value="' + c.id + '"' + (i === 0 ? ' selected' : '') + '>' + c.emoji + ' ' + c.skupina + ' – ' + c.varianta + ' (' + c.delka_min + ' min, ' + c.cena.toLocaleString('cs-CZ') + ' Kč)</option>';
       }).join('');
     }
     var pkSelect = document.getElementById('pkMasazSelect');
