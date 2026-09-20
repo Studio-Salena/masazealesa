@@ -828,6 +828,77 @@
     opacity: 0.85;
   }
   .rez-slot-btn:disabled:hover { border-color: rgba(200,60,60,0.3); }
+
+  .rez-tyden-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin: 1rem 0 0.8rem;
+    gap: 0.5rem;
+  }
+  .rez-tyden-nav button {
+    background: var(--white);
+    border: 1.5px solid rgba(196,122,74,0.3);
+    border-radius: 50px;
+    padding: 0.4rem 0.9rem;
+    cursor: pointer;
+    font-family: 'Nunito', sans-serif;
+    font-weight: 700;
+    color: var(--brown);
+    font-size: 0.85rem;
+  }
+  .rez-tyden-nav button:hover { border-color: var(--terracotta); }
+  .rez-tyden-nav button:disabled { opacity: 0.3; cursor: not-allowed; }
+  .rez-tyden-label { font-weight: 700; color: var(--brown); font-size: 0.88rem; }
+  .rez-kalendar {
+    display: flex;
+    gap: 0.4rem;
+    overflow-x: auto;
+    padding-bottom: 0.5rem;
+  }
+  .rez-den-sloupec {
+    flex: 1 0 auto;
+    min-width: 88px;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+  .rez-den-hlavicka {
+    text-align: center;
+    font-weight: 700;
+    color: var(--brown);
+    font-size: 0.8rem;
+    padding-bottom: 0.4rem;
+    border-bottom: 1.5px solid rgba(196,122,74,0.2);
+    margin-bottom: 0.2rem;
+  }
+  .rez-den-hlavicka small { display: block; font-weight: 400; color: var(--text-light); font-size: 0.7rem; }
+  .rez-den-hlavicka.dnes { color: var(--terracotta); }
+  .rez-den-cas {
+    padding: 0.4rem 0.3rem;
+    border-radius: 8px;
+    border: 1.5px solid rgba(196,122,74,0.25);
+    background: var(--white);
+    color: var(--brown);
+    font-weight: 700;
+    font-size: 0.75rem;
+    cursor: pointer;
+    text-align: center;
+    font-family: 'Nunito', sans-serif;
+  }
+  .rez-den-cas:hover { border-color: var(--terracotta); }
+  .rez-den-cas.selected { background: var(--terracotta); color: var(--white); border-color: var(--terracotta); }
+  .rez-den-cas:disabled {
+    background: rgba(200,60,60,0.1);
+    border-color: rgba(200,60,60,0.25);
+    color: #b8402a;
+    cursor: not-allowed;
+    text-decoration: line-through;
+    opacity: 0.8;
+  }
+  .rez-den-cas:disabled:hover { border-color: rgba(200,60,60,0.25); }
+  .rez-den-zavreno { font-size: 0.72rem; color: var(--text-light); text-align: center; padding: 0.6rem 0; }
+  @media (max-width: 480px) { .rez-den-sloupec { min-width: 76px; } .rez-den-cas { font-size: 0.7rem; padding: 0.35rem 0.2rem; } }
   .rez-hint { font-size: 0.85rem; color: var(--text-light); text-align: center; margin: 0.5rem 0; }
 
   .pk-modal-overlay {
@@ -1804,20 +1875,19 @@
   <div class="pk-modal">
     <button type="button" class="pk-modal-close" onclick="zavritRezForm()" aria-label="Zavřít">✕</button>
     <h3>Rezervovat termín</h3>
-    <div class="form-row">
-      <div class="form-field">
-        <label for="rezMasaz">Masáž</label>
-        <select id="rezMasaz" class="form-select" onchange="rezNacistTerminy()">
-          <option value="">Načítám ceník…</option>
-        </select>
-      </div>
-      <div class="form-field">
-        <label for="rezDatum">Datum</label>
-        <input type="date" id="rezDatum" class="form-input" onchange="rezNacistTerminy()">
-      </div>
+    <div class="form-field">
+      <label for="rezMasaz">Masáž</label>
+      <select id="rezMasaz" class="form-select" onchange="rezNacistTyden()">
+        <option value="">Načítám ceník…</option>
+      </select>
     </div>
 
-    <div id="rezSloty" class="rez-slots"></div>
+    <div class="rez-tyden-nav">
+      <button type="button" onclick="rezPosunTyden(-1)" id="rezTydenZpet">◀</button>
+      <span class="rez-tyden-label" id="rezTydenLabel"></span>
+      <button type="button" onclick="rezPosunTyden(1)">▶</button>
+    </div>
+    <div id="rezKalendar" class="rez-kalendar"></div>
 
     <div id="rezFormFields" style="display:none;">
       <div class="form-row" style="margin-top:1rem;">
@@ -2165,9 +2235,6 @@ async function nacistCenikZAdministrace() {
         return '<option value="' + c.id + '">' + c.emoji + ' ' + c.skupina + ' – ' + c.varianta + ' (' + c.delka_min + ' min, ' + c.cena.toLocaleString('cs-CZ') + ' Kč)</option>';
       }).join('');
     }
-    var rezDatum = document.getElementById('rezDatum');
-    if (rezDatum) rezDatum.min = new Date().toISOString().slice(0, 10);
-
     var pkSelect = document.getElementById('pkMasazSelect');
     if (pkSelect && rezervovatelne.length) {
       pkSelect.innerHTML = '<option value="">Vyberte masáž…</option>' + rezervovatelne.map(function(c) {
@@ -2191,47 +2258,88 @@ document.addEventListener('keydown', function(e) {
   if (e.key === 'Escape') { zavritPkForm(); zavritRezForm(); }
 });
 
-// ── REZERVACE ONLINE ──
+// ── REZERVACE ONLINE (týdenní kalendář) ──
 var rezVybranyCas = null;
+var rezVybranyDatum = null;
+var rezTydenZacatek = null; // Date — pondělí aktuálně zobrazeného týdne
 
 function otevritRezForm() {
   document.getElementById('rezModalOverlay').classList.add('open');
   document.body.style.overflow = 'hidden';
+  rezTydenZacatek = rezPondeliTydne(new Date());
+  rezNacistTyden();
 }
 function zavritRezForm() {
   document.getElementById('rezModalOverlay').classList.remove('open');
   document.body.style.overflow = '';
 }
 
-async function rezNacistTerminy() {
+function rezPondeliTydne(d) {
+  var den = d.getDay(); // 0=neděle..6=sobota
+  var posun = den === 0 ? -6 : 1 - den;
+  var pondeli = new Date(d);
+  pondeli.setDate(pondeli.getDate() + posun);
+  pondeli.setHours(0, 0, 0, 0);
+  return pondeli;
+}
+
+function rezPosunTyden(smer) {
+  var novy = new Date(rezTydenZacatek);
+  novy.setDate(novy.getDate() + smer * 7);
+  var dnesPondeli = rezPondeliTydne(new Date());
+  rezTydenZacatek = novy < dnesPondeli ? dnesPondeli : novy;
+  rezNacistTyden();
+}
+
+async function rezNacistTyden() {
   rezVybranyCas = null;
+  rezVybranyDatum = null;
   document.getElementById('rezFormFields').style.display = 'none';
   document.getElementById('rezZprava').textContent = '';
   document.getElementById('rezZprava').className = 'form-msg';
   var cenikId = document.getElementById('rezMasaz').value;
-  var datum = document.getElementById('rezDatum').value;
-  var wrap = document.getElementById('rezSloty');
-  wrap.innerHTML = '';
-  if (!cenikId || !datum) return;
+  var kalendar = document.getElementById('rezKalendar');
+  if (!rezTydenZacatek) rezTydenZacatek = rezPondeliTydne(new Date());
 
-  wrap.innerHTML = '<p class="rez-hint">Hledám volné termíny…</p>';
+  var konecTydne = new Date(rezTydenZacatek);
+  konecTydne.setDate(konecTydne.getDate() + 6);
+  var formatKratky = function(d) { return d.getDate() + '. ' + (d.getMonth() + 1) + '.'; };
+  document.getElementById('rezTydenLabel').textContent = formatKratky(rezTydenZacatek) + ' – ' + formatKratky(konecTydne) + ' ' + konecTydne.getFullYear();
+  document.getElementById('rezTydenZpet').disabled = rezTydenZacatek <= rezPondeliTydne(new Date());
+
+  if (!cenikId) { kalendar.innerHTML = '<p class="rez-hint">Nejdřív prosím vyberte masáž.</p>'; return; }
+
+  var zacatekStr = rezTydenZacatek.getFullYear() + '-' + String(rezTydenZacatek.getMonth() + 1).padStart(2, '0') + '-' + String(rezTydenZacatek.getDate()).padStart(2, '0');
+  kalendar.innerHTML = '<p class="rez-hint">Načítám kalendář…</p>';
   try {
-    var res = await fetch(API + '/rezervace/volne-terminy?datum=' + encodeURIComponent(datum) + '&cenik_id=' + encodeURIComponent(cenikId));
-    var terminy = await res.json();
-    if (!res.ok) { wrap.innerHTML = '<p class="rez-hint">' + (terminy.chyba || 'Termíny se nepodařilo načíst.') + '</p>'; return; }
-    if (!terminy.length) { wrap.innerHTML = '<p class="rez-hint">V tento den bohužel nemáme otevřeno. Zkuste prosím jiné datum.</p>'; return; }
-    wrap.innerHTML = terminy.map(function(t) {
-      if (t.volno) return '<button type="button" class="rez-slot-btn" onclick="rezVybratSlot(this, \'' + t.cas + '\')">' + t.cas + '</button>';
-      return '<button type="button" class="rez-slot-btn" disabled title="Obsazeno">' + t.cas + '</button>';
+    var res = await fetch(API + '/rezervace/kalendar?zacatek=' + encodeURIComponent(zacatekStr) + '&cenik_id=' + encodeURIComponent(cenikId));
+    var dny = await res.json();
+    if (!res.ok) { kalendar.innerHTML = '<p class="rez-hint">' + (dny.chyba || 'Kalendář se nepodařilo načíst.') + '</p>'; return; }
+    var NAZVY = ['Ne', 'Po', 'Út', 'St', 'Čt', 'Pá', 'So'];
+    var dnesIso = new Date().toISOString().slice(0, 10);
+    kalendar.innerHTML = dny.map(function(den) {
+      var d = new Date(den.datum + 'T12:00:00');
+      var jeDnes = den.datum === dnesIso;
+      var obsah = !den.terminy.length
+        ? '<div class="rez-den-zavreno">Zavřeno</div>'
+        : den.terminy.map(function(t) {
+            if (t.volno) return '<button type="button" class="rez-den-cas" onclick="rezVybratSlot(this, \'' + den.datum + '\', \'' + t.cas + '\')">' + t.cas + '</button>';
+            return '<button type="button" class="rez-den-cas" disabled title="Obsazeno">' + t.cas + '</button>';
+          }).join('');
+      return '<div class="rez-den-sloupec">' +
+        '<div class="rez-den-hlavicka' + (jeDnes ? ' dnes' : '') + '">' + NAZVY[d.getDay()] + '<small>' + d.getDate() + '.' + (d.getMonth() + 1) + '.</small></div>' +
+        obsah +
+      '</div>';
     }).join('');
   } catch (e) {
-    wrap.innerHTML = '<p class="rez-hint">Termíny se nepodařilo načíst, zkuste to prosím znovu.</p>';
+    kalendar.innerHTML = '<p class="rez-hint">Kalendář se nepodařilo načíst, zkuste to prosím znovu.</p>';
   }
 }
 
-function rezVybratSlot(btn, cas) {
-  document.querySelectorAll('.rez-slot-btn.selected').forEach(function(b) { b.classList.remove('selected'); });
+function rezVybratSlot(btn, datum, cas) {
+  document.querySelectorAll('.rez-den-cas.selected').forEach(function(b) { b.classList.remove('selected'); });
   btn.classList.add('selected');
+  rezVybranyDatum = datum;
   rezVybranyCas = cas;
   document.getElementById('rezFormFields').style.display = 'block';
 }
@@ -2240,13 +2348,12 @@ async function rezOdeslat() {
   var zprava = document.getElementById('rezZprava');
   zprava.className = 'form-msg';
   var cenikId = document.getElementById('rezMasaz').value;
-  var datum = document.getElementById('rezDatum').value;
   var jmeno = document.getElementById('rezJmeno').value.trim();
   var telefon = document.getElementById('rezTelefon').value.trim();
   var email = document.getElementById('rezEmail').value.trim();
   var poznamka = document.getElementById('rezPoznamka').value.trim();
 
-  if (!rezVybranyCas || !cenikId || !datum) { zprava.textContent = 'Vyberte prosím masáž, datum a čas.'; zprava.className = 'form-msg err'; return; }
+  if (!rezVybranyCas || !rezVybranyDatum || !cenikId) { zprava.textContent = 'Vyberte prosím masáž a čas v kalendáři.'; zprava.className = 'form-msg err'; return; }
   if (!jmeno || !telefon) { zprava.textContent = 'Vyplňte prosím jméno a telefon.'; zprava.className = 'form-msg err'; return; }
 
   var btn = document.getElementById('rezSubmitBtn');
@@ -2255,7 +2362,7 @@ async function rezOdeslat() {
     var res = await fetch(API + '/rezervace', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ datum: datum, cas_od: rezVybranyCas, jmeno: jmeno, telefon: telefon, email: email, cenik_id: cenikId, poznamka: poznamka })
+      body: JSON.stringify({ datum: rezVybranyDatum, cas_od: rezVybranyCas, jmeno: jmeno, telefon: telefon, email: email, cenik_id: cenikId, poznamka: poznamka })
     });
     var vysledek = await res.json();
     if (!res.ok) { zprava.textContent = vysledek.chyba || 'Rezervaci se nepodařilo odeslat.'; zprava.className = 'form-msg err'; return; }
@@ -2266,8 +2373,9 @@ async function rezOdeslat() {
     document.getElementById('rezEmail').value = '';
     document.getElementById('rezPoznamka').value = '';
     document.getElementById('rezFormFields').style.display = 'none';
-    document.getElementById('rezSloty').innerHTML = '';
     rezVybranyCas = null;
+    rezVybranyDatum = null;
+    rezNacistTyden();
   } catch (e) {
     zprava.textContent = 'Rezervaci se nepodařilo odeslat, zkuste to prosím znovu nebo zavolejte.';
     zprava.className = 'form-msg err';

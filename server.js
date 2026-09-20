@@ -78,6 +78,30 @@ app.get('/api/cenik', async (req, res) => {
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
+// Spočte pro daný den seznam kandidátních časů (po 15 min) s příznakem volno/obsazeno,
+// bez jakýchkoliv osobních údajů — jen čas.
+async function spocitatTerminyDne(datum, delka, pd) {
+  if (!pd || !pd.aktivni) return [];
+  const { rows: existujici } = await db.query(
+    "SELECT cas_od, cas_do FROM rezervace WHERE datum = $1 AND stav <> 'zrusena'", [datum]
+  );
+  // Obsazené intervaly rozšířené o mezeru na obě strany
+  const obsazeno = existujici.map(r => ({
+    od: casNaMinuty(r.cas_od) - MEZERA_MIN,
+    do: casNaMinuty(r.cas_do) + MEZERA_MIN
+  }));
+  const otevrenoOd = casNaMinuty(pd.otevreno_od);
+  const otevrenoDo = casNaMinuty(pd.otevreno_do);
+  const KROK = 15; // kandidátní časy po 15 minutách
+  const terminy = [];
+  for (let start = otevrenoOd; start + delka <= otevrenoDo; start += KROK) {
+    const konec = start + delka;
+    const koliduje = obsazeno.some(o => start < o.do && konec > o.od);
+    terminy.push({ cas: minutyNaCas(start), volno: !koliduje });
+  }
+  return terminy;
+}
+
 // Volné termíny pro konkrétní datum a položku ceníku (počítá se dynamicky)
 app.get('/api/rezervace/volne-terminy', async (req, res) => {
   const { datum, cenik_id } = req.query;
@@ -86,34 +110,35 @@ app.get('/api/rezervace/volne-terminy', async (req, res) => {
     const { rows: [polozkaCeniku] } = await db.query('SELECT * FROM cenik WHERE id = $1', [cenik_id]);
     if (!polozkaCeniku) return res.status(404).json({ chyba: 'Tato masáž nebyla v ceníku nalezena.' });
     if (!polozkaCeniku.rezervovatelna) return res.status(400).json({ chyba: 'Na tuto položku nelze rezervovat online.' });
-    const delka = polozkaCeniku.delka_min;
 
     const denVTydnu = new Date(datum + 'T12:00:00').getDay();
     const { rows: [pd] } = await db.query('SELECT * FROM pracovni_doba WHERE den_v_tydnu = $1', [denVTydnu]);
-    if (!pd || !pd.aktivni) return res.json([]);
+    res.json(await spocitatTerminyDne(datum, polozkaCeniku.delka_min, pd));
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
 
-    const { rows: existujici } = await db.query(
-      "SELECT cas_od, cas_do FROM rezervace WHERE datum = $1 AND stav <> 'zrusena'", [datum]
-    );
+// Celý týden (7 dní od zadaného data) najednou, pro kalendářové zobrazení rezervace na webu
+app.get('/api/rezervace/kalendar', async (req, res) => {
+  const { zacatek, cenik_id } = req.query;
+  if (!zacatek || !cenik_id) return res.status(400).json({ chyba: 'Zadejte datum a masáž.' });
+  try {
+    const { rows: [polozkaCeniku] } = await db.query('SELECT * FROM cenik WHERE id = $1', [cenik_id]);
+    if (!polozkaCeniku) return res.status(404).json({ chyba: 'Tato masáž nebyla v ceníku nalezena.' });
+    if (!polozkaCeniku.rezervovatelna) return res.status(400).json({ chyba: 'Na tuto položku nelze rezervovat online.' });
 
-    // Obsazené intervaly rozšířené o mezeru na obě strany
-    const obsazeno = existujici.map(r => ({
-      od: casNaMinuty(r.cas_od) - MEZERA_MIN,
-      do: casNaMinuty(r.cas_do) + MEZERA_MIN
-    }));
+    const { rows: pracovniDoba } = await db.query('SELECT * FROM pracovni_doba');
+    const pdPodleDne = {};
+    pracovniDoba.forEach(pd => { pdPodleDne[pd.den_v_tydnu] = pd; });
 
-    const otevrenoOd = casNaMinuty(pd.otevreno_od);
-    const otevrenoDo = casNaMinuty(pd.otevreno_do);
-    const KROK = 15; // kandidátní časy po 15 minutách
-
-    // Vrací i obsazené časy (jen čas, žádné jméno/kontakt), ať jde zobrazit celý den jako kalendář
-    const terminy = [];
-    for (let start = otevrenoOd; start + delka <= otevrenoDo; start += KROK) {
-      const konec = start + delka;
-      const koliduje = obsazeno.some(o => start < o.do && konec > o.od);
-      terminy.push({ cas: minutyNaCas(start), volno: !koliduje });
+    const dny = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(zacatek + 'T12:00:00');
+      d.setDate(d.getDate() + i);
+      const datum = d.toISOString().slice(0, 10);
+      const terminy = await spocitatTerminyDne(datum, polozkaCeniku.delka_min, pdPodleDne[d.getDay()]);
+      dny.push({ datum, terminy });
     }
-    res.json(terminy);
+    res.json(dny);
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
