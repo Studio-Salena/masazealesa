@@ -819,6 +819,7 @@
   }
   .rez-slot-btn:hover { border-color: var(--terracotta); }
   .rez-slot-btn.selected { background: var(--terracotta); color: var(--white); border-color: var(--terracotta); }
+  .rez-hint { font-size: 0.85rem; color: var(--text-light); text-align: center; margin: 0.5rem 0; }
 
   .pk-modal-overlay {
     display: none;
@@ -1478,7 +1479,7 @@
     <li><a href="#recenze">Recenze</a></li>
     <li><a href="#faq">Časté dotazy</a></li>
     <li><a href="#kontakt">Kontakt</a></li>
-    <li><a href="https://masaze-hasalova.reservio.com/" target="_blank" class="nav-cta" style="animation:navPulse 3s ease-in-out infinite;">📅 Rezervovat</a></li>
+    <li><a href="#" onclick="otevritRezForm();return false;" class="nav-cta" style="animation:navPulse 3s ease-in-out infinite;">📅 Rezervovat</a></li>
   </ul>
   <div class="hamburger" id="hamburger" onclick="toggleMenu()">
     <span></span><span></span><span></span>
@@ -1505,7 +1506,7 @@
     <h1>Zastavte se na chvilku<br><em id="hero-word">relaxace</em><span class="hero-cursor">.</span></h1>
     <p class="hero-desc">Každý den běžíme, staráme se, dáváme ze sebe všechno.<br>Přijďte si načerpat sílu — v klidném prostředí s péčí přesně pro vás. 🌸</p>
     <div class="hero-btns">
-      <a href="https://masaze-hasalova.reservio.com/" target="_blank" class="btn-primary">Rezervovat termín</a>
+      <a href="#" onclick="otevritRezForm();return false;" class="btn-primary">Rezervovat termín</a>
       <a href="#masaze" class="btn-secondary">Prohlédnout masáže</a>
     </div>
   </div>
@@ -1769,7 +1770,7 @@
       </p>
 
       <div class="rezervace-options">
-        <a href="https://masaze-hasalova.reservio.com/" target="_blank" class="rezervace-option">
+        <a href="#" onclick="otevritRezForm();return false;" class="rezervace-option">
           <span class="ro-icon">🗓️</span>
           <span class="ro-label">Online</span>
           <span class="ro-value">Rezervace</span>
@@ -1788,6 +1789,53 @@
     </div>
   </div>
 </section>
+
+<!-- MODAL: Rezervace -->
+<div id="rezModalOverlay" class="pk-modal-overlay" onclick="if(event.target===this) zavritRezForm()">
+  <div class="pk-modal">
+    <button type="button" class="pk-modal-close" onclick="zavritRezForm()" aria-label="Zavřít">✕</button>
+    <h3>Rezervovat termín</h3>
+    <div class="form-row">
+      <div class="form-field">
+        <label for="rezMasaz">Masáž</label>
+        <select id="rezMasaz" class="form-select" onchange="rezNacistTerminy()">
+          <option value="">Načítám ceník…</option>
+        </select>
+      </div>
+      <div class="form-field">
+        <label for="rezDatum">Datum</label>
+        <input type="date" id="rezDatum" class="form-input" onchange="rezNacistTerminy()">
+      </div>
+    </div>
+
+    <div id="rezSloty" class="rez-slots"></div>
+
+    <div id="rezFormFields" style="display:none;">
+      <div class="form-row" style="margin-top:1rem;">
+        <div class="form-field">
+          <label for="rezJmeno">Jméno a příjmení*</label>
+          <input type="text" id="rezJmeno" class="form-input" placeholder="Jana Nováková">
+        </div>
+        <div class="form-field">
+          <label for="rezTelefon">Telefon*</label>
+          <input type="tel" id="rezTelefon" class="form-input" placeholder="736 734 951">
+        </div>
+        <div class="form-field">
+          <label for="rezEmail">E-mail</label>
+          <input type="email" id="rezEmail" class="form-input" placeholder="jana@example.cz">
+        </div>
+        <div class="form-field form-field-full">
+          <label for="rezPoznamka">Poznámka</label>
+          <textarea id="rezPoznamka" class="form-textarea" placeholder="Nepovinné"></textarea>
+        </div>
+      </div>
+      <div style="text-align:center; margin-top:1.2rem;">
+        <button type="button" id="rezSubmitBtn" class="btn-gold" onclick="rezOdeslat()">Odeslat rezervaci</button>
+      </div>
+    </div>
+    <p id="rezZprava" class="form-msg"></p>
+  </div>
+</div>
 
 <!-- KONTAKT -->
 
@@ -2100,8 +2148,17 @@ async function nacistCenikZAdministrace() {
       return '<div class="cenik-acc-item" onclick="toggleCenik(this)"><div class="cenik-acc-header"><span class="cenik-acc-emoji">' + varianty[0].emoji + '</span><span class="cenik-acc-name">' + nazev + '</span><span class="cenik-acc-from">' + odText + '</span><span class="cenik-acc-arrow">▼</span></div><div class="cenik-acc-body">' + polozky + '</div></div>';
     }).join('');
 
-    // Naplnit select masáží ve formuláři poukazu na konkrétní masáž (jen položky, na které lze online rezervovat)
+    // Naplnit select masáží ve formuláři rezervace i poukazu na konkrétní masáž (jen položky, na které lze online rezervovat)
     var rezervovatelne = data.filter(function(c) { return c.rezervovatelna; });
+    var rezSelect = document.getElementById('rezMasaz');
+    if (rezSelect && rezervovatelne.length) {
+      rezSelect.innerHTML = '<option value="">Vyberte masáž…</option>' + rezervovatelne.map(function(c) {
+        return '<option value="' + c.id + '">' + c.emoji + ' ' + c.skupina + ' – ' + c.varianta + ' (' + c.delka_min + ' min, ' + c.cena.toLocaleString('cs-CZ') + ' Kč)</option>';
+      }).join('');
+    }
+    var rezDatum = document.getElementById('rezDatum');
+    if (rezDatum) rezDatum.min = new Date().toISOString().slice(0, 10);
+
     var pkSelect = document.getElementById('pkMasazSelect');
     if (pkSelect && rezervovatelne.length) {
       pkSelect.innerHTML = '<option value="">Vyberte masáž…</option>' + rezervovatelne.map(function(c) {
@@ -2122,8 +2179,92 @@ function zavritPkForm() {
   document.body.style.overflow = '';
 }
 document.addEventListener('keydown', function(e) {
-  if (e.key === 'Escape') zavritPkForm();
+  if (e.key === 'Escape') { zavritPkForm(); zavritRezForm(); }
 });
+
+// ── REZERVACE ONLINE ──
+var rezVybranyCas = null;
+
+function otevritRezForm() {
+  document.getElementById('rezModalOverlay').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+function zavritRezForm() {
+  document.getElementById('rezModalOverlay').classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+async function rezNacistTerminy() {
+  rezVybranyCas = null;
+  document.getElementById('rezFormFields').style.display = 'none';
+  document.getElementById('rezZprava').textContent = '';
+  document.getElementById('rezZprava').className = 'form-msg';
+  var cenikId = document.getElementById('rezMasaz').value;
+  var datum = document.getElementById('rezDatum').value;
+  var wrap = document.getElementById('rezSloty');
+  wrap.innerHTML = '';
+  if (!cenikId || !datum) return;
+
+  wrap.innerHTML = '<p class="rez-hint">Hledám volné termíny…</p>';
+  try {
+    var res = await fetch(API + '/rezervace/volne-terminy?datum=' + encodeURIComponent(datum) + '&cenik_id=' + encodeURIComponent(cenikId));
+    var terminy = await res.json();
+    if (!res.ok) { wrap.innerHTML = '<p class="rez-hint">' + (terminy.chyba || 'Termíny se nepodařilo načíst.') + '</p>'; return; }
+    if (!terminy.length) { wrap.innerHTML = '<p class="rez-hint">Pro tento den už bohužel nejsou volné žádné termíny. Zkuste prosím jiné datum.</p>'; return; }
+    wrap.innerHTML = terminy.map(function(t) {
+      return '<button type="button" class="rez-slot-btn" onclick="rezVybratSlot(this, \'' + t + '\')">' + t + '</button>';
+    }).join('');
+  } catch (e) {
+    wrap.innerHTML = '<p class="rez-hint">Termíny se nepodařilo načíst, zkuste to prosím znovu.</p>';
+  }
+}
+
+function rezVybratSlot(btn, cas) {
+  document.querySelectorAll('.rez-slot-btn.selected').forEach(function(b) { b.classList.remove('selected'); });
+  btn.classList.add('selected');
+  rezVybranyCas = cas;
+  document.getElementById('rezFormFields').style.display = 'block';
+}
+
+async function rezOdeslat() {
+  var zprava = document.getElementById('rezZprava');
+  zprava.className = 'form-msg';
+  var cenikId = document.getElementById('rezMasaz').value;
+  var datum = document.getElementById('rezDatum').value;
+  var jmeno = document.getElementById('rezJmeno').value.trim();
+  var telefon = document.getElementById('rezTelefon').value.trim();
+  var email = document.getElementById('rezEmail').value.trim();
+  var poznamka = document.getElementById('rezPoznamka').value.trim();
+
+  if (!rezVybranyCas || !cenikId || !datum) { zprava.textContent = 'Vyberte prosím masáž, datum a čas.'; zprava.className = 'form-msg err'; return; }
+  if (!jmeno || !telefon) { zprava.textContent = 'Vyplňte prosím jméno a telefon.'; zprava.className = 'form-msg err'; return; }
+
+  var btn = document.getElementById('rezSubmitBtn');
+  btn.disabled = true; btn.textContent = 'Odesílám…';
+  try {
+    var res = await fetch(API + '/rezervace', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ datum: datum, cas_od: rezVybranyCas, jmeno: jmeno, telefon: telefon, email: email, cenik_id: cenikId, poznamka: poznamka })
+    });
+    var vysledek = await res.json();
+    if (!res.ok) { zprava.textContent = vysledek.chyba || 'Rezervaci se nepodařilo odeslat.'; zprava.className = 'form-msg err'; return; }
+    zprava.textContent = '🌸 Rezervace odeslána! Ozveme se vám s potvrzením.';
+    zprava.className = 'form-msg ok';
+    document.getElementById('rezJmeno').value = '';
+    document.getElementById('rezTelefon').value = '';
+    document.getElementById('rezEmail').value = '';
+    document.getElementById('rezPoznamka').value = '';
+    document.getElementById('rezFormFields').style.display = 'none';
+    document.getElementById('rezSloty').innerHTML = '';
+    rezVybranyCas = null;
+  } catch (e) {
+    zprava.textContent = 'Rezervaci se nepodařilo odeslat, zkuste to prosím znovu nebo zavolejte.';
+    zprava.className = 'form-msg err';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Odeslat rezervaci';
+  }
+}
 
 // ── STATICKÁ UKÁZKA VZHLEDU POUKAZU (na webu, čárový kód je záměrně neplatný) ──
 var EAN_L = ['0001101','0011001','0010011','0111101','0100011','0110001','0101111','0111011','0110111','0001011'];
