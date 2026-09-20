@@ -2321,6 +2321,7 @@ var UKAZKA_SABLONY = {
     obrazek: 'assets/poukaz.jpg',
     pomer: '795/532',
     logo: false,
+    podklad: false,
     box: { left: '10%', right: '10%' },
     radky: { pro: '42%', hodnota: '53%', platnost: '64%' },
     spodek: { top: '80%', left: '32%', right: '32%' }
@@ -2329,7 +2330,7 @@ var UKAZKA_SABLONY = {
     obrazek: 'assets/vanocni-poukaz.jpg',
     pomer: '1024/558',
     logo: true,
-    stin: true,
+    podklad: true,
     logoBox: { top: '14%', left: '40%', right: '6%' },
     box: { left: '40%', right: '6%' },
     radky: { pro: '38%', hodnota: '47%', platnost: '56%' },
@@ -2349,16 +2350,20 @@ function vykreslitUkazkuPoukazu() {
   var s = UKAZKA_SABLONY[ukazkaAktivniSablona];
   el.style.backgroundImage = "url('" + s.obrazek + "')";
   el.style.aspectRatio = s.pomer;
-  var stin = s.stin ? ' pu-text-shadow' : '';
+  // Bez pevného bílého podkladu jde jen o jemný textový stín, aby text nezmizel v obrázku
+  var bezPodkladu = !s.podklad;
+  var radekStyl = bezPodkladu ? 'background:none;padding:0;box-shadow:none;text-shadow:0 0 4px rgba(255,255,255,.95),0 0 7px rgba(255,255,255,.85);' : '';
+  var bottomStyl = bezPodkladu ? 'background:none;padding:0;' : '';
+  var logoStyl = bezPodkladu ? 'background:none;padding:0;' : '';
   el.innerHTML =
-    (s.logo ? '<div class="pu-logo-overlay' + stin + '" style="top:' + s.logoBox.top + ';left:' + s.logoBox.left + ';right:' + s.logoBox.right + '">' +
+    (s.logo ? '<div class="pu-logo-overlay" style="' + logoStyl + 'top:' + s.logoBox.top + ';left:' + s.logoBox.left + ';right:' + s.logoBox.right + '">' +
       '<div class="pu-logo-text">🌸 Masáže Alesa</div>' +
       '<div class="pu-title-text">Dárkový poukaz</div>' +
     '</div>' : '') +
-    '<div class="pu-radek' + stin + '" style="top:' + s.radky.pro + ';left:' + s.box.left + ';right:' + s.box.right + '">Pro: <strong>— — —</strong></div>' +
-    '<div class="pu-radek' + stin + '" style="top:' + s.radky.hodnota + ';left:' + s.box.left + ';right:' + s.box.right + '">Hodnota: <strong>1 000 Kč</strong></div>' +
-    '<div class="pu-radek' + stin + '" style="top:' + s.radky.platnost + ';left:' + s.box.left + ';right:' + s.box.right + '">Platnost: <strong>31. 12. 2027</strong></div>' +
-    '<div class="pu-bottom" style="top:' + s.spodek.top + ';left:' + s.spodek.left + ';right:' + s.spodek.right + '">' +
+    '<div class="pu-radek" style="' + radekStyl + 'top:' + s.radky.pro + ';left:' + s.box.left + ';right:' + s.box.right + '">Pro: <strong>— — —</strong></div>' +
+    '<div class="pu-radek" style="' + radekStyl + 'top:' + s.radky.hodnota + ';left:' + s.box.left + ';right:' + s.box.right + '">Hodnota: <strong>1 000 Kč</strong></div>' +
+    '<div class="pu-radek" style="' + radekStyl + 'top:' + s.radky.platnost + ';left:' + s.box.left + ';right:' + s.box.right + '">Platnost: <strong>31. 12. 2027</strong></div>' +
+    '<div class="pu-bottom" style="' + bottomStyl + 'top:' + s.spodek.top + ';left:' + s.spodek.left + ';right:' + s.spodek.right + '">' +
       '<div class="pu-barcode-col">' +
         '<div class="pu-barcode">' + eanBarcodeSvg('2000000000008', 24) + '</div>' +
         '<div class="pu-ean">UKÁZKA — neplatný kód</div>' +
