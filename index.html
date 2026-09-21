@@ -402,6 +402,20 @@
     padding-top: 0.8rem;
     width: 100%;
   }
+  .masaz-cta {
+    display: inline-block;
+    margin-top: 0.7rem;
+    background: none;
+    border: none;
+    padding: 0;
+    font-family: 'Nunito', sans-serif;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--terracotta-dark);
+    cursor: pointer;
+    text-decoration: underline;
+  }
+  .masaz-cta:hover { color: var(--brown); }
 
   /* ── O MNĚ ── */
   #o-mne {
@@ -1631,7 +1645,8 @@
       <div class="masaz-card reveal expandable" onclick="toggleCard(this)">
         <div class="masaz-card-header"><span class="masaz-icon">🔥</span><h3>Masáž lávovými kameny</h3><span class="masaz-arrow">▼</span></div>
         <p>Teplo lávových kamenů se pomalu rozlévá po celém těle a hluboce uvolňuje napjaté svaly zad a kloubů. Příjemné teplo navozuje pocit klidu, dobré nálady a celkové regenerace.</p>
-        <span class="masaz-price">od 720 Kč / 45 min – 1 600 Kč / 100 min</span>
+        <span class="masaz-price">od 720 Kč / 45 min – 1 600 Kč / 100 min</span><br>
+        <button type="button" class="masaz-cta" onclick="event.stopPropagation(); otevritRezForm(); return false;">Rezervovat →</button>
         <div class="masaz-detail">
           <p style="font-size:0.9rem;margin-bottom:0.5rem;"><strong>Klientky masáž vyhledávají při:</strong></p>
           <ul style="margin-bottom:1rem;"><li>uvolnění stresu a napětí v těle</li><li>potřebě celkového odlehčení a regenerace</li><li>podpoře klidnějšího spánku</li><li>napětí v oblasti hlavy a šíje</li><li>ztuhlých kloubech a svalech</li><li>potřebě zlepšit prokrvení a celkovou vitalitu</li></ul>
@@ -1644,7 +1659,8 @@
       <div class="masaz-card reveal expandable" onclick="toggleCard(this)">
         <div class="masaz-card-header"><span class="masaz-icon">💪</span><h3>Rekondiční masáž</h3><span class="masaz-arrow">▼</span></div>
         <p>Pomáhá tělu najít zpátky pohyb a sílu po období, kdy na pohybovou aktivitu nebyl čas ani prostor — třeba po náročném období, dlouhém sezení nebo delší pauze od sportu.</p>
-        <span class="masaz-price">od 630 Kč / 45 min – 1 190 Kč / 90 min</span>
+        <span class="masaz-price">od 630 Kč / 45 min – 1 190 Kč / 90 min</span><br>
+        <button type="button" class="masaz-cta" onclick="event.stopPropagation(); otevritRezForm(); return false;">Rezervovat →</button>
         <div class="masaz-detail">
           <p style="font-size:0.9rem;margin-bottom:0.5rem;"><strong>Proč ji klientky vyhledávají:</strong></p>
           <ul style="margin-bottom:1rem;"><li>podporuje regeneraci svalstva a tkání</li><li>zlepšuje celkový fyzický i psychický pocit</li><li>podporuje prokrvení svalů i pokožky</li><li>dodává energii a pomáhá s pocitem únavy</li><li>pravidelná péče o nohy přispívá k jejich lehkosti a svěžímu vzhledu</li><li>pomáhá uvolnit napětí v šíji a ramenou a navodit pocit klidu</li></ul>
@@ -1655,7 +1671,8 @@
       <div class="masaz-card reveal expandable" onclick="toggleCard(this)">
         <div class="masaz-card-header"><span class="masaz-icon">🤰</span><h3>Masáž pro těhotné ženy</h3><span class="masaz-arrow">▼</span></div>
         <p>Těhotenská masáž je jemná péče přizpůsobená potřebám nastávajících maminek. Zaměřuje se především na příjemné uvolnění zad, šíje a nohou a nabízí chvíli klidu a odpočinku během těhotenství.</p>
-        <span class="masaz-price">od 420 Kč / 30 min – 840 Kč / 60 min</span>
+        <span class="masaz-price">od 420 Kč / 30 min – 840 Kč / 60 min</span><br>
+        <button type="button" class="masaz-cta" onclick="event.stopPropagation(); otevritRezForm(); return false;">Rezervovat →</button>
         <div class="masaz-detail">
           <p style="font-size:0.9rem;margin-bottom:0.5rem;"><strong>Ceník:</strong></p>
           <ul><li>Částečná (záda + šíje) &nbsp;<strong>420 Kč / 30 min</strong></li><li>Celková &nbsp;<strong>840 Kč / 60 min</strong></li></ul>
@@ -1666,7 +1683,8 @@
       <div class="masaz-card reveal expandable" onclick="toggleCard(this)">
         <div class="masaz-card-header"><span class="masaz-icon">🍯</span><h3>Medové snění</h3><span class="masaz-arrow">▼</span></div>
         <p>Jemná medová masáž, která pokožku příjemně prohřeje a zároveň podpoří uvolnění a celkovou relaxaci. Masáž je příjemným způsobem, jak zpomalit, odpočinout si a dopřát tělu chvíli péče.</p>
-        <span class="masaz-price">960 Kč / 60 min</span>
+        <span class="masaz-price">960 Kč / 60 min</span><br>
+        <button type="button" class="masaz-cta" onclick="event.stopPropagation(); otevritRezForm(); return false;">Rezervovat →</button>
         <div class="masaz-detail">
           <ul><li>Celková procedura (2× nanesení medu 45 min. + zábal 15 min.) &nbsp;<strong>960 Kč / 60 min</strong></li></ul>
         </div>
@@ -1674,7 +1692,8 @@
       <div class="masaz-card reveal expandable" onclick="toggleCard(this)">
         <div class="masaz-card-header"><span class="masaz-icon">🌿</span><h3>Konopná úleva</h3><span class="masaz-arrow">▼</span></div>
         <p>Využívá za studena lisovaný konopný olej. Důraz na regeneraci pokožky a hloubkové uvolnění svalů díky aktivním látkám v konopí.</p>
-        <span class="masaz-price">od 765 Kč / 45 min – 960 Kč / 60 min</span>
+        <span class="masaz-price">od 765 Kč / 45 min – 960 Kč / 60 min</span><br>
+        <button type="button" class="masaz-cta" onclick="event.stopPropagation(); otevritRezForm(); return false;">Rezervovat →</button>
         <div class="masaz-detail">
           <ul><li>Záda + šíje &nbsp;<strong>765 Kč / 45 min</strong></li><li>Částečná (nohy zezadu, záda, šíje) &nbsp;<strong>960 Kč / 60 min</strong></li></ul>
         </div>
@@ -1752,7 +1771,7 @@
         </p>
         <p class="section-sub" style="margin:0.5rem 0 0;">V hodnotě 500, 1 000 nebo 1 500 Kč, případně na konkrétní masáž. Platnost 12 měsíců od zakoupení. Zaplatíte QR kódem, převodem nebo při osobním převzetí.</p>
         <br>
-        <button type="button" class="btn-gold" onclick="otevritPkForm()">Objednat poukaz</button>
+        <button type="button" class="btn-gold" onclick="otevritPkForm()">Chci dárkový poukaz</button>
       </div>
       <div class="voucher-card reveal">
         <h3>Dárkový poukaz</h3>
@@ -1849,6 +1868,26 @@
         <span class="produkt-badge">Vitální houby · TCM</span>
       </div>
     </div>
+  </div>
+</section>
+
+<!-- RECENZE -->
+<section id="recenze">
+  <div class="container">
+    <div class="reveal" style="text-align:center;margin-bottom:3rem;">
+      <p class="section-tag">✦ Spokojené klientky</p>
+      <h2 class="section-title">Co říkají <em>ostatní</em></h2>
+      <div class="divider"></div>
+    </div>
+    <div class="recenze-grid reveal">
+      <div class="recenze-card"><div class="recenze-stars">★★★★★</div><p class="recenze-text">"U paní Hasalové jsem začínala jako těhotná. Chodila jsem k ní na těhotenské cvičení a masáže pro těhotné — a díky tomu byla rekonvalescence těla po císaři okamžitá a bez problémů. Nyní jsem stále věrnou zákaznicí, protože má zlaté ručičky. Málokdy píši recenze, ale opravdu vřele doporučuji všem."</p><div class="recenze-autor"><span class="recenze-avatar">M</span><span class="recenze-jmeno">Monika</span></div></div>
+      <div class="recenze-card"><div class="recenze-stars">★★★★★</div><p class="recenze-text">"Na masáž se vždy moc těším. Velmi mne udržuje v kondici. I dnes tomu nebylo jinak. Už se těším na příští návštěvu."</p><div class="recenze-autor"><span class="recenze-avatar">P</span><span class="recenze-jmeno">Pavlína</span></div></div>
+      <div class="recenze-card"><div class="recenze-stars">★★★★★</div><p class="recenze-text">"Výborné, příjemné prostředí. Doporučuji!"</p><div class="recenze-autor"><span class="recenze-avatar">H</span><span class="recenze-jmeno">Helena</span></div></div>
+      <div class="recenze-card"><div class="recenze-stars">★★★★★</div><p class="recenze-text">"Skvělý přístup, milá paní masérka. Absolvovala jsem těhotenskou masáž, která byla velice příjemná — odcházela jsem moc spokojená. Doporučuji!"</p><div class="recenze-autor"><span class="recenze-avatar">A</span><span class="recenze-jmeno">Adéla</span></div></div>
+    </div>
+    <p style="text-align:center;margin-top:2rem;">
+      <a href="https://share.google/3TMBEIjrr0KTJRqUN" target="_blank" style="color:var(--terracotta-dark);font-weight:700;text-decoration:underline;">Více recenzí najdete na Google →</a>
+    </p>
   </div>
 </section>
 
@@ -1960,7 +1999,10 @@
       <p class="section-tag">✦ Pro vás</p>
       <h2 class="section-title">Která masáž je <em>pro mě?</em></h2>
       <div class="divider"></div>
-      <p class="section-sub" style="margin:0 auto;">Odpovězte na 3 otázky a zjistěte, která masáž je přesně pro vás. 🌸</p>
+      <p class="section-sub" style="margin:0 auto;">Nevíte, která masáž je pro vás? Pomůžu vám vybrat — odpovězte na 3 krátké otázky.</p>
+      <p style="margin-top:0.8rem;">
+        <a href="#" onclick="otevritRezForm();return false;" style="color:var(--terracotta-dark);font-weight:700;text-decoration:underline;font-size:0.9rem;">Nebo rovnou zvolit termín →</a>
+      </p>
     </div>
     <div class="kviz-box reveal">
       <div class="kviz-step" id="kviz-step-1">
@@ -2002,7 +2044,7 @@
           <div class="kviz-result-name" id="kviz-name"></div>
           <p class="kviz-result-desc" id="kviz-desc"></p>
           <div style="display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;margin-top:1.5rem;">
-            <a href="#masaze" class="btn-primary">Zjistit více</a>
+            <a href="#" onclick="otevritRezForm();return false;" class="btn-primary">Rezervovat termín</a>
             <button onclick="kvizReset()" class="btn-secondary">Zkusit znovu</button>
           </div>
         </div>
@@ -2024,26 +2066,6 @@
       <div class="predpo-card"><div class="predpo-icon">🌸</div><h3>Po masáži</h3><ul><li>💧 Po masáži doporučuji dopřát si dostatek tekutin a klidnější režim, aby si tělo mohlo odpočinout a využít příjemný pocit uvolnění.</li>
             <li>🌸 Nechte aromaterapeutický olej působit — jeho účinky přetrvávají ještě hodiny po masáži</li><li>🍃 Vyhněte se alkoholu alespoň 24 hodin</li><li>☀️ Nechoďte hned do sauny nebo na přímé slunce</li><li>💆 Užijte si pocit lehkosti a klidu</li></ul></div>
     </div>
-  </div>
-</section>
-
-<!-- RECENZE -->
-<section id="recenze">
-  <div class="container">
-    <div class="reveal" style="text-align:center;margin-bottom:3rem;">
-      <p class="section-tag">✦ Spokojené klientky</p>
-      <h2 class="section-title">Co říkají <em>ostatní</em></h2>
-      <div class="divider"></div>
-    </div>
-    <div class="recenze-grid reveal">
-      <div class="recenze-card"><div class="recenze-stars">★★★★★</div><p class="recenze-text">"U paní Hasalové jsem začínala jako těhotná. Chodila jsem k ní na těhotenské cvičení a masáže pro těhotné — a díky tomu byla rekonvalescence těla po císaři okamžitá a bez problémů. Nyní jsem stále věrnou zákaznicí, protože má zlaté ručičky. Málokdy píši recenze, ale opravdu vřele doporučuji všem."</p><div class="recenze-autor"><span class="recenze-avatar">M</span><span class="recenze-jmeno">Monika</span></div></div>
-      <div class="recenze-card"><div class="recenze-stars">★★★★★</div><p class="recenze-text">"Na masáž se vždy moc těším. Velmi mne udržuje v kondici. I dnes tomu nebylo jinak. Už se těším na příští návštěvu."</p><div class="recenze-autor"><span class="recenze-avatar">P</span><span class="recenze-jmeno">Pavlína</span></div></div>
-      <div class="recenze-card"><div class="recenze-stars">★★★★★</div><p class="recenze-text">"Výborné, příjemné prostředí. Doporučuji!"</p><div class="recenze-autor"><span class="recenze-avatar">H</span><span class="recenze-jmeno">Helena</span></div></div>
-      <div class="recenze-card"><div class="recenze-stars">★★★★★</div><p class="recenze-text">"Skvělý přístup, milá paní masérka. Absolvovala jsem těhotenskou masáž, která byla velice příjemná — odcházela jsem moc spokojená. Doporučuji!"</p><div class="recenze-autor"><span class="recenze-avatar">A</span><span class="recenze-jmeno">Adéla</span></div></div>
-    </div>
-    <p style="text-align:center;margin-top:2rem;">
-      <a href="https://share.google/3TMBEIjrr0KTJRqUN" target="_blank" style="color:var(--terracotta-dark);font-weight:700;text-decoration:underline;">Více recenzí najdete na Google →</a>
-    </p>
   </div>
 </section>
 
@@ -2192,7 +2214,7 @@
   <div class="seasonal-inner">
     <span class="seasonal-emoji" id="seasonal-emoji">🎄</span>
     <p id="seasonal-text">Hledáte originální dárek?</p>
-    <a href="#poukazy" class="seasonal-btn" onclick="document.getElementById('seasonal-banner').style.display='none'">Zjistit více</a>
+    <a href="#poukazy" class="seasonal-btn" onclick="document.getElementById('seasonal-banner').style.display='none'">Chci dárkový poukaz</a>
     <button class="seasonal-close" onclick="document.getElementById('seasonal-banner').style.display='none'">✕</button>
   </div>
 </div>
