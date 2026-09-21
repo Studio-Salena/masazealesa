@@ -266,7 +266,6 @@
     width: 420px;
     height: auto;
     pointer-events: none;
-    animation: floatSlow 8s ease-in-out infinite alternate;
     filter: drop-shadow(0 20px 40px rgba(196, 147, 58, 0.25));
   }
 
@@ -443,7 +442,6 @@
     overflow: hidden;
     font-size: 5rem;
     position: relative;
-    animation: morphBlob 12s ease-in-out infinite;
     box-shadow: 0 20px 60px rgba(196,122,74,0.2);
   }
   .about-photo-img {
@@ -1084,15 +1082,6 @@
     from { opacity: 0; transform: translateY(30px); }
     to { opacity: 1; transform: translateY(0); }
   }
-  @keyframes floatSlow {
-    from { transform: translateY(-50%) rotate(0deg); }
-    to { transform: translateY(-53%) rotate(5deg); }
-  }
-  @keyframes morphBlob {
-    0%, 100% { border-radius: 30% 70% 70% 30% / 30% 30% 70% 70%; }
-    33% { border-radius: 50% 50% 30% 70% / 50% 70% 30% 50%; }
-    66% { border-radius: 70% 30% 50% 50% / 30% 50% 70% 50%; }
-  }
 
   /* fade-in on scroll */
   .reveal {
@@ -1120,18 +1109,18 @@
   }
 
   /* ── ŽIVOST ── */
-  #masaze { background: linear-gradient(180deg, #fff5ef 0%, #fce8de 100%); }
-  #o-mne { background: linear-gradient(160deg, #fce8de 0%, #fff5ef 100%); }
-  #cenik { background: linear-gradient(180deg, #fff5ef 0%, #fce8de 100%); }
-  #poukazy { background: linear-gradient(135deg, #fce8de 0%, #fdd8cc 50%, #fce8de 100%); }
-  #rezervace { background: linear-gradient(160deg, #fde8d8 0%, #fad4cf 40%, #fce8de 100%); }
-  #kontakt { background: linear-gradient(180deg, #fff5ef 0%, #fce8de 100%); }
-  #kviz { background: linear-gradient(135deg, #fce8de 0%, #fdd8cc 50%, #fce8de 100%); padding: 5rem 0; }
-  #predpo { background: linear-gradient(180deg, #fce8de 0%, #fff5ef 100%); padding: 5rem 0; }
-  #recenze { background: linear-gradient(180deg, #fff5ef 0%, #fce8de 100%); padding: 5rem 0; }
-  #newsletter { background: linear-gradient(135deg, #fce8de 0%, #fdd8cc 50%, #fce8de 100%); padding: 5rem 0; }
-  #faq { background: linear-gradient(180deg, #fce8de 0%, #fff5ef 100%); padding: 5rem 0; }
-  #instagram { background: linear-gradient(135deg, #fce8de, #fdd8cc, #fce8de); padding: 5rem 0; }
+  #masaze { background: var(--cream); }
+  #o-mne { background: var(--warm-beige); }
+  #cenik { background: var(--cream); }
+  #poukazy { background: var(--warm-beige); }
+  #rezervace { background: var(--cream); }
+  #kontakt { background: var(--warm-beige); }
+  #kviz { background: var(--cream); padding: 5rem 0; }
+  #predpo { background: var(--warm-beige); padding: 5rem 0; }
+  #recenze { background: var(--cream); padding: 5rem 0; }
+  #newsletter { background: var(--warm-beige); padding: 5rem 0; }
+  #faq { background: var(--cream); padding: 5rem 0; }
+  #instagram { background: var(--warm-beige); padding: 5rem 0; }
 
   /* STATS */
   .stats { background: linear-gradient(135deg, #d4856a 0%, #c97050 40%, #e0a830 100%) !important; }
@@ -1139,8 +1128,7 @@
   .stat-label { font-size: 0.78rem !important; letter-spacing: 0.12em !important; text-transform: uppercase !important; color: rgba(255,255,255,0.95) !important; font-weight: 600 !important; margin-top: 0.3rem; display: block; }
 
   /* NADPISY */
-  .section-title em { background: linear-gradient(120deg, #d4856a, #e0a830, #d4856a); background-size: 200% auto; -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; animation: gradientShift 4s ease infinite; }
-  @keyframes gradientShift { 0% { background-position: 0% center; } 50% { background-position: 100% center; } 100% { background-position: 0% center; } }
+  .section-title em { background: linear-gradient(120deg, #d4856a, #e0a830); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
   .divider { background: linear-gradient(90deg, transparent, #e8907a, #e0a830, #e8907a, transparent) !important; height: 2px !important; }
   .section-tag { color: var(--rose) !important; }
 
@@ -1148,7 +1136,6 @@
   .btn-primary { background: linear-gradient(135deg, #d4856a, #e0a830) !important; }
   .btn-primary:hover { background: linear-gradient(135deg, #c07050, #c89020) !important; transform: translateY(-2px); }
   .nav-cta { background: linear-gradient(135deg, #d4856a, #e0a830) !important; color: white !important; padding: 0.5rem 1.2rem !important; border-radius: 50px !important; font-weight: 700 !important; }
-  @keyframes navPulse { 0%, 100% { box-shadow: 0 2px 10px rgba(212,133,106,0.3); } 50% { box-shadow: 0 2px 18px rgba(212,133,106,0.6); } }
 
   /* MASÁŽ KARTY */
   .masaz-card { background: linear-gradient(145deg, #fffcfa, #fdf0ea) !important; border: 1px solid rgba(212,133,106,0.18) !important; }
@@ -1193,10 +1180,6 @@
   .entrance-inner p { font-family: 'Cormorant', Georgia, serif; font-size: 2rem; font-style: italic; color: var(--terracotta-dark); letter-spacing: 0.15em; }
   @keyframes entranceFade { 0% { opacity: 1; } 100% { opacity: 0; pointer-events: none; } }
   @keyframes entranceScale { from { opacity: 0; transform: scale(0.8); } to { opacity: 1; transform: scale(1); } }
-
-  /* PETALS */
-  .petal-float { position: fixed; pointer-events: none; z-index: 0; opacity: 0.15; animation: petalDrift linear infinite; }
-  @keyframes petalDrift { 0% { transform: translateY(-10vh) rotate(0deg); opacity: 0; } 10% { opacity: 0.15; } 90% { opacity: 0.1; } 100% { transform: translateY(110vh) rotate(720deg); opacity: 0; } }
 
   /* RECENZE */
   .recenze-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; margin-top: 3rem; }
@@ -1564,11 +1547,6 @@
 </head>
 <body>
   <div id="entrance-overlay"><div class="entrance-inner"><span class="entrance-flower">🌸</span><p>Vítejte</p></div></div>
-  <div class="petal-float" style="left:5%;animation-duration:18s;animation-delay:0s;">🌸</div>
-  <div class="petal-float" style="left:25%;animation-duration:22s;animation-delay:5s;font-size:0.9rem;">🌺</div>
-  <div class="petal-float" style="left:50%;animation-duration:16s;animation-delay:9s;">🌸</div>
-  <div class="petal-float" style="left:75%;animation-duration:20s;animation-delay:3s;font-size:0.8rem;">🌺</div>
-  <div class="petal-float" style="left:90%;animation-duration:24s;animation-delay:13s;">🌸</div>
 
 <!-- NAV -->
 <nav id="navbar">
@@ -1583,7 +1561,7 @@
     <li><a href="#recenze">Recenze</a></li>
     <li><a href="#faq">Časté dotazy</a></li>
     <li><a href="#kontakt">Kontakt</a></li>
-    <li><a href="#" onclick="otevritRezForm();return false;" class="nav-cta" style="animation:navPulse 3s ease-in-out infinite;">📅 Rezervovat</a></li>
+    <li><a href="#" onclick="otevritRezForm();return false;" class="nav-cta">📅 Rezervovat</a></li>
   </ul>
   <div class="hamburger" id="hamburger" onclick="toggleMenu()">
     <span></span><span></span><span></span>
@@ -1699,9 +1677,6 @@
         </div>
       </div>
     </div>
-    <p style="text-align:center;margin-top:2.5rem;">
-      <a href="#" onclick="otevritRezForm();return false;" class="btn-primary">Rezervovat termín</a>
-    </p>
   </div>
 </section>
 
@@ -1752,9 +1727,6 @@
       <div class="cenik-acc-item" onclick="toggleCenik(this)"><div class="cenik-acc-header"><span class="cenik-acc-emoji">🍯</span><span class="cenik-acc-name">Medové snění</span><span class="cenik-acc-from">960 Kč</span><span class="cenik-acc-arrow">▼</span></div><div class="cenik-acc-body"><div class="cenik-item"><div class="cenik-item-name">Celková procedura (2× nanesení medu + zábal)<small>60 min</small></div><div class="cenik-item-price">960 Kč</div></div></div></div>
       <div class="cenik-acc-item" onclick="toggleCenik(this)"><div class="cenik-acc-header"><span class="cenik-acc-emoji">🩹</span><span class="cenik-acc-name">Kineziotaping</span><span class="cenik-acc-from">dle spotřeby</span><span class="cenik-acc-arrow">▼</span></div><div class="cenik-acc-body"><div class="cenik-item"><div class="cenik-item-name">Při masáži – aplikace ZDARMA<small>materiál 5 Kč / 1 cm</small></div><div class="cenik-item-price">0 Kč</div></div><div class="cenik-item"><div class="cenik-item-name">Samostatně (do 30 min.)<small>+ 150 Kč každých dalších 30 min. + materiál</small></div><div class="cenik-item-price">150 Kč</div></div></div></div>
     </div>
-    <p style="text-align:center;margin-top:2rem;">
-      <a href="#" onclick="otevritRezForm();return false;" class="btn-primary">Rezervovat termín</a>
-    </p>
   </div>
 </section>
 
@@ -2059,9 +2031,9 @@
       <div class="divider"></div>
     </div>
     <div class="predpo-grid reveal">
-      <div class="predpo-card"><div class="predpo-icon">🌿</div><h3>Před masáží</h3><ul><li>🚿 Přijďte čistí, ideálně po sprše</li><li>🍽️ Nejezzte těžké jídlo 1–2 hodiny předem</li><li>💧 Dobře se hydratujte — pijte vodu</li><li>👗 Oblečte se pohodlně</li><li>📱 Informujte mě o zdravotních obtížích předem</li><li>⏰ Přijďte včas, ať si vychutnáte každou minutu</li></ul></div>
-      <div class="predpo-card"><div class="predpo-icon">🌸</div><h3>Po masáži</h3><ul><li>💧 Po masáži doporučuji dopřát si dostatek tekutin a klidnější režim, aby si tělo mohlo odpočinout a využít příjemný pocit uvolnění.</li>
-            <li>🌸 Nechte aromaterapeutický olej působit — jeho účinky přetrvávají ještě hodiny po masáži</li><li>🍃 Vyhněte se alkoholu alespoň 24 hodin</li><li>☀️ Nechoďte hned do sauny nebo na přímé slunce</li><li>💆 Užijte si pocit lehkosti a klidu</li></ul></div>
+      <div class="predpo-card"><div class="predpo-icon">🌿</div><h3>Před masáží</h3><ul><li>Přijďte čistí, ideálně po sprše</li><li>Nejezzte těžké jídlo 1–2 hodiny předem</li><li>Dobře se hydratujte — pijte vodu</li><li>Oblečte se pohodlně</li><li>Informujte mě o zdravotních obtížích předem</li><li>Přijďte včas, ať si vychutnáte každou minutu</li></ul></div>
+      <div class="predpo-card"><div class="predpo-icon">🌸</div><h3>Po masáži</h3><ul><li>Po masáži doporučuji dopřát si dostatek tekutin a klidnější režim, aby si tělo mohlo odpočinout a využít příjemný pocit uvolnění.</li>
+            <li>Nechte aromaterapeutický olej působit — jeho účinky přetrvávají ještě hodiny po masáži</li><li>Vyhněte se alkoholu alespoň 24 hodin</li><li>Nechoďte hned do sauny nebo na přímé slunce</li><li>Užijte si pocit lehkosti a klidu</li></ul></div>
     </div>
   </div>
 </section>
@@ -2072,7 +2044,7 @@
     <div class="newsletter-box reveal">
       <div class="newsletter-icon">💌</div>
       <h2 class="newsletter-title">Tipy a novinky <em>přímo do e-mailu</em></h2>
-      <p class="newsletter-desc">Přihlaste se k odběru a dostávejte tipy na péči o tělo a novinky ze salónu. 🌸</p>
+      <p class="newsletter-desc">Přihlaste se k odběru a dostávejte tipy na péči o tělo a novinky ze salónu.</p>
       <div class="newsletter-form">
         <input type="email" id="newsletter-email" placeholder="Váš e-mail" class="newsletter-input">
         <button onclick="submitNewsletter()" class="newsletter-btn">Přihlásit se</button>
@@ -2181,7 +2153,6 @@
 
 <!-- FOOTER -->
 <footer>
-  <a href="#" onclick="otevritRezForm();return false;" class="btn-gold" style="margin-bottom:1.2rem;display:inline-block;">Rezervovat termín</a>
   <p>
     © 2026 Masáže Alesa · Alena Hasalová · Hulín<br>
     <a href="tel:736734951">736 734 951</a> ·
