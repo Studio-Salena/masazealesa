@@ -41,6 +41,16 @@ async function ziskatBufferMinut() {
   } catch { return 30; }
 }
 
+// Nejdřívější datum, od kterého jsou online rezervace vůbec možné (nepovinné —
+// nastavuje se v adminu, ať jde spustit rezervace k danému datu bez nutnosti
+// zakládat "výjimku provozu" s důvodem). Vrací null, když omezení není nastavené.
+async function ziskatRezervaceOd() {
+  try {
+    const { rows: [n] } = await db.query("SELECT hodnota FROM nastaveni WHERE klic = 'rezervace_od'");
+    return n && n.hodnota ? n.hodnota : null;
+  } catch { return null; }
+}
+
 function vyzadovatAdmina(req, res, next) {
   const heslo = req.headers['x-admin-heslo'] || '';
   if (!ADMIN_HESLO || heslo !== ADMIN_HESLO) {
@@ -118,6 +128,8 @@ app.get('/api/poukazy/typy', async (req, res) => {
 // bez jakýchkoliv osobních údajů — jen čas.
 async function spocitatTerminyDne(datum, delka, pd) {
   if (!pd || !pd.aktivni) return [];
+  const rezervaceOd = await ziskatRezervaceOd();
+  if (rezervaceOd && datum < rezervaceOd) return [];
   const { rows: [vyjimka] } = await db.query(
     'SELECT 1 FROM provozni_vyjimky WHERE $1 BETWEEN datum_od AND datum_do LIMIT 1', [datum]
   );
@@ -204,6 +216,12 @@ app.post('/api/rezervace', async (req, res) => {
     const { rows: [polozkaCeniku] } = await client.query('SELECT * FROM cenik WHERE id = $1', [cenik_id]);
     if (!polozkaCeniku) { await client.query('ROLLBACK'); return res.status(404).json({ chyba: 'Tato masáž nebyla v ceníku nalezena.' }); }
     if (!polozkaCeniku.rezervovatelna) { await client.query('ROLLBACK'); return res.status(400).json({ chyba: 'Na tuto položku nelze rezervovat online.' }); }
+
+    const rezervaceOd = await ziskatRezervaceOd();
+    if (rezervaceOd && datum < rezervaceOd) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ chyba: `Online rezervace spouštíme až od ${formatDatumCz(rezervaceOd)}, vyberte prosím pozdější datum.` });
+    }
 
     const { rows: [vyjimka] } = await client.query(
       'SELECT 1 FROM provozni_vyjimky WHERE $1 BETWEEN datum_od AND datum_do LIMIT 1', [datum]
@@ -400,6 +418,12 @@ app.put('/api/admin/nastaveni/:klic', async (req, res) => {
       'INSERT INTO nastaveni (klic, hodnota) VALUES ($1,$2) ON CONFLICT (klic) DO UPDATE SET hodnota = $2',
       [req.params.klic, hodnota]
     );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+app.delete('/api/admin/nastaveni/:klic', async (req, res) => {
+  try {
+    await db.query('DELETE FROM nastaveni WHERE klic = $1', [req.params.klic]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
