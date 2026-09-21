@@ -106,6 +106,14 @@ app.get('/api/cenik', async (req, res) => {
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
+// Varianty poukazů (částka + platnost) — stejný zdroj dat jako v adminu, ať web nemá vlastní napevno psané hodnoty
+app.get('/api/poukazy/typy', async (req, res) => {
+  try {
+    const { rows } = await db.query('SELECT id, hodnota, platnost_mesicu FROM poukazy_typy ORDER BY poradi');
+    res.json(rows);
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
 // Spočte pro daný den seznam kandidátních časů (po 15 min) s příznakem volno/obsazeno,
 // bez jakýchkoliv osobních údajů — jen čas.
 async function spocitatTerminyDne(datum, delka, pd) {

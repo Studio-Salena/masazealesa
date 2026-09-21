@@ -1769,7 +1769,7 @@
         <p class="section-sub">
           Dárkový poukaz na masáž je ten nejhezčí dárek — darujete čas pro sebe. Ideální pro narozeniny, Vánoce nebo jen tak.
         </p>
-        <p class="section-sub" style="margin:0.5rem 0 0;">V hodnotě 500, 1 000 nebo 1 500 Kč, případně na konkrétní masáž. Platnost 12 měsíců od zakoupení. Zaplatíte QR kódem, převodem nebo při osobním převzetí.</p>
+        <p class="section-sub" id="pkPopisVarianty" style="margin:0.5rem 0 0;">V hodnotě 500, 1 000 nebo 1 500 Kč, případně na konkrétní masáž. Platnost 12 měsíců od zakoupení. Zaplatíte QR kódem, převodem nebo při osobním převzetí.</p>
         <br>
         <button type="button" class="btn-gold" onclick="otevritPkForm()">Chci dárkový poukaz</button>
       </div>
@@ -1795,10 +1795,7 @@
     <div class="form-field form-field-full" style="margin-bottom:1.1rem">
       <label>Hodnota poukazu*</label>
       <div class="rez-slots" id="pkHodnotaSlots" style="justify-content:flex-start">
-        <button type="button" class="rez-slot-btn" onclick="pkVybratHodnotu(500,this)">500 Kč</button>
-        <button type="button" class="rez-slot-btn" onclick="pkVybratHodnotu(1000,this)">1 000 Kč</button>
-        <button type="button" class="rez-slot-btn" onclick="pkVybratHodnotu(1500,this)">1 500 Kč</button>
-        <button type="button" class="rez-slot-btn" onclick="pkVybratKonkretni(this)">Konkrétní masáž</button>
+        <span style="font-size:0.85rem;color:var(--text-light)">Načítám varianty…</span>
       </div>
     </div>
     <div class="form-field form-field-full" id="pkMasazWrap" style="display:none;margin-bottom:1.1rem">
@@ -2296,6 +2293,31 @@ async function nacistCenikZAdministrace() {
   } catch (e) { /* necháme napevno zapsaný ceník jako zálohu */ }
 }
 document.addEventListener('DOMContentLoaded', nacistCenikZAdministrace);
+
+// Varianty poukazů (částka/platnost) — stejná data jako v adminu, ať nejsou napevno v kódu
+async function nacistTypyPoukazu() {
+  var wrap = document.getElementById('pkHodnotaSlots');
+  if (!wrap) return;
+  try {
+    var res = await fetch(API + '/poukazy/typy');
+    var typy = await res.json();
+    var html = typy.map(function(t) {
+      return '<button type="button" class="rez-slot-btn" onclick="pkVybratHodnotu(' + t.hodnota + ',this)">' + Number(t.hodnota).toLocaleString('cs-CZ') + ' Kč</button>';
+    }).join('');
+    html += '<button type="button" class="rez-slot-btn" onclick="pkVybratKonkretni(this)">Konkrétní masáž</button>';
+    wrap.innerHTML = html;
+
+    var popis = document.getElementById('pkPopisVarianty');
+    if (popis && typy.length) {
+      var castky = typy.map(function(t) { return Number(t.hodnota).toLocaleString('cs-CZ'); });
+      var castkyText = castky.length > 1 ? castky.slice(0, -1).join(', ') + ' nebo ' + castky[castky.length - 1] : castky[0];
+      popis.textContent = 'V hodnotě ' + castkyText + ' Kč, případně na konkrétní masáž. Platnost ' + typy[0].platnost_mesicu + ' měsíců od zakoupení. Zaplatíte QR kódem, převodem nebo při osobním převzetí.';
+    }
+  } catch (e) {
+    wrap.innerHTML = '<button type="button" class="rez-slot-btn" onclick="pkVybratKonkretni(this)">Konkrétní masáž</button>';
+  }
+}
+document.addEventListener('DOMContentLoaded', nacistTypyPoukazu);
 
 // Otevře okno se žádostí o poukaz po kliknutí na "Objednat poukaz"
 function otevritPkForm() {
