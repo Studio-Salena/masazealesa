@@ -136,8 +136,11 @@
   .nav-cta::after { display: none !important; }
   .nav-cta:hover { background: var(--terracotta-dark) !important; transform: translateY(-1px); }
 
-  .hamburger { display: none; cursor: pointer; flex-direction: column; gap: 5px; }
+  .hamburger { display: none; cursor: pointer; flex-direction: column; gap: 5px; position: relative; z-index: 9999; }
   .hamburger span { display: block; width: 24px; height: 2px; background: var(--brown); border-radius: 2px; transition: 0.3s; }
+  .hamburger.open span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+  .hamburger.open span:nth-child(2) { opacity: 0; }
+  .hamburger.open span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
 
   /* ── HERO ── */
   .hero {
@@ -1554,7 +1557,7 @@
 <!-- NAV -->
 <nav id="navbar">
   <div class="nav-logo"><img src="assets/logo.png" alt="Masáže Alesa"></div>
-  <ul class="nav-links" id="navLinks">
+  <ul class="nav-links" id="navLinks" onclick="if(event.target===this) toggleMenu()">
     <li><a href="#masaze">Masáže</a></li>
     <li><a href="#o-mne">O mně</a></li>
     <li><a href="#cenik">Ceník</a></li>
@@ -2682,6 +2685,14 @@ function toggleMenu() {
   if (links) links.classList.toggle('open');
   if (burger) burger.classList.toggle('open');
 }
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    var links = document.getElementById('navLinks');
+    var burger = document.getElementById('hamburger');
+    if (links) links.classList.remove('open');
+    if (burger) burger.classList.remove('open');
+  }
+});
 
 // ── KVÍZ ──
 var kvizAnswers = {};
