@@ -192,35 +192,43 @@ app.post('/api/rezervace', async (req, res) => {
   if (!datum || !cas_od || !jmeno || !telefon || !cenik_id) {
     return res.status(400).json({ chyba: 'Vyplňte prosím jméno, telefon, masáž, datum a čas.' });
   }
+  // Celý blok (kontrola kolize + zápis) běží v jedné transakci uzamčené na dané datum,
+  // aby se dvě rezervace odeslané prakticky současně nemohly obě protlačit na stejný
+  // (nebo těsně sousedící) termín — bez zámku by obě mohly projít kontrolou dřív, než
+  // se stihne zapsat ta první (tzv. race condition).
+  const client = await db.connect();
   try {
-    const { rows: [polozkaCeniku] } = await db.query('SELECT * FROM cenik WHERE id = $1', [cenik_id]);
-    if (!polozkaCeniku) return res.status(404).json({ chyba: 'Tato masáž nebyla v ceníku nalezena.' });
-    if (!polozkaCeniku.rezervovatelna) return res.status(400).json({ chyba: 'Na tuto položku nelze rezervovat online.' });
+    await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [datum]);
 
-    const { rows: [vyjimka] } = await db.query(
+    const { rows: [polozkaCeniku] } = await client.query('SELECT * FROM cenik WHERE id = $1', [cenik_id]);
+    if (!polozkaCeniku) { await client.query('ROLLBACK'); return res.status(404).json({ chyba: 'Tato masáž nebyla v ceníku nalezena.' }); }
+    if (!polozkaCeniku.rezervovatelna) { await client.query('ROLLBACK'); return res.status(400).json({ chyba: 'Na tuto položku nelze rezervovat online.' }); }
+
+    const { rows: [vyjimka] } = await client.query(
       'SELECT 1 FROM provozni_vyjimky WHERE $1 BETWEEN datum_od AND datum_do LIMIT 1', [datum]
     );
-    if (vyjimka) return res.status(400).json({ chyba: 'V tento den bohužel nerezervujeme (dovolená/svátek), vyberte prosím jiné datum.' });
+    if (vyjimka) { await client.query('ROLLBACK'); return res.status(400).json({ chyba: 'V tento den bohužel nerezervujeme (dovolená/svátek), vyberte prosím jiné datum.' }); }
 
     const zacatek = casNaMinuty(cas_od);
     const konec = zacatek + polozkaCeniku.delka_min;
     const cas_do = minutyNaCas(konec);
     const nazevMasaze = polozkaCeniku.skupina + ' – ' + polozkaCeniku.varianta;
 
-    // Znovu ověřit kolizi (ochrana proti dvěma klientkám, co kliknou zároveň)
+    // Znovu ověřit kolizi (ochrana proti dvěma klientkám, co kliknou zároveň) — teď už pod zámkem výše
     const bufferMin = await ziskatBufferMinut();
-    const { rows: existujici } = await db.query(
+    const { rows: existujici } = await client.query(
       "SELECT cas_od, cas_do FROM rezervace WHERE datum = $1 AND stav <> 'zrusena'", [datum]
     );
     const koliduje = existujici.some(r => {
       const oOd = casNaMinuty(r.cas_od) - bufferMin, oDo = casNaMinuty(r.cas_do) + bufferMin;
       return zacatek < oDo && konec > oOd;
     });
-    if (koliduje) return res.status(409).json({ chyba: 'Tento termín je již obsazený (nebo příliš blízko jiné rezervaci), vyberte prosím jiný.' });
+    if (koliduje) { await client.query('ROLLBACK'); return res.status(409).json({ chyba: 'Tento termín je již obsazený (nebo příliš blízko jiné rezervaci), vyberte prosím jiný.' }); }
 
     let poukazPoznamka = '';
     if (poukaz_kod && poukaz_kod.trim()) {
-      const { rows: [poukaz] } = await db.query(
+      const { rows: [poukaz] } = await client.query(
         "SELECT * FROM poukazy WHERE (kod = $1 OR ean = $1) AND stav = 'aktivni'", [poukaz_kod.trim()]
       );
       poukazPoznamka = poukaz
@@ -229,11 +237,13 @@ app.post('/api/rezervace', async (req, res) => {
     }
 
     const celaPoznamka = ((poznamka || '') + poukazPoznamka).trim() || null;
-    const { rows: [rezervace] } = await db.query(
+    const { rows: [rezervace] } = await client.query(
       `INSERT INTO rezervace (cenik_id, datum, cas_od, cas_do, jmeno, telefon, email, masaz, poznamka, poukaz_kod, stav, cena)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'cekajici',$11) RETURNING *`,
       [cenik_id, datum, cas_od, cas_do, jmeno, telefon, email || null, nazevMasaze, celaPoznamka, poukaz_kod || null, polozkaCeniku.cena]
     );
+
+    await client.query('COMMIT');
 
     if (email) {
       odeslatEmail(email, 'Rezervace přijata – Masáže Alesa', `
@@ -250,7 +260,12 @@ app.post('/api/rezervace', async (req, res) => {
     }
 
     res.json({ ok: true, rezervace });
-  } catch (e) { res.status(500).json({ chyba: e.message }); }
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch {}
+    res.status(500).json({ chyba: e.message });
+  } finally {
+    client.release();
+  }
 });
 
 // Žádost o dárkový poukaz z webového formuláře
