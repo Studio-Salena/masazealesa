@@ -106,6 +106,41 @@ app.post('/api/login', (req, res) => {
   res.status(401).json({ ok: false });
 });
 
+// ── JEDNORÁZOVÁ MIGRACE: doplní sloupce/tabulky přidané do schema.sql později,
+// které se do už existující produkční databáze nikdy nepropsaly (CREATE TABLE IF
+// NOT EXISTS totiž chybějící sloupce do existující tabulky nedoplní). Bezpečné
+// spustit opakovaně — všechno je IF NOT EXISTS. Chráněno admin heslem. Po ověření,
+// že proběhla, se tento endpoint zase odstraní.
+app.post('/api/admin/migrace-2026-09', vyzadovatAdmina, async (req, res) => {
+  try {
+    await db.query(`
+      ALTER TABLE pracovni_doba ADD COLUMN IF NOT EXISTS pauza_od time;
+      ALTER TABLE pracovni_doba ADD COLUMN IF NOT EXISTS pauza_do time;
+      ALTER TABLE zakaznici ADD COLUMN IF NOT EXISTS jmeno text;
+      ALTER TABLE zakaznici ADD COLUMN IF NOT EXISTS email text;
+      ALTER TABLE zakaznici ADD COLUMN IF NOT EXISTS poznamka text;
+      ALTER TABLE zakaznici ADD COLUMN IF NOT EXISTS alergie text;
+      ALTER TABLE zakaznici ADD COLUMN IF NOT EXISTS preference text;
+      CREATE TABLE IF NOT EXISTS newsletter_odberatele (
+        id serial primary key,
+        email text not null unique,
+        jmeno text,
+        odhlasovaci_token text not null unique,
+        aktivni boolean not null default true,
+        vytvoreno timestamptz not null default now()
+      );
+      CREATE TABLE IF NOT EXISTS newsletter_zpravy (
+        id serial primary key,
+        predmet text not null,
+        obsah text not null,
+        pocet_prijemcu integer not null default 0,
+        odeslano timestamptz not null default now()
+      );
+    `);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
 // ══════════════ VEŘEJNÉ ENDPOINTY ══════════════
 
 // Ceník pro zobrazení na webu (seřazeno podle skupiny a varianty)
