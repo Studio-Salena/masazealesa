@@ -395,8 +395,15 @@ app.get('/api/admin/pracovni-doba', async (req, res) => {
 app.put('/api/admin/pracovni-doba/:den', async (req, res) => {
   const { otevreno_od, otevreno_do, pauza_od, pauza_do, aktivni } = req.body || {};
   try {
+    // otevreno_od/otevreno_do jsou v DB "not null" — u neaktivního dne (např. neděle)
+    // se ale v adminu čas klidně nechává prázdný. Prázdnou hodnotu proto nezapisujeme
+    // a necháme sloupci jeho dosavadní hodnotu, ať uložení nespadne na chybě databáze.
     await db.query(
-      'UPDATE pracovni_doba SET otevreno_od = $1, otevreno_do = $2, pauza_od = $3, pauza_do = $4, aktivni = $5 WHERE den_v_tydnu = $6',
+      `UPDATE pracovni_doba SET
+         otevreno_od = COALESCE(NULLIF($1,'')::time, otevreno_od),
+         otevreno_do = COALESCE(NULLIF($2,'')::time, otevreno_do),
+         pauza_od = $3, pauza_do = $4, aktivni = $5
+       WHERE den_v_tydnu = $6`,
       [otevreno_od, otevreno_do, pauza_od || null, pauza_do || null, aktivni, req.params.den]
     );
     res.json({ ok: true });
