@@ -38,11 +38,16 @@ create table if not exists nastaveni (
 insert into nastaveni (klic, hodnota) values ('buffer_minut', '30') on conflict (klic) do nothing;
 
 -- Jednorázové výjimky provozu (dovolená, svátek) — blokují celý den(y) mimo týdenní rozvrh
+-- otevreno_od/otevreno_do nepovinné: když jsou vyplněné, výjimka pro dané dny
+-- nastaví vlastní otevírací dobu (např. jeden den v měsíci delší otevřeno)
+-- místo běžného týdenního rozvrhu. Bez nich = celý den zavřeno (dovolená/svátek).
 create table if not exists provozni_vyjimky (
   id serial primary key,
   datum_od date not null,
   datum_do date not null,
   popis text,
+  otevreno_od time,
+  otevreno_do time,
   vytvoreno timestamptz not null default now()
 );
 

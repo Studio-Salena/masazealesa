@@ -605,12 +605,17 @@ tr:hover td{background:#fffaf5}
 <div class="modal-overlay" id="modalNovaVyjimka">
   <div class="modal">
     <h3>+ Přidat výjimku provozu</h3>
+    <p style="font-size:0.8rem;color:var(--text-light);margin-top:-8px">Bez vyplněné otevírací doby níž = celý den zavřeno (dovolená, svátek). S vyplněnou otevírací dobou = pro tyhle dny platí místo běžného rozvrhu tahle (např. jeden den v měsíci delší otevřeno).</p>
     <div id="novaVyjimkaMsg"></div>
     <div class="form-grid-2">
       <div class="form-group"><label>Od</label><input type="date" id="vyDatumOd"></div>
       <div class="form-group"><label>Do</label><input type="date" id="vyDatumDo"></div>
     </div>
-    <div class="form-group"><label>Popis</label><input type="text" id="vyPopis" placeholder="např. Dovolená"></div>
+    <div class="form-group"><label>Popis</label><input type="text" id="vyPopis" placeholder="např. Dovolená, nebo Delší otevírací doba"></div>
+    <div class="form-grid-2">
+      <div class="form-group"><label>Otevřeno od (nepovinné)</label><input type="time" id="vyOtevrenoOd"></div>
+      <div class="form-group"><label>Otevřeno do (nepovinné)</label><input type="time" id="vyOtevrenoDo"></div>
+    </div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal('modalNovaVyjimka')">Zrušit</button>
       <button class="btn btn-primary" onclick="pridatVyjimku()">Přidat</button>
@@ -858,11 +863,12 @@ async function loadVyjimky() {
     posledniVyjimky = await adminFetch(API + '/admin/vyjimky').then(r => r.json());
     if (!posledniVyjimky.length) { document.getElementById('vyjimkyTable').innerHTML = '<div class="empty">Žádné výjimky</div>'; return; }
     document.getElementById('vyjimkyTable').innerHTML = `
-      <table><thead><tr><th>Od</th><th>Do</th><th>Popis</th><th></th></tr></thead>
+      <table><thead><tr><th>Od</th><th>Do</th><th>Popis</th><th>Otevírací doba</th><th></th></tr></thead>
       <tbody>${posledniVyjimky.map(v => `<tr>
         <td>${new Date(v.datum_od).toLocaleDateString('cs-CZ')}</td>
         <td>${new Date(v.datum_do).toLocaleDateString('cs-CZ')}</td>
         <td>${v.popis || '—'}</td>
+        <td>${v.otevreno_od && v.otevreno_do ? v.otevreno_od.slice(0,5) + '–' + v.otevreno_do.slice(0,5) : 'zavřeno celý den'}</td>
         <td><button class="btn btn-red btn-sm" onclick="smazatVyjimku(${v.id})">🗑️</button></td>
       </tr>`).join('')}</tbody></table>`;
   } catch (e) { document.getElementById('vyjimkyTable').innerHTML = '<div class="error-msg">Chyba načítání.</div>'; }
@@ -871,13 +877,16 @@ async function pridatVyjimku() {
   const datum_od = document.getElementById('vyDatumOd').value;
   const datum_do = document.getElementById('vyDatumDo').value;
   const popis = document.getElementById('vyPopis').value.trim();
+  const otevreno_od = document.getElementById('vyOtevrenoOd').value;
+  const otevreno_do = document.getElementById('vyOtevrenoDo').value;
   const msg = document.getElementById('novaVyjimkaMsg');
   if (!datum_od || !datum_do) { msg.innerHTML = '<div class="error-msg">Vyplňte datum od a do.</div>'; return; }
   try {
-    const res = await adminFetch(API + '/admin/vyjimky', { method: 'POST', body: JSON.stringify({ datum_od, datum_do, popis }) });
+    const res = await adminFetch(API + '/admin/vyjimky', { method: 'POST', body: JSON.stringify({ datum_od, datum_do, popis, otevreno_od, otevreno_do }) });
     if (res.ok) {
       closeModal('modalNovaVyjimka');
       document.getElementById('vyDatumOd').value = ''; document.getElementById('vyDatumDo').value = ''; document.getElementById('vyPopis').value = '';
+      document.getElementById('vyOtevrenoOd').value = ''; document.getElementById('vyOtevrenoDo').value = '';
       msg.innerHTML = '';
       loadVyjimky();
     } else msg.innerHTML = '<div class="error-msg">Nepodařilo se přidat.</div>';

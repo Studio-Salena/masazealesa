@@ -248,16 +248,32 @@ app.get('/api/poukazy/typy', async (req, res) => {
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
+// Zjistí skutečnou otevírací dobu pro konkrétní datum: buď normální týdenní
+// pracovní dobu, nebo — pokud na ten den existuje "výjimka provozu" s vlastní
+// otevírací dobou — tu (ať jde nastavit třeba jeden den v měsíci s delší
+// otevírací dobou). Výjimka bez vlastní otevírací doby = celý den zavřeno
+// (dovolená/svátek, dosavadní chování). Vrací null, když je ten den zavřeno.
+async function ziskatEfektivniOtevrenoDobu(datum) {
+  const { rows: [vyjimka] } = await db.query(
+    'SELECT * FROM provozni_vyjimky WHERE $1 BETWEEN datum_od AND datum_do LIMIT 1', [datum]
+  );
+  if (vyjimka) {
+    if (!vyjimka.otevreno_od || !vyjimka.otevreno_do) return null;
+    return { otevreno_od: vyjimka.otevreno_od, otevreno_do: vyjimka.otevreno_do, pauza_od: null, pauza_do: null };
+  }
+  const denVTydnu = new Date(datum + 'T12:00:00').getDay();
+  const { rows: [pd] } = await db.query('SELECT * FROM pracovni_doba WHERE den_v_tydnu = $1', [denVTydnu]);
+  if (!pd || !pd.aktivni) return null;
+  return { otevreno_od: pd.otevreno_od, otevreno_do: pd.otevreno_do, pauza_od: pd.pauza_od, pauza_do: pd.pauza_do };
+}
+
 // Spočte pro daný den seznam kandidátních časů (po 15 min) s příznakem volno/obsazeno,
 // bez jakýchkoliv osobních údajů — jen čas.
-async function spocitatTerminyDne(datum, delka, pd) {
-  if (!pd || !pd.aktivni) return [];
+async function spocitatTerminyDne(datum, delka) {
   const rezervaceOd = await ziskatRezervaceOd();
   if (rezervaceOd && datum < rezervaceOd) return [];
-  const { rows: [vyjimka] } = await db.query(
-    'SELECT 1 FROM provozni_vyjimky WHERE $1 BETWEEN datum_od AND datum_do LIMIT 1', [datum]
-  );
-  if (vyjimka) return [];
+  const oteviraciDoba = await ziskatEfektivniOtevrenoDobu(datum);
+  if (!oteviraciDoba) return [];
   const bufferMin = await ziskatBufferMinut();
   const { rows: existujici } = await db.query(
     "SELECT cas_od, cas_do FROM rezervace WHERE datum = $1 AND stav <> 'zrusena'", [datum]
@@ -267,10 +283,10 @@ async function spocitatTerminyDne(datum, delka, pd) {
     od: casNaMinuty(r.cas_od) - bufferMin,
     do: casNaMinuty(r.cas_do) + bufferMin
   }));
-  const otevrenoOd = casNaMinuty(pd.otevreno_od);
-  const otevrenoDo = casNaMinuty(pd.otevreno_do);
-  const pauzaOd = pd.pauza_od ? casNaMinuty(pd.pauza_od) : null;
-  const pauzaDo = pd.pauza_do ? casNaMinuty(pd.pauza_do) : null;
+  const otevrenoOd = casNaMinuty(oteviraciDoba.otevreno_od);
+  const otevrenoDo = casNaMinuty(oteviraciDoba.otevreno_do);
+  const pauzaOd = oteviraciDoba.pauza_od ? casNaMinuty(oteviraciDoba.pauza_od) : null;
+  const pauzaDo = oteviraciDoba.pauza_do ? casNaMinuty(oteviraciDoba.pauza_do) : null;
   const KROK = 15; // kandidátní časy po 15 minutách
   const terminy = [];
   for (let start = otevrenoOd; start + delka <= otevrenoDo; start += KROK) {
@@ -291,9 +307,7 @@ app.get('/api/rezervace/volne-terminy', async (req, res) => {
     if (!polozkaCeniku) return res.status(404).json({ chyba: 'Tato masáž nebyla v ceníku nalezena.' });
     if (!polozkaCeniku.rezervovatelna) return res.status(400).json({ chyba: 'Na tuto položku nelze rezervovat online.' });
 
-    const denVTydnu = new Date(datum + 'T12:00:00').getDay();
-    const { rows: [pd] } = await db.query('SELECT * FROM pracovni_doba WHERE den_v_tydnu = $1', [denVTydnu]);
-    res.json(await spocitatTerminyDne(datum, polozkaCeniku.delka_min, pd));
+    res.json(await spocitatTerminyDne(datum, polozkaCeniku.delka_min));
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
@@ -306,16 +320,12 @@ app.get('/api/rezervace/kalendar', async (req, res) => {
     if (!polozkaCeniku) return res.status(404).json({ chyba: 'Tato masáž nebyla v ceníku nalezena.' });
     if (!polozkaCeniku.rezervovatelna) return res.status(400).json({ chyba: 'Na tuto položku nelze rezervovat online.' });
 
-    const { rows: pracovniDoba } = await db.query('SELECT * FROM pracovni_doba');
-    const pdPodleDne = {};
-    pracovniDoba.forEach(pd => { pdPodleDne[pd.den_v_tydnu] = pd; });
-
     const dny = [];
     for (let i = 0; i < 7; i++) {
       const d = new Date(zacatek + 'T12:00:00');
       d.setDate(d.getDate() + i);
       const datum = d.toISOString().slice(0, 10);
-      const terminy = await spocitatTerminyDne(datum, polozkaCeniku.delka_min, pdPodleDne[d.getDay()]);
+      const terminy = await spocitatTerminyDne(datum, polozkaCeniku.delka_min);
       dny.push({ datum, terminy });
     }
     res.json(dny);
@@ -347,15 +357,27 @@ app.post('/api/rezervace', async (req, res) => {
       return res.status(400).json({ chyba: `Online rezervace spouštíme až od ${formatDatumCz(rezervaceOd)}, vyberte prosím pozdější datum.` });
     }
 
-    const { rows: [vyjimka] } = await client.query(
-      'SELECT 1 FROM provozni_vyjimky WHERE $1 BETWEEN datum_od AND datum_do LIMIT 1', [datum]
-    );
-    if (vyjimka) { await client.query('ROLLBACK'); return res.status(400).json({ chyba: 'V tento den bohužel nerezervujeme (dovolená/svátek), vyberte prosím jiné datum.' }); }
+    const oteviraciDoba = await ziskatEfektivniOtevrenoDobu(datum);
+    if (!oteviraciDoba) { await client.query('ROLLBACK'); return res.status(400).json({ chyba: 'V tento den bohužel nerezervujeme (dovolená/svátek/zavřeno), vyberte prosím jiné datum.' }); }
 
     const zacatek = casNaMinuty(cas_od);
     const konec = zacatek + polozkaCeniku.delka_min;
     const cas_do = minutyNaCas(konec);
     const nazevMasaze = polozkaCeniku.skupina + ' – ' + polozkaCeniku.varianta;
+
+    const otevrenoOd = casNaMinuty(oteviraciDoba.otevreno_od);
+    const otevrenoDo = casNaMinuty(oteviraciDoba.otevreno_do);
+    if (zacatek < otevrenoOd || konec > otevrenoDo) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ chyba: 'Tento čas je mimo otevírací dobu, vyberte prosím jiný.' });
+    }
+    if (oteviraciDoba.pauza_od && oteviraciDoba.pauza_do) {
+      const pauzaOd = casNaMinuty(oteviraciDoba.pauza_od), pauzaDo = casNaMinuty(oteviraciDoba.pauza_do);
+      if (zacatek < pauzaDo && konec > pauzaOd) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ chyba: 'Tento čas spadá do polední pauzy, vyberte prosím jiný.' });
+      }
+    }
 
     // Znovu ověřit kolizi (ochrana proti dvěma klientkám, co kliknou zároveň) — teď už pod zámkem výše
     const bufferMin = await ziskatBufferMinut();
@@ -616,13 +638,16 @@ app.get('/api/admin/vyjimky', async (req, res) => {
     res.json(rows);
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
+// otevreno_od/otevreno_do jsou nepovinné — když se vyplní, výjimka pro daný den
+// (dny) nastaví vlastní otevírací dobu místo běžného týdenního rozvrhu (např.
+// jeden den v měsíci delší otevřeno). Bez nich je to jako dřív — celý den zavřeno.
 app.post('/api/admin/vyjimky', async (req, res) => {
-  const { datum_od, datum_do, popis } = req.body || {};
+  const { datum_od, datum_do, popis, otevreno_od, otevreno_do } = req.body || {};
   if (!datum_od || !datum_do) return res.status(400).json({ chyba: 'Zadejte datum od a do.' });
   try {
     const { rows: [vyjimka] } = await db.query(
-      'INSERT INTO provozni_vyjimky (datum_od, datum_do, popis) VALUES ($1,$2,$3) RETURNING *',
-      [datum_od, datum_do, popis || null]
+      'INSERT INTO provozni_vyjimky (datum_od, datum_do, popis, otevreno_od, otevreno_do) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+      [datum_od, datum_do, popis || null, otevreno_od || null, otevreno_do || null]
     );
     res.json({ ok: true, vyjimka });
   } catch (e) { res.status(500).json({ chyba: e.message }); }
