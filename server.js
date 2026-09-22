@@ -652,6 +652,17 @@ app.post('/api/admin/vyjimky', async (req, res) => {
     res.json({ ok: true, vyjimka });
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
+app.put('/api/admin/vyjimky/:id', async (req, res) => {
+  const { datum_od, datum_do, popis, otevreno_od, otevreno_do } = req.body || {};
+  if (!datum_od || !datum_do) return res.status(400).json({ chyba: 'Zadejte datum od a do.' });
+  try {
+    const { rows: [vyjimka] } = await db.query(
+      'UPDATE provozni_vyjimky SET datum_od = $1, datum_do = $2, popis = $3, otevreno_od = $4, otevreno_do = $5 WHERE id = $6 RETURNING *',
+      [datum_od, datum_do, popis || null, otevreno_od || null, otevreno_do || null, req.params.id]
+    );
+    res.json({ ok: true, vyjimka });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
 app.delete('/api/admin/vyjimky/:id', async (req, res) => {
   try {
     await db.query('DELETE FROM provozni_vyjimky WHERE id = $1', [req.params.id]);

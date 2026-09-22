@@ -270,7 +270,7 @@ tr:hover td{background:#fffaf5}
       <div class="table-wrap">
         <div class="table-header">
           <h3>🏖️ Výjimky provozu (dovolená, svátky)</h3>
-          <button class="btn btn-primary btn-sm" onclick="openModal('modalNovaVyjimka')">+ Přidat výjimku</button>
+          <button class="btn btn-primary btn-sm" onclick="otevritNovouVyjimku()">+ Přidat výjimku</button>
         </div>
         <div id="vyjimkyTable"><div class="loading">Načítám...</div></div>
       </div>
@@ -601,10 +601,10 @@ tr:hover td{background:#fffaf5}
   </div>
 </div>
 
-<!-- MODAL: Nová výjimka provozu -->
+<!-- MODAL: Nová/upravovaná výjimka provozu -->
 <div class="modal-overlay" id="modalNovaVyjimka">
   <div class="modal">
-    <h3>+ Přidat výjimku provozu</h3>
+    <h3 id="vyjimkaModalNadpis">+ Přidat výjimku provozu</h3>
     <p style="font-size:0.8rem;color:var(--text-light);margin-top:-8px">Bez vyplněné otevírací doby níž = celý den zavřeno (dovolená, svátek). S vyplněnou otevírací dobou = pro tyhle dny platí místo běžného rozvrhu tahle (např. jeden den v měsíci delší otevřeno).</p>
     <div id="novaVyjimkaMsg"></div>
     <div class="form-grid-2">
@@ -618,7 +618,7 @@ tr:hover td{background:#fffaf5}
     </div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal('modalNovaVyjimka')">Zrušit</button>
-      <button class="btn btn-primary" onclick="pridatVyjimku()">Přidat</button>
+      <button class="btn btn-primary" id="vyjimkaUlozitBtn" onclick="pridatVyjimku()">Přidat</button>
     </div>
   </div>
 </div>
@@ -869,9 +869,36 @@ async function loadVyjimky() {
         <td>${new Date(v.datum_do).toLocaleDateString('cs-CZ')}</td>
         <td>${v.popis || '—'}</td>
         <td>${v.otevreno_od && v.otevreno_do ? v.otevreno_od.slice(0,5) + '–' + v.otevreno_do.slice(0,5) : 'zavřeno celý den'}</td>
-        <td><button class="btn btn-red btn-sm" onclick="smazatVyjimku(${v.id})">🗑️</button></td>
+        <td>
+          <button class="btn btn-outline btn-sm" onclick="upravitVyjimku(${v.id})">✏️</button>
+          <button class="btn btn-red btn-sm" onclick="smazatVyjimku(${v.id})">🗑️</button>
+        </td>
       </tr>`).join('')}</tbody></table>`;
   } catch (e) { document.getElementById('vyjimkyTable').innerHTML = '<div class="error-msg">Chyba načítání.</div>'; }
+}
+let upravovanaVyjimkaId = null;
+function otevritNovouVyjimku() {
+  upravovanaVyjimkaId = null;
+  document.getElementById('vyjimkaModalNadpis').textContent = '+ Přidat výjimku provozu';
+  document.getElementById('vyjimkaUlozitBtn').textContent = 'Přidat';
+  document.getElementById('novaVyjimkaMsg').innerHTML = '';
+  document.getElementById('vyDatumOd').value = ''; document.getElementById('vyDatumDo').value = ''; document.getElementById('vyPopis').value = '';
+  document.getElementById('vyOtevrenoOd').value = ''; document.getElementById('vyOtevrenoDo').value = '';
+  openModal('modalNovaVyjimka');
+}
+function upravitVyjimku(id) {
+  const v = posledniVyjimky.find(x => x.id === id);
+  if (!v) return;
+  upravovanaVyjimkaId = id;
+  document.getElementById('vyjimkaModalNadpis').textContent = '✏️ Upravit výjimku provozu';
+  document.getElementById('vyjimkaUlozitBtn').textContent = 'Uložit';
+  document.getElementById('novaVyjimkaMsg').innerHTML = '';
+  document.getElementById('vyDatumOd').value = v.datum_od;
+  document.getElementById('vyDatumDo').value = v.datum_do;
+  document.getElementById('vyPopis').value = v.popis || '';
+  document.getElementById('vyOtevrenoOd').value = v.otevreno_od ? v.otevreno_od.slice(0, 5) : '';
+  document.getElementById('vyOtevrenoDo').value = v.otevreno_do ? v.otevreno_do.slice(0, 5) : '';
+  openModal('modalNovaVyjimka');
 }
 async function pridatVyjimku() {
   const datum_od = document.getElementById('vyDatumOd').value;
@@ -882,14 +909,14 @@ async function pridatVyjimku() {
   const msg = document.getElementById('novaVyjimkaMsg');
   if (!datum_od || !datum_do) { msg.innerHTML = '<div class="error-msg">Vyplňte datum od a do.</div>'; return; }
   try {
-    const res = await adminFetch(API + '/admin/vyjimky', { method: 'POST', body: JSON.stringify({ datum_od, datum_do, popis, otevreno_od, otevreno_do }) });
+    const url = API + '/admin/vyjimky' + (upravovanaVyjimkaId ? '/' + upravovanaVyjimkaId : '');
+    const method = upravovanaVyjimkaId ? 'PUT' : 'POST';
+    const res = await adminFetch(url, { method, body: JSON.stringify({ datum_od, datum_do, popis, otevreno_od, otevreno_do }) });
     if (res.ok) {
       closeModal('modalNovaVyjimka');
-      document.getElementById('vyDatumOd').value = ''; document.getElementById('vyDatumDo').value = ''; document.getElementById('vyPopis').value = '';
-      document.getElementById('vyOtevrenoOd').value = ''; document.getElementById('vyOtevrenoDo').value = '';
       msg.innerHTML = '';
       loadVyjimky();
-    } else msg.innerHTML = '<div class="error-msg">Nepodařilo se přidat.</div>';
+    } else msg.innerHTML = '<div class="error-msg">Nepodařilo se uložit.</div>';
   } catch (e) { msg.innerHTML = '<div class="error-msg">Nejde se připojit k serveru.</div>'; }
 }
 async function smazatVyjimku(id) {
