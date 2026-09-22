@@ -1941,7 +1941,7 @@
           <input type="tel" id="rezTelefon" class="form-input" placeholder="736 734 951">
         </div>
         <div class="form-field">
-          <label for="rezEmail">E-mail</label>
+          <label for="rezEmail">E-mail*</label>
           <input type="email" id="rezEmail" class="form-input" placeholder="jana@example.cz">
         </div>
         <div class="form-field">
@@ -2475,7 +2475,7 @@ async function rezOdeslat() {
   var souhlasGdpr = document.getElementById('rezSouhlasGdpr').checked;
 
   if (!rezVybranyCas || !rezVybranyDatum || !cenikId) { zprava.textContent = 'Vyberte prosím masáž a čas v kalendáři.'; zprava.className = 'form-msg err'; return; }
-  if (!jmeno || !telefon) { zprava.textContent = 'Vyplňte prosím jméno a telefon.'; zprava.className = 'form-msg err'; return; }
+  if (!jmeno || !telefon || !email) { zprava.textContent = 'Vyplňte prosím jméno, telefon a e-mail.'; zprava.className = 'form-msg err'; return; }
   if (!souhlasGdpr) { zprava.textContent = 'Pro odeslání rezervace je potřeba souhlasit se zpracováním osobních údajů.'; zprava.className = 'form-msg err'; return; }
 
   var btn = document.getElementById('rezSubmitBtn');

@@ -335,8 +335,8 @@ app.get('/api/rezervace/kalendar', async (req, res) => {
 // Vytvoření rezervace klientkou
 app.post('/api/rezervace', async (req, res) => {
   const { datum, cas_od, jmeno, telefon, email, cenik_id, poznamka, poukaz_kod, alergie, preference, souhlas_gdpr, souhlas_newsletter } = req.body || {};
-  if (!datum || !cas_od || !jmeno || !telefon || !cenik_id) {
-    return res.status(400).json({ chyba: 'Vyplňte prosím jméno, telefon, masáž, datum a čas.' });
+  if (!datum || !cas_od || !jmeno || !telefon || !email || !cenik_id) {
+    return res.status(400).json({ chyba: 'Vyplňte prosím jméno, telefon, e-mail, masáž, datum a čas.' });
   }
   if (!souhlas_gdpr) {
     return res.status(400).json({ chyba: 'Pro odeslání rezervace je potřeba souhlasit se zpracováním osobních údajů.' });
