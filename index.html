@@ -903,12 +903,19 @@
   .rez-grid-hlavicka.dnes { color: var(--terracotta); }
   .rez-grid-roh { border-bottom: 1.5px solid rgba(196,122,74,0.2); }
   .rez-grid-hodina {
-    font-size: 0.62rem;
+    font-size: 0.58rem;
     color: var(--text-light);
     text-align: right;
     padding: 0 5px;
     border-top: 1px solid rgba(196,122,74,0.1);
     white-space: nowrap;
+    opacity: 0.7;
+  }
+  .rez-grid-hodina.cela-hodina {
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: var(--brown);
+    opacity: 1;
   }
   .rez-grid-bunka {
     border-left: 1px solid rgba(196,122,74,0.08);
@@ -1921,6 +1928,7 @@
       <span><i style="background:rgba(200,60,60,0.35)"></i> Obsazeno</span>
       <span><i style="background:var(--terracotta)"></i> Vybráno</span>
     </div>
+    <p id="rezVybranyLabel" style="display:none;text-align:center;font-weight:700;color:var(--terracotta-dark);margin:0.8rem 0 0;"></p>
 
     <div id="rezFormFields" style="display:none;">
       <div class="form-row" style="margin-top:1rem;">
@@ -2350,6 +2358,7 @@ async function rezNacistTyden(zachovatZpravu) {
   rezVybranyCas = null;
   rezVybranyDatum = null;
   document.getElementById('rezFormFields').style.display = 'none';
+  document.getElementById('rezVybranyLabel').style.display = 'none';
   if (!zachovatZpravu) {
     document.getElementById('rezZprava').textContent = '';
     document.getElementById('rezZprava').className = 'form-msg';
@@ -2399,7 +2408,7 @@ async function rezNacistTyden(zachovatZpravu) {
     });
     vsechnyCasy.forEach(function(cas) {
       var jeCelaHodina = cas.slice(3) === '00';
-      html += '<div class="rez-grid-hodina">' + (jeCelaHodina ? cas : '') + '</div>';
+      html += '<div class="rez-grid-hodina' + (jeCelaHodina ? ' cela-hodina' : '') + '">' + cas + '</div>';
       dny.forEach(function(den, i) {
         var stav = mapyDnu[i][cas]; // true=volno, false=obsazeno, undefined=mimo otevírací dobu pro tenhle den
         if (stav === undefined) html += '<div class="rez-grid-bunka mimo"></div>';
@@ -2419,6 +2428,10 @@ function rezVybratSlot(bunka, datum, cas) {
   rezVybranyDatum = datum;
   rezVybranyCas = cas;
   document.getElementById('rezFormFields').style.display = 'block';
+  var d = new Date(datum + 'T12:00:00');
+  var label = document.getElementById('rezVybranyLabel');
+  label.textContent = 'Vybraný termín: ' + d.getDate() + '. ' + (d.getMonth() + 1) + '. v ' + cas;
+  label.style.display = 'block';
 }
 
 async function rezOdeslat() {
