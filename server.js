@@ -99,10 +99,11 @@ function formatDatumCz(datumIso) {
   return `${Number(den)}. ${Number(mesic)}. ${rok}`;
 }
 
-// Šablona e-mailu "rezervace potvrzena" (odesílá se, když Alena v adminu přepne
-// rezervaci na stav "potvrzena") — vizuální styl podle podkladu, který dodala.
-function potvrzovaciEmailHtml(r) {
-  const datumCz = formatDatumCz(r.datum);
+// Sdílená vizuální šablona pro úplně všechny e-maily ze salónu (přijetí rezervace,
+// potvrzení, připomínka, žádost o recenzi, newsletter) — ať mají jednotný vzhled.
+// `telo` je jen obsah uvnitř bílé karty (nadpis + text), hlavičku s logem a patičku
+// přidává tahle funkce automaticky.
+function emailSablona(telo) {
   return `<!DOCTYPE html>
 <html lang="cs">
 <head>
@@ -139,20 +140,7 @@ function potvrzovaciEmailHtml(r) {
           </tr>
           <tr>
             <td class="email-body">
-              <h2>Dobrý den, ${r.jmeno},</h2>
-              <p>vaše rezervace je potvrzená — těším se na vaši návštěvu.</p>
-              <table class="rez-detail" width="100%" cellpadding="0" cellspacing="0">
-                <tr><td>
-                  <strong>Masáž:</strong> ${r.masaz}<br>
-                  <strong>Datum:</strong> ${datumCz}<br>
-                  <strong>Čas:</strong> ${r.cas_od.slice(0,5)}–${r.cas_do.slice(0,5)}
-                </td></tr>
-              </table>
-              <p>Pokud potřebujete termín změnit nebo zrušit, ozvěte se mi prosím co nejdřív.</p>
-              <div class="btn-container">
-                <a href="tel:736734951" class="btn">Zavolat kvůli změně termínu</a>
-              </div>
-              <p>S pozdravem,<br><strong>Alena Hasalová</strong><br>Masáže Alesa</p>
+              ${telo}
             </td>
           </tr>
           <tr>
@@ -167,6 +155,72 @@ function potvrzovaciEmailHtml(r) {
   </table>
 </body>
 </html>`;
+}
+
+// Rezervace přijata (hned po odeslání formuláře na webu)
+function prijataEmailHtml(jmeno, nazevMasaze, datum, casOd, casDo) {
+  return emailSablona(`
+    <h2>Dobrý den, ${jmeno},</h2>
+    <p>děkuji za rezervaci. Přijala jsem ji a brzy vám ji telefonicky nebo e-mailem potvrdím.</p>
+    <table class="rez-detail" width="100%" cellpadding="0" cellspacing="0">
+      <tr><td>
+        <strong>Masáž:</strong> ${nazevMasaze}<br>
+        <strong>Datum:</strong> ${formatDatumCz(datum)}<br>
+        <strong>Čas:</strong> ${casOd}–${casDo}
+      </td></tr>
+    </table>
+    <p>V případě potřeby mě prosím kontaktujte na tel. 736 734 951.</p>
+    <p>S pozdravem,<br><strong>Alena Hasalová</strong><br>Masáže Alesa</p>
+  `);
+}
+
+// Rezervace potvrzena (odesílá se, když Alena v adminu přepne rezervaci na stav "potvrzena")
+function potvrzovaciEmailHtml(r) {
+  return emailSablona(`
+    <h2>Dobrý den, ${r.jmeno},</h2>
+    <p>vaše rezervace je potvrzená — těším se na vaši návštěvu.</p>
+    <table class="rez-detail" width="100%" cellpadding="0" cellspacing="0">
+      <tr><td>
+        <strong>Masáž:</strong> ${r.masaz}<br>
+        <strong>Datum:</strong> ${formatDatumCz(r.datum)}<br>
+        <strong>Čas:</strong> ${r.cas_od.slice(0,5)}–${r.cas_do.slice(0,5)}
+      </td></tr>
+    </table>
+    <p>Pokud potřebujete termín změnit nebo zrušit, ozvěte se mi prosím co nejdřív.</p>
+    <div class="btn-container">
+      <a href="tel:736734951" class="btn">Zavolat kvůli změně termínu</a>
+    </div>
+    <p>S pozdravem,<br><strong>Alena Hasalová</strong><br>Masáže Alesa</p>
+  `);
+}
+
+// Připomínka den předem (denní cron úloha)
+function pripomenkaEmailHtml(r) {
+  return emailSablona(`
+    <h2>Dobrý den, ${r.jmeno},</h2>
+    <p>připomínám vaši rezervaci na zítra:</p>
+    <table class="rez-detail" width="100%" cellpadding="0" cellspacing="0">
+      <tr><td>
+        <strong>Masáž:</strong> ${r.masaz}<br>
+        <strong>Datum:</strong> ${formatDatumCz(r.datum)}<br>
+        <strong>Čas:</strong> ${String(r.cas_od).slice(0,5)}–${String(r.cas_do).slice(0,5)}
+      </td></tr>
+    </table>
+    <p>Pokud se nemůžete dostavit, dejte mi prosím vědět na tel. 736 734 951.</p>
+    <p>S pozdravem,<br><strong>Alena Hasalová</strong><br>Masáže Alesa</p>
+  `);
+}
+
+// Žádost o recenzi den po návštěvě (denní cron úloha)
+function recenzeEmailHtml(r) {
+  return emailSablona(`
+    <h2>Dobrý den, ${r.jmeno},</h2>
+    <p>děkuji, že jste včera navštívila můj salón. Budu moc ráda, když mi napíšete pár slov zpětné vazby nebo necháte recenzi.</p>
+    <div class="btn-container">
+      <a href="https://www.facebook.com/masazehasalova" class="btn">Napsat recenzi na Facebooku</a>
+    </div>
+    <p>S pozdravem,<br><strong>Alena Hasalová</strong><br>Masáže Alesa</p>
+  `);
 }
 
 // ── LOGIN (admin) ──
@@ -334,17 +388,7 @@ app.post('/api/rezervace', async (req, res) => {
     await client.query('COMMIT');
 
     if (email) {
-      odeslatEmail(email, 'Rezervace přijata – Masáže Alesa', `
-        <p>Dobrý den ${jmeno},</p>
-        <p>děkujeme za rezervaci. Přijali jsme ji a brzy vám ji telefonicky nebo e-mailem potvrdíme.</p>
-        <p>
-          <strong>Masáž:</strong> ${nazevMasaze}<br>
-          <strong>Datum:</strong> ${formatDatumCz(datum)}<br>
-          <strong>Čas:</strong> ${cas_od}–${cas_do}
-        </p>
-        <p>V případě potřeby nás prosím kontaktujte na tel. 736 734 951.</p>
-        <p>🌸 Masáže Alesa</p>
-      `);
+      odeslatEmail(email, 'Rezervace přijata – Masáže Alesa', prijataEmailHtml(jmeno, nazevMasaze, datum, cas_od, cas_do));
     }
 
     res.json({ ok: true, rezervace });
@@ -789,9 +833,10 @@ app.post('/api/admin/newsletter/odeslat', async (req, res) => {
     let odeslano = 0;
     for (const o of odberatele) {
       const odhlasitUrl = `${API_URL}/api/newsletter/odhlasit?token=${o.odhlasovaci_token}`;
-      const html = `${obsah}<hr style="margin-top:30px;border:none;border-top:1px solid #ddd">
-        <p style="font-size:12px;color:#999">Nechcete už tyto e-maily dostávat?
-        <a href="${odhlasitUrl}">Odhlásit se z newsletteru</a></p>`;
+      const html = emailSablona(`${obsah}
+        <p style="font-size:12px;color:#999;margin-top:30px;border-top:1px solid #f0ece6;padding-top:15px;">
+          Nechcete už tyto e-maily dostávat? <a href="${odhlasitUrl}" style="color:#bfa14f;">Odhlásit se z newsletteru</a>
+        </p>`);
       if (await odeslatEmail(o.email, predmet, html)) odeslano++;
     }
 
@@ -930,17 +975,7 @@ app.get('/api/cron/denni', async (req, res) => {
       [zitraIso]
     );
     for (const r of zitrejsi) {
-      const odeslano = await odeslatEmail(r.email, 'Připomínka rezervace zítra – Masáže Alesa', `
-        <p>Dobrý den ${r.jmeno},</p>
-        <p>připomínáme vaši rezervaci na zítra:</p>
-        <p>
-          <strong>Masáž:</strong> ${r.masaz}<br>
-          <strong>Datum:</strong> ${formatDatumCz(r.datum)}<br>
-          <strong>Čas:</strong> ${String(r.cas_od).slice(0, 5)}–${String(r.cas_do).slice(0, 5)}
-        </p>
-        <p>Pokud se nemůžete dostavit, dejte nám prosím vědět na tel. 736 734 951.</p>
-        <p>🌸 Masáže Alesa</p>
-      `);
+      const odeslano = await odeslatEmail(r.email, 'Připomínka rezervace zítra – Masáže Alesa', pripomenkaEmailHtml(r));
       if (odeslano) {
         await db.query('UPDATE rezervace SET pripomenuto = true WHERE id = $1', [r.id]);
         pripomenutoPocet++;
@@ -953,12 +988,7 @@ app.get('/api/cron/denni', async (req, res) => {
       [vceraIso]
     );
     for (const r of vcerejsi) {
-      const odeslano = await odeslatEmail(r.email, 'Jak jste byla spokojená? – Masáže Alesa', `
-        <p>Dobrý den ${r.jmeno},</p>
-        <p>děkujeme, že jste včera navštívila náš salón. Budeme moc rády, když nám napíšete pár slov zpětné vazby nebo necháte recenzi.</p>
-        <p><a href="https://www.facebook.com/masazehasalova">Napsat recenzi na Facebooku</a></p>
-        <p>🌸 Masáže Alesa</p>
-      `);
+      const odeslano = await odeslatEmail(r.email, 'Jak jste byla spokojená? – Masáže Alesa', recenzeEmailHtml(r));
       if (odeslano) {
         await db.query('UPDATE rezervace SET pozadano_recenze = true WHERE id = $1', [r.id]);
         recenzePocet++;
