@@ -230,18 +230,6 @@ app.post('/api/login', (req, res) => {
   res.status(401).json({ ok: false });
 });
 
-// ── JEDNORÁZOVÁ MIGRACE: doplní sloupce otevreno_od/otevreno_do do provozni_vyjimky.
-// Po ověření, že proběhla, se zase odstraní (stejný postup jako minule).
-app.post('/api/admin/migrace-2026-09b', vyzadovatAdmina, async (req, res) => {
-  try {
-    await db.query(`
-      ALTER TABLE provozni_vyjimky ADD COLUMN IF NOT EXISTS otevreno_od time;
-      ALTER TABLE provozni_vyjimky ADD COLUMN IF NOT EXISTS otevreno_do time;
-    `);
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ chyba: e.message }); }
-});
-
 // ══════════════ VEŘEJNÉ ENDPOINTY ══════════════
 
 // Ceník pro zobrazení na webu (seřazeno podle skupiny a varianty)
