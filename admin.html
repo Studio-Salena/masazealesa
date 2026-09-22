@@ -500,7 +500,6 @@ tr:hover td{background:#fffaf5}
       <div class="form-group"><label>Telefon</label><input type="text" id="npTelefon"></div>
     </div>
     <div class="form-group"><label>Pro koho (nepovinné)</label><input type="text" id="npProKoho"></div>
-    <div class="form-group"><label>Konkrétní masáž (nepovinné — pokud poukaz platí jen na jednu masáž, ne na libovolné použití do dané částky)</label><input type="text" id="npMasaz" placeholder="např. Rekondiční masáž 60 min"></div>
     <div class="form-group"><label>Zakoupeno</label>
       <select id="npKde"><option value="osobne">Osobně v salonu</option><option value="web">Přes web</option></select>
     </div>
@@ -1055,9 +1054,15 @@ async function loadPoukazyTypy() {
     posledniTypyPoukazu = await adminFetch(API + '/admin/poukazy/typy').then(r => r.json());
     const npTyp = document.getElementById('npTyp');
     if (npTyp) {
-      npTyp.innerHTML = posledniTypyPoukazu.length
-        ? posledniTypyPoukazu.map(t => `<option value="${t.id}">${Number(t.hodnota).toLocaleString('cs-CZ')} Kč — platí ${t.platnost_mesicu} měsíců</option>`).join('')
-        : '<option value="">Nejdřív přidejte variantu poukazu</option>';
+      const cenik = await adminFetch(API + '/admin/cenik').then(r => r.json()).catch(() => []);
+      const masazeOptions = cenik.filter(c => c.rezervovatelna)
+        .map(c => `<option value="masaz:${c.id}">${c.skupina} – ${c.varianta} (${Number(c.cena).toLocaleString('cs-CZ')} Kč)</option>`).join('');
+      const castkyOptions = posledniTypyPoukazu.length
+        ? posledniTypyPoukazu.map(t => `<option value="typ:${t.id}">${Number(t.hodnota).toLocaleString('cs-CZ')} Kč — platí ${t.platnost_mesicu} měsíců</option>`).join('')
+        : '';
+      npTyp.innerHTML = '<option value="">Vyberte…</option>'
+        + (castkyOptions ? `<optgroup label="Částka">${castkyOptions}</optgroup>` : '')
+        + (masazeOptions ? `<optgroup label="Konkrétní masáž">${masazeOptions}</optgroup>` : '');
     }
     if (!posledniTypyPoukazu.length) { document.getElementById('poukazyTypyTable').innerHTML = '<div class="empty">Zatím žádné varianty — přidejte první tlačítkem výše</div>'; return; }
     document.getElementById('poukazyTypyTable').innerHTML = `
@@ -1130,18 +1135,20 @@ async function smazatZadost(id) {
   loadPoukazy();
 }
 async function vydatPoukaz() {
-  const poukaz_typ_id = document.getElementById('npTyp').value;
+  const vybrano = document.getElementById('npTyp').value;
   const kupujici_jmeno = document.getElementById('npJmeno').value;
   const kupujici_email = document.getElementById('npEmail').value;
   const kupujici_telefon = document.getElementById('npTelefon').value;
   const pro_koho = document.getElementById('npProKoho').value;
-  const konkretni_masaz = document.getElementById('npMasaz').value;
   const zakoupeno_kde = document.getElementById('npKde').value;
   const msg = document.getElementById('novyPoukazMsg');
-  if (!poukaz_typ_id) { msg.innerHTML = '<div class="error-msg">Vyberte variantu poukazu.</div>'; return; }
+  if (!vybrano) { msg.innerHTML = '<div class="error-msg">Vyberte variantu poukazu nebo konkrétní masáž.</div>'; return; }
+  const [druh, id] = vybrano.split(':');
+  const body = { kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, zakoupeno_kde };
+  if (druh === 'masaz') body.cenik_id = id; else body.poukaz_typ_id = id;
   try {
-    const res = await adminFetch(API + '/admin/poukazy', { method: 'POST', body: JSON.stringify({ poukaz_typ_id, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, konkretni_masaz, zakoupeno_kde }) });
-    if (res.ok) { closeModal('modalNovyPoukaz'); document.getElementById('npMasaz').value = ''; loadPoukazy(); } else msg.innerHTML = '<div class="error-msg">Nepodařilo se vydat poukaz.</div>';
+    const res = await adminFetch(API + '/admin/poukazy', { method: 'POST', body: JSON.stringify(body) });
+    if (res.ok) { closeModal('modalNovyPoukaz'); loadPoukazy(); } else msg.innerHTML = '<div class="error-msg">Nepodařilo se vydat poukaz.</div>';
   } catch (e) { msg.innerHTML = '<div class="error-msg">Nejde se připojit k serveru — backend ještě neběží nebo není doplněná jeho adresa v proměnné API.</div>'; }
 }
 async function smazatPoukaz(id) {

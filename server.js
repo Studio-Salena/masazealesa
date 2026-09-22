@@ -713,18 +713,32 @@ app.get('/api/admin/poukazy', async (req, res) => {
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
+// Poukaz jde vydat buď na částku (poukaz_typ_id, z "Varianty poukazů"), nebo rovnou
+// na konkrétní masáž (cenik_id) — pak se hodnota poukazu vezme přímo z ceníku,
+// místo aby se vždycky vynucovala první/vybraná peněžní varianta.
 app.post('/api/admin/poukazy', async (req, res) => {
-  const { poukaz_typ_id, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, zakoupeno_kde, konkretni_masaz } = req.body || {};
-  if (!poukaz_typ_id) return res.status(400).json({ chyba: 'Vyberte variantu poukazu.' });
+  const { poukaz_typ_id, cenik_id, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, zakoupeno_kde } = req.body || {};
+  if (!poukaz_typ_id && !cenik_id) return res.status(400).json({ chyba: 'Vyberte variantu poukazu nebo konkrétní masáž.' });
   try {
-    const { rows: [typ] } = await db.query('SELECT * FROM poukazy_typy WHERE id = $1', [poukaz_typ_id]);
-    if (!typ) return res.status(404).json({ chyba: 'Tato varianta poukazu nebyla nalezena.' });
+    let hodnota, platnostMesicu, konkretniMasaz = null;
+    if (cenik_id) {
+      const { rows: [polozka] } = await db.query('SELECT * FROM cenik WHERE id = $1', [cenik_id]);
+      if (!polozka) return res.status(404).json({ chyba: 'Tato masáž nebyla v ceníku nalezena.' });
+      hodnota = polozka.cena;
+      platnostMesicu = 12;
+      konkretniMasaz = polozka.skupina + ' – ' + polozka.varianta;
+    } else {
+      const { rows: [typ] } = await db.query('SELECT * FROM poukazy_typy WHERE id = $1', [poukaz_typ_id]);
+      if (!typ) return res.status(404).json({ chyba: 'Tato varianta poukazu nebyla nalezena.' });
+      hodnota = typ.hodnota;
+      platnostMesicu = typ.platnost_mesicu;
+    }
     const platnostDo = new Date();
-    platnostDo.setMonth(platnostDo.getMonth() + typ.platnost_mesicu);
+    platnostDo.setMonth(platnostDo.getMonth() + platnostMesicu);
     const { rows: [poukaz] } = await db.query(
       `INSERT INTO poukazy (kod, ean, hodnota, zustatek, platnost_do, zakoupeno_kde, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, konkretni_masaz, stav)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'aktivni') RETURNING *`,
-      [vygenerovatKod(), vygenerovatEan(), typ.hodnota, typ.hodnota, platnostDo.toISOString().slice(0, 10), zakoupeno_kde || 'osobne', kupujici_jmeno || null, kupujici_email || null, kupujici_telefon || null, pro_koho || null, konkretni_masaz || null]
+      [vygenerovatKod(), vygenerovatEan(), hodnota, hodnota, platnostDo.toISOString().slice(0, 10), zakoupeno_kde || 'osobne', kupujici_jmeno || null, kupujici_email || null, kupujici_telefon || null, pro_koho || null, konkretniMasaz]
     );
     res.json({ ok: true, poukaz });
   } catch (e) { res.status(500).json({ chyba: e.message }); }
