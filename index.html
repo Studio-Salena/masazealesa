@@ -2430,7 +2430,16 @@ function rezVybratSlot(bunka, datum, cas) {
   document.getElementById('rezFormFields').style.display = 'block';
   var d = new Date(datum + 'T12:00:00');
   var label = document.getElementById('rezVybranyLabel');
-  label.textContent = 'Vybraný termín: ' + d.getDate() + '. ' + (d.getMonth() + 1) + '. v ' + cas;
+  var cenikId = document.getElementById('rezMasaz').value;
+  var masaz = cenikData.filter(function(c) { return String(c.id) === cenikId; })[0];
+  var textCasu = cas;
+  if (masaz) {
+    var [h, m] = cas.split(':').map(Number);
+    var konecMin = h * 60 + m + masaz.delka_min;
+    var konecCas = String(Math.floor(konecMin / 60)).padStart(2, '0') + ':' + String(konecMin % 60).padStart(2, '0');
+    textCasu = cas + '–' + konecCas;
+  }
+  label.textContent = 'Vybraný termín: ' + d.getDate() + '. ' + (d.getMonth() + 1) + '. v ' + textCasu;
   label.style.display = 'block';
 }
 
