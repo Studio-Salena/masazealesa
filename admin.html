@@ -236,6 +236,7 @@ tr:hover td{background:#fffaf5}
       <div class="page-header">
         <div class="page-title">📅 Rezervace</div>
         <div class="table-actions">
+          <button class="btn btn-primary btn-sm" onclick="otevritNovouRezervaci()">+ Přidat rezervaci</button>
           <button class="refresh-btn" onclick="loadRezervace()">↻ Obnovit</button>
         </div>
       </div>
@@ -574,6 +575,32 @@ tr:hover td{background:#fffaf5}
   </div>
 </div>
 
+<!-- MODAL: Nová rezervace (ručně, mimo otevírací dobu apod.) -->
+<div class="modal-overlay" id="modalNovaRezervace">
+  <div class="modal">
+    <h3>+ Přidat rezervaci</h3>
+    <p style="font-size:0.8rem;color:var(--text-light);margin-top:-8px">Jde i mimo běžnou otevírací dobu — hodí se pro klientky domluvené mimo web. Rezervace se rovnou založí jako potvrzená a pokud vyplníš e-mail, hned se jí pošle potvrzovací e-mail.</p>
+    <div id="novaRezervaceMsg"></div>
+    <div class="form-group"><label>Masáž</label>
+      <select id="nrMasaz" style="width:100%;border:1px solid var(--tan-light);border-radius:6px;padding:8px"><option value="">Načítám…</option></select>
+    </div>
+    <div class="form-grid-2">
+      <div class="form-group"><label>Datum</label><input type="date" id="nrDatum"></div>
+      <div class="form-group"><label>Čas</label><input type="time" id="nrCas" step="900"></div>
+    </div>
+    <div class="form-grid-2">
+      <div class="form-group"><label>Jméno a příjmení</label><input type="text" id="nrJmeno" placeholder="Jana Nováková"></div>
+      <div class="form-group"><label>Telefon</label><input type="tel" id="nrTelefon" placeholder="736 734 951"></div>
+    </div>
+    <div class="form-group"><label>E-mail (nepovinné — bez něj se e-mail neodešle)</label><input type="email" id="nrEmail" placeholder="jana@example.cz"></div>
+    <div class="form-group"><label>Poznámka</label><input type="text" id="nrPoznamka" placeholder="Nepovinné"></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modalNovaRezervace')">Zrušit</button>
+      <button class="btn btn-primary" onclick="pridatRezervaci()">Přidat</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL: Nová výjimka provozu -->
 <div class="modal-overlay" id="modalNovaVyjimka">
   <div class="modal">
@@ -702,6 +729,54 @@ async function loadRezervace() {
   loadPracovniDoba();
   loadNastaveni();
   loadVyjimky();
+}
+
+async function otevritNovouRezervaci() {
+  const sel = document.getElementById('nrMasaz');
+  sel.innerHTML = '<option value="">Načítám…</option>';
+  document.getElementById('novaRezervaceMsg').innerHTML = '';
+  document.getElementById('nrDatum').value = '';
+  document.getElementById('nrCas').value = '';
+  document.getElementById('nrJmeno').value = '';
+  document.getElementById('nrTelefon').value = '';
+  document.getElementById('nrEmail').value = '';
+  document.getElementById('nrPoznamka').value = '';
+  openModal('modalNovaRezervace');
+  try {
+    const cenik = await adminFetch(API + '/admin/cenik').then(r => r.json());
+    sel.innerHTML = cenik.map(c => `<option value="${c.id}">${c.skupina} – ${c.varianta} (${c.delka_min} min)</option>`).join('');
+  } catch (e) {
+    sel.innerHTML = '<option value="">Nepodařilo se načíst ceník</option>';
+  }
+}
+async function pridatRezervaci() {
+  const cenik_id = document.getElementById('nrMasaz').value;
+  const datum = document.getElementById('nrDatum').value;
+  const cas_od = document.getElementById('nrCas').value;
+  const jmeno = document.getElementById('nrJmeno').value.trim();
+  const telefon = document.getElementById('nrTelefon').value.trim();
+  const email = document.getElementById('nrEmail').value.trim();
+  const poznamka = document.getElementById('nrPoznamka').value.trim();
+  const msg = document.getElementById('novaRezervaceMsg');
+  if (!cenik_id || !datum || !cas_od || !jmeno) {
+    msg.innerHTML = '<div class="error-msg">Vyplňte prosím masáž, datum, čas a jméno.</div>';
+    return;
+  }
+  try {
+    const res = await adminFetch(API + '/admin/rezervace', {
+      method: 'POST',
+      body: JSON.stringify({ cenik_id, datum, cas_od, jmeno, telefon, email, poznamka })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      closeModal('modalNovaRezervace');
+      loadRezervace();
+    } else {
+      msg.innerHTML = '<div class="error-msg">' + (data.chyba || 'Nepodařilo se přidat.') + '</div>';
+    }
+  } catch (e) {
+    msg.innerHTML = '<div class="error-msg">Nejde se připojit k serveru.</div>';
+  }
 }
 
 async function loadPracovniDoba() {

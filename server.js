@@ -480,6 +480,60 @@ app.get('/api/admin/rezervace', async (req, res) => {
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
+// Ruční založení rezervace přímo Alenou (např. klientka mimo běžnou otevírací dobu) —
+// na rozdíl od veřejného POST /api/rezervace se tu neřeší otevírací doba ani datum
+// "rezervace možné od" (to platí jen pro online rezervace klientkami), ale kolize
+// s ostatními rezervacemi (+ mezera) se pořád hlídá, ať se nepřepíšou dvě klientky
+// na stejný čas. Rezervace se rovnou založí jako "potvrzena" a pošle se e-mail.
+app.post('/api/admin/rezervace', async (req, res) => {
+  const { datum, cas_od, jmeno, telefon, email, cenik_id, poznamka } = req.body || {};
+  if (!datum || !cas_od || !jmeno || !cenik_id) {
+    return res.status(400).json({ chyba: 'Vyplňte prosím jméno, masáž, datum a čas.' });
+  }
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [datum]);
+
+    const { rows: [polozkaCeniku] } = await client.query('SELECT * FROM cenik WHERE id = $1', [cenik_id]);
+    if (!polozkaCeniku) { await client.query('ROLLBACK'); return res.status(404).json({ chyba: 'Tato masáž nebyla v ceníku nalezena.' }); }
+
+    const zacatek = casNaMinuty(cas_od);
+    const konec = zacatek + polozkaCeniku.delka_min;
+    const cas_do = minutyNaCas(konec);
+    const nazevMasaze = polozkaCeniku.skupina + ' – ' + polozkaCeniku.varianta;
+
+    const bufferMin = await ziskatBufferMinut();
+    const { rows: existujici } = await client.query(
+      "SELECT cas_od, cas_do FROM rezervace WHERE datum = $1 AND stav <> 'zrusena'", [datum]
+    );
+    const koliduje = existujici.some(r => {
+      const oOd = casNaMinuty(r.cas_od) - bufferMin, oDo = casNaMinuty(r.cas_do) + bufferMin;
+      return zacatek < oDo && konec > oOd;
+    });
+    if (koliduje) { await client.query('ROLLBACK'); return res.status(409).json({ chyba: 'Tento termín koliduje s jinou rezervací (nebo je jí příliš blízko).' }); }
+
+    const { rows: [rezervace] } = await client.query(
+      `INSERT INTO rezervace (cenik_id, datum, cas_od, cas_do, jmeno, telefon, email, masaz, poznamka, stav, cena)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'potvrzena',$10) RETURNING *`,
+      [cenik_id, datum, cas_od, cas_do, jmeno, telefon || null, email || null, nazevMasaze, poznamka || null, polozkaCeniku.cena]
+    );
+
+    await client.query('COMMIT');
+
+    if (email) {
+      odeslatEmail(email, 'Rezervace potvrzena – Masáže Alesa', potvrzovaciEmailHtml(rezervace));
+    }
+
+    res.json({ ok: true, rezervace });
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch {}
+    res.status(500).json({ chyba: e.message });
+  } finally {
+    client.release();
+  }
+});
+
 app.patch('/api/admin/rezervace/:id/stav', async (req, res) => {
   const { stav } = req.body || {};
   if (!['cekajici', 'potvrzena', 'dokoncena', 'nedostavila_se', 'zrusena'].includes(stav)) {
