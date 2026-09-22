@@ -1948,11 +1948,27 @@
           <label for="rezPoukazKod">Kód dárkového poukazu</label>
           <input type="text" id="rezPoukazKod" class="form-input" placeholder="Nepovinné">
         </div>
+        <div class="form-field">
+          <label for="rezAlergie">Alergie (např. na oleje)</label>
+          <input type="text" id="rezAlergie" class="form-input" placeholder="Nepovinné">
+        </div>
+        <div class="form-field">
+          <label for="rezPreference">Preference (např. síla tlaku)</label>
+          <input type="text" id="rezPreference" class="form-input" placeholder="Nepovinné">
+        </div>
         <div class="form-field form-field-full">
           <label for="rezPoznamka">Poznámka</label>
           <textarea id="rezPoznamka" class="form-textarea" placeholder="Nepovinné"></textarea>
         </div>
       </div>
+      <label style="display:flex;align-items:flex-start;gap:0.5rem;margin-top:1rem;font-size:0.85rem;cursor:pointer;">
+        <input type="checkbox" id="rezSouhlasNewsletter" style="margin-top:0.2rem;">
+        <span>Chci dostávat novinky a tipy e-mailem (nepovinné).</span>
+      </label>
+      <label style="display:flex;align-items:flex-start;gap:0.5rem;margin-top:0.6rem;font-size:0.85rem;cursor:pointer;">
+        <input type="checkbox" id="rezSouhlasGdpr" style="margin-top:0.2rem;">
+        <span>Souhlasím se zpracováním osobních údajů dle <a href="ochrana-osobnich-udaju.html" target="_blank" style="color:var(--terracotta-dark);text-decoration:underline;">zásad ochrany osobních údajů</a>.*</span>
+      </label>
       <p class="rez-hint" style="margin-top:1rem;">Odesláním si termín zarezervujete — do 24 hodin vám ho telefonicky nebo e-mailem potvrdíme.</p>
       <div style="text-align:center; margin-top:0.5rem;">
         <button type="button" id="rezSubmitBtn" class="btn-gold" onclick="rezOdeslat()">Odeslat rezervaci</button>
@@ -2173,7 +2189,8 @@
     <a href="tel:736734951">736 734 951</a> ·
     <a href="mailto:info@masazealesa.cz">info@masazealesa.cz</a> ·
     <a href="https://www.facebook.com/masazehasalova" target="_blank">Facebook</a> ·
-    <a href="https://www.instagram.com/masazehasalova/" target="_blank">Instagram</a>
+    <a href="https://www.instagram.com/masazehasalova/" target="_blank">Instagram</a> ·
+    <a href="ochrana-osobnich-udaju.html">Ochrana osobních údajů</a>
   </p>
   <p style="margin-top:0.6rem;font-size:0.78rem;">
     Web vytvořilo: <a href="https://www.studiosalena.cz" target="_blank">Studio Salena</a>
@@ -2451,10 +2468,15 @@ async function rezOdeslat() {
   var telefon = document.getElementById('rezTelefon').value.trim();
   var email = document.getElementById('rezEmail').value.trim();
   var poukazKod = document.getElementById('rezPoukazKod').value.trim();
+  var alergie = document.getElementById('rezAlergie').value.trim();
+  var preference = document.getElementById('rezPreference').value.trim();
   var poznamka = document.getElementById('rezPoznamka').value.trim();
+  var souhlasNewsletter = document.getElementById('rezSouhlasNewsletter').checked;
+  var souhlasGdpr = document.getElementById('rezSouhlasGdpr').checked;
 
   if (!rezVybranyCas || !rezVybranyDatum || !cenikId) { zprava.textContent = 'Vyberte prosím masáž a čas v kalendáři.'; zprava.className = 'form-msg err'; return; }
   if (!jmeno || !telefon) { zprava.textContent = 'Vyplňte prosím jméno a telefon.'; zprava.className = 'form-msg err'; return; }
+  if (!souhlasGdpr) { zprava.textContent = 'Pro odeslání rezervace je potřeba souhlasit se zpracováním osobních údajů.'; zprava.className = 'form-msg err'; return; }
 
   var btn = document.getElementById('rezSubmitBtn');
   btn.disabled = true; btn.textContent = 'Odesílám…';
@@ -2462,7 +2484,7 @@ async function rezOdeslat() {
     var res = await fetch(API + '/rezervace', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ datum: rezVybranyDatum, cas_od: rezVybranyCas, jmeno: jmeno, telefon: telefon, email: email, cenik_id: cenikId, poznamka: poznamka, poukaz_kod: poukazKod })
+      body: JSON.stringify({ datum: rezVybranyDatum, cas_od: rezVybranyCas, jmeno: jmeno, telefon: telefon, email: email, cenik_id: cenikId, poznamka: poznamka, poukaz_kod: poukazKod, alergie: alergie, preference: preference, souhlas_gdpr: souhlasGdpr, souhlas_newsletter: souhlasNewsletter })
     });
     var vysledek = await res.json();
     if (!res.ok) {
@@ -2482,7 +2504,11 @@ async function rezOdeslat() {
     document.getElementById('rezTelefon').value = '';
     document.getElementById('rezEmail').value = '';
     document.getElementById('rezPoukazKod').value = '';
+    document.getElementById('rezAlergie').value = '';
+    document.getElementById('rezPreference').value = '';
     document.getElementById('rezPoznamka').value = '';
+    document.getElementById('rezSouhlasNewsletter').checked = false;
+    document.getElementById('rezSouhlasGdpr').checked = false;
     document.getElementById('rezFormFields').style.display = 'none';
     rezVybranyCas = null;
     rezVybranyDatum = null;

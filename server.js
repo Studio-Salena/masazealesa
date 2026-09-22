@@ -334,9 +334,12 @@ app.get('/api/rezervace/kalendar', async (req, res) => {
 
 // Vytvoření rezervace klientkou
 app.post('/api/rezervace', async (req, res) => {
-  const { datum, cas_od, jmeno, telefon, email, cenik_id, poznamka, poukaz_kod } = req.body || {};
+  const { datum, cas_od, jmeno, telefon, email, cenik_id, poznamka, poukaz_kod, alergie, preference, souhlas_gdpr, souhlas_newsletter } = req.body || {};
   if (!datum || !cas_od || !jmeno || !telefon || !cenik_id) {
     return res.status(400).json({ chyba: 'Vyplňte prosím jméno, telefon, masáž, datum a čas.' });
+  }
+  if (!souhlas_gdpr) {
+    return res.status(400).json({ chyba: 'Pro odeslání rezervace je potřeba souhlasit se zpracováním osobních údajů.' });
   }
   // Celý blok (kontrola kolize + zápis) běží v jedné transakci uzamčené na dané datum,
   // aby se dvě rezervace odeslané prakticky současně nemohly obě protlačit na stejný
@@ -408,6 +411,31 @@ app.post('/api/rezervace', async (req, res) => {
     );
 
     await client.query('COMMIT');
+
+    // Alergie/preference se ukládají k zákaznici (podle telefonu), ať je Alena vidí
+    // příště u každé další rezervace, ne jen jako poznámku u tohohle jednoho termínu.
+    if (alergie || preference) {
+      db.query(
+        `INSERT INTO zakaznici (telefon, jmeno, email, alergie, preference, upraveno) VALUES ($1,$2,$3,$4,$5,now())
+         ON CONFLICT (telefon) DO UPDATE SET
+           jmeno = COALESCE($2, zakaznici.jmeno),
+           email = COALESCE($3, zakaznici.email),
+           alergie = COALESCE($4, zakaznici.alergie),
+           preference = COALESCE($5, zakaznici.preference),
+           upraveno = now()`,
+        [telefon.trim(), jmeno || null, email || null, alergie || null, preference || null]
+      ).catch(() => {});
+    }
+
+    if (souhlas_newsletter && email) {
+      const token = crypto.randomBytes(20).toString('hex');
+      db.query(
+        `INSERT INTO newsletter_odberatele (email, jmeno, odhlasovaci_token)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (email) DO UPDATE SET aktivni = true, jmeno = COALESCE($2, newsletter_odberatele.jmeno)`,
+        [email.trim().toLowerCase(), jmeno || null, token]
+      ).catch(() => {});
+    }
 
     if (email) {
       odeslatEmail(email, 'Rezervace přijata – Masáže Alesa', prijataEmailHtml(jmeno, nazevMasaze, datum, cas_od, cas_do));
