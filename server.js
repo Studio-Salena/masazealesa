@@ -99,6 +99,76 @@ function formatDatumCz(datumIso) {
   return `${Number(den)}. ${Number(mesic)}. ${rok}`;
 }
 
+// Šablona e-mailu "rezervace potvrzena" (odesílá se, když Alena v adminu přepne
+// rezervaci na stav "potvrzena") — vizuální styl podle podkladu, který dodala.
+function potvrzovaciEmailHtml(r) {
+  const datumCz = formatDatumCz(r.datum);
+  return `<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Masáže Alesa</title>
+<style>
+  body { margin:0; padding:0; background-color:#fcfbfa; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; color:#4a4541; line-height:1.6; }
+  .email-wrapper { width:100%; table-layout:fixed; background-color:#fcfbfa; padding:40px 0; }
+  .email-content { max-width:600px; margin:0 auto; background-color:#ffffff; border-radius:8px; overflow:hidden; border:1px solid #f0ece6; box-shadow:0 4px 15px rgba(0,0,0,0.03); }
+  .email-header { background:linear-gradient(135deg, #fffcf7 0%, #f7f1e5 100%); padding:35px 20px; text-align:center; border-bottom:1px solid #f0ece6; }
+  .email-header img { max-width:120px; height:auto; margin-bottom:15px; }
+  .email-header h1 { color:#bfa14f; font-size:24px; margin:0; font-weight:400; letter-spacing:1px; }
+  .email-body { padding:40px 30px; }
+  .email-body h2 { color:#332e2a; font-size:20px; margin-top:0; font-weight:500; }
+  .email-body p { margin-bottom:20px; font-size:15px; }
+  .rez-detail { background-color:#f7f5f0; border-radius:6px; padding:18px 22px; font-size:15px; margin-bottom:20px; }
+  .btn-container { text-align:center; margin:35px 0; }
+  .btn { background-color:#d4af37; color:#ffffff; padding:12px 30px; text-decoration:none; border-radius:4px; font-weight:500; letter-spacing:0.5px; display:inline-block; box-shadow:0 2px 5px rgba(212,175,55,0.3); }
+  .email-footer { background-color:#f7f5f0; padding:25px 20px; text-align:center; font-size:13px; color:#8c837b; border-top:1px solid #f0ece6; }
+  .email-footer a { color:#bfa14f; text-decoration:none; }
+</style>
+</head>
+<body>
+  <table class="email-wrapper" width="100%" cellpadding="0" cellspacing="0">
+    <tr>
+      <td align="center">
+        <table class="email-content" width="100%" cellpadding="0" cellspacing="0">
+          <tr>
+            <td class="email-header">
+              <img src="https://www.masazealesa.cz/assets/logo.png" alt="Masáže Alesa">
+              <h1>Masáže Alesa</h1>
+            </td>
+          </tr>
+          <tr>
+            <td class="email-body">
+              <h2>Dobrý den, ${r.jmeno},</h2>
+              <p>vaše rezervace je potvrzená — těším se na vaši návštěvu.</p>
+              <table class="rez-detail" width="100%" cellpadding="0" cellspacing="0">
+                <tr><td>
+                  <strong>Masáž:</strong> ${r.masaz}<br>
+                  <strong>Datum:</strong> ${datumCz}<br>
+                  <strong>Čas:</strong> ${r.cas_od.slice(0,5)}–${r.cas_do.slice(0,5)}
+                </td></tr>
+              </table>
+              <p>Pokud potřebujete termín změnit nebo zrušit, ozvěte se mi prosím co nejdřív.</p>
+              <div class="btn-container">
+                <a href="tel:736734951" class="btn">Zavolat kvůli změně termínu</a>
+              </div>
+              <p>S pozdravem,<br><strong>Alena Hasalová</strong><br>Masáže Alesa</p>
+            </td>
+          </tr>
+          <tr>
+            <td class="email-footer">
+              <p>Masáže Alesa | Hulín<br>
+              Navštivte můj web: <a href="https://www.masazealesa.cz" target="_blank">www.masazealesa.cz</a></p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
 // ── LOGIN (admin) ──
 app.post('/api/login', (req, res) => {
   const { heslo } = req.body || {};
@@ -372,7 +442,13 @@ app.patch('/api/admin/rezervace/:id/stav', async (req, res) => {
     return res.status(400).json({ chyba: 'Neplatný stav.' });
   }
   try {
+    const { rows: [predtim] } = await db.query('SELECT * FROM rezervace WHERE id = $1', [req.params.id]);
     await db.query('UPDATE rezervace SET stav = $1 WHERE id = $2', [stav, req.params.id]);
+    // E-mail o potvrzení se posílá jen při skutečném přechodu do stavu "potvrzena"
+    // (ne při každém uložení, ať se neposílá opakovaně).
+    if (predtim && stav === 'potvrzena' && predtim.stav !== 'potvrzena' && predtim.email) {
+      odeslatEmail(predtim.email, 'Rezervace potvrzena – Masáže Alesa', potvrzovaciEmailHtml(predtim));
+    }
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
