@@ -631,8 +631,8 @@ tr:hover td{background:#fffaf5}
       <div class="form-group"><label>Čas</label><input type="time" id="nrCas" step="900"></div>
     </div>
     <div class="form-grid-2">
-      <div class="form-group"><label>Jméno a příjmení</label><input type="text" id="nrJmeno" placeholder="Jana Nováková"></div>
-      <div class="form-group"><label>Telefon</label><input type="tel" id="nrTelefon" placeholder="736 734 951"></div>
+      <div class="form-group"><label>Jméno a příjmení*</label><input type="text" id="nrJmeno" placeholder="Jana Nováková"></div>
+      <div class="form-group"><label>Telefon*</label><input type="tel" id="nrTelefon" placeholder="736 734 951"></div>
     </div>
     <div class="form-group"><label>E-mail (nepovinné — bez něj se e-mail neodešle)</label><input type="email" id="nrEmail" placeholder="jana@example.cz"></div>
     <div class="form-group"><label>Poznámka</label><input type="text" id="nrPoznamka" placeholder="Nepovinné"></div>
@@ -912,8 +912,8 @@ async function pridatRezervaci() {
   const email = document.getElementById('nrEmail').value.trim();
   const poznamka = document.getElementById('nrPoznamka').value.trim();
   const msg = document.getElementById('novaRezervaceMsg');
-  if (!cenik_id || !datum || !cas_od || !jmeno) {
-    msg.innerHTML = '<div class="error-msg">Vyplňte prosím masáž, datum, čas a jméno.</div>';
+  if (!cenik_id || !datum || !cas_od || !jmeno || !telefon) {
+    msg.innerHTML = '<div class="error-msg">Vyplňte prosím masáž, datum, čas, jméno a telefon.</div>';
     return;
   }
   try {
@@ -1113,16 +1113,53 @@ function otevritDetailRezervace(id) {
     nedostavila_se: '<span class="badge badge-zruseno">🚫 Nedostavila se</span>',
     zrusena: '<span class="badge badge-zruseno">❌ Zrušena</span>'
   };
+  const platbaBadge = {
+    nezaplaceno: '<span class="badge badge-zruseno">💸 Nezaplaceno</span>',
+    castecne_zaplaceno: '<span class="badge badge-cekajici">🟡 Částečně zaplaceno</span>',
+    zaplaceno: '<span class="badge badge-ok">✅ Zaplaceno</span>'
+  };
+  const zpusobLabel = { hotove: 'Hotově', kartou: 'Kartou', online: 'Online', poukaz: 'Poukaz' };
+  const cena = Number(r.cena) || 0;
+  const uhrazeno = Number(r.uhrazeno) || 0;
+  const zbyva = Math.max(0, cena - uhrazeno);
+  const stavPlatby = r.stav_platby || 'nezaplaceno';
+
   document.getElementById('detailRezervaceObsah').innerHTML = `
     <div class="form-group"><label>Termín</label><div>${new Date(r.datum).toLocaleDateString('cs-CZ')}, ${r.cas_od.slice(0,5)}–${r.cas_do.slice(0,5)}</div></div>
     <div class="form-group"><label>Masáž</label><div>${escapeHtml(r.masaz)}</div></div>
-    <div class="form-group"><label>Cena</label><div>${Number(r.cena).toLocaleString('cs-CZ')} Kč</div></div>
+    <div class="form-group"><label>Cena</label><div>${cena.toLocaleString('cs-CZ')} Kč</div></div>
     <div class="form-group"><label>Jméno</label><div>${escapeHtml(r.jmeno)}</div></div>
     <div class="form-group"><label>Telefon</label><div>${escapeHtml(r.telefon) || '—'}</div></div>
     <div class="form-group"><label>E-mail</label><div>${escapeHtml(r.email) || '—'}</div></div>
     ${r.poukaz_kod ? `<div class="form-group"><label>Kód poukazu</label><div>🎁 ${escapeHtml(r.poukaz_kod)}</div></div>` : ''}
     <div class="form-group"><label>Poznámka</label><div>${escapeHtml(r.poznamka) || '—'}</div></div>
     <div class="form-group"><label>Stav</label><div>${stavBadge[r.stav] || r.stav}</div></div>
+    <div class="form-group"><label>Platba</label>
+      <div>${platbaBadge[stavPlatby] || stavPlatby}${r.zpusob_platby ? ' · ' + (zpusobLabel[r.zpusob_platby] || r.zpusob_platby) : ''}</div>
+      <div style="font-size:0.82rem;color:var(--text-light);margin-top:2px">Cena ${cena.toLocaleString('cs-CZ')} Kč · Uhrazeno ${uhrazeno.toLocaleString('cs-CZ')} Kč · Zbývá ${zbyva.toLocaleString('cs-CZ')} Kč</div>
+    </div>
+    ${zbyva > 0 ? `
+    <div class="form-group"><label>Zaznamenat platbu</label>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        <select id="platbaZpusob" style="border:1px solid var(--tan-light);border-radius:6px;padding:6px 8px">
+          <option value="hotove">Hotově</option>
+          <option value="kartou">Kartou</option>
+          <option value="online">Online</option>
+        </select>
+        <input type="number" id="platbaCastka" value="${zbyva}" min="1" max="${zbyva}" style="width:100px;border:1px solid var(--tan-light);border-radius:6px;padding:6px 8px">
+        <span style="font-size:0.8rem;color:var(--text-light)">Kč</span>
+        <button class="btn btn-green btn-sm" onclick="zaznamenatPlatbu(${r.id})">💾 Zaznamenat</button>
+      </div>
+    </div>
+    ${r.poukaz_kod ? `
+    <div class="form-group">
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        <input type="number" id="platbaPoukazCastka" value="${zbyva}" min="1" max="${zbyva}" style="width:100px;border:1px solid var(--tan-light);border-radius:6px;padding:6px 8px">
+        <span style="font-size:0.8rem;color:var(--text-light)">Kč</span>
+        <button class="btn btn-outline btn-sm" onclick="uplatnitPoukazNaRezervaci(${r.id},'${escapeJsAttr(r.poukaz_kod)}')">🎁 Uplatnit poukaz ${escapeHtml(r.poukaz_kod)} na tuto rezervaci</button>
+      </div>
+    </div>` : ''}` : ''}
+    ${uhrazeno > 0 ? `<div class="form-group"><button class="btn btn-outline btn-sm" onclick="resetovatPlatbu(${r.id})">↺ Vrátit platbu na nezaplaceno</button></div>` : ''}
     <div class="form-group"><label>Odesláno</label><div>${new Date(r.vytvoreno).toLocaleString('cs-CZ')}</div></div>
     <div class="form-group"><label>Připomínka / žádost o recenzi</label><div>${r.pripomenuto ? 'připomínka odeslána' : 'připomínka zatím ne'} · ${r.pozadano_recenze ? 'recenze požádána' : 'recenze zatím ne'}</div></div>
   `;
@@ -1134,6 +1171,34 @@ function otevritDetailRezervace(id) {
     <button class="btn btn-red btn-sm" onclick="smazatRezervaci(${r.id});closeModal('modalDetailRezervace')">🗑️ Smazat</button>
   `;
   openModal('modalDetailRezervace');
+}
+async function zaznamenatPlatbu(id) {
+  const castka = Number(document.getElementById('platbaCastka').value);
+  const zpusob_platby = document.getElementById('platbaZpusob').value;
+  if (!castka || castka <= 0) { alert('Zadejte prosím kladnou částku.'); return; }
+  const res = await adminFetch(API + '/admin/rezervace/' + id + '/platba', { method: 'PATCH', body: JSON.stringify({ castka, zpusob_platby }) });
+  const data = await res.json();
+  if (!res.ok) { alert(data.chyba || 'Zaznamenání platby se nepodařilo.'); return; }
+  await loadRezervace();
+  otevritDetailRezervace(id);
+}
+async function uplatnitPoukazNaRezervaci(rezervaceId, kod) {
+  const castka = Number(document.getElementById('platbaPoukazCastka').value);
+  if (!castka || castka <= 0) { alert('Zadejte prosím kladnou částku.'); return; }
+  const seznam = await adminFetch(API + '/admin/poukazy').then(r => r.json());
+  const p = seznam.find(x => x.kod === kod);
+  if (!p) { alert('Poukaz s kódem "' + kod + '" nebyl nalezen v evidenci poukazů — ověřte ho ručně v sekci Poukazy.'); return; }
+  const res = await adminFetch(API + '/admin/poukazy/' + p.id + '/uplatnit', { method: 'POST', body: JSON.stringify({ castka, rezervace_id: rezervaceId }) });
+  const data = await res.json();
+  if (!res.ok) { alert(data.chyba || 'Uplatnění poukazu se nepodařilo.'); return; }
+  await loadRezervace();
+  otevritDetailRezervace(rezervaceId);
+}
+async function resetovatPlatbu(id) {
+  if (!confirm('Vrátit platbu u této rezervace zpět na "nezaplaceno"?')) return;
+  await adminFetch(API + '/admin/rezervace/' + id + '/platba', { method: 'PATCH', body: JSON.stringify({ reset: true }) });
+  await loadRezervace();
+  otevritDetailRezervace(id);
 }
 function filtrovatRez(f, el) {
   document.querySelectorAll('#page-rezervace .table-wrap:last-child .pill').forEach(p => p.classList.remove('active'));

@@ -83,6 +83,13 @@ create table if not exists rezervace (
   stav text not null default 'cekajici', -- cekajici | potvrzena | dokoncena | nedostavila_se | zrusena
   pripomenuto boolean not null default false, -- už odeslána 24h připomínka (ať se neposílá vícekrát)
   pozadano_recenze boolean not null default false, -- už odeslána žádost o recenzi
+  -- Platba je záměrně oddělená od stavu rezervace (stav) — dokončená masáž může
+  -- být nezaplacená a naopak. uhrazeno je průběžný součet (podporuje částečnou
+  -- platbu, např. poukaz + doplatek hotově), stav_platby se z něj dopočítává.
+  stav_platby text not null default 'nezaplaceno', -- nezaplaceno | castecne_zaplaceno | zaplaceno
+  zpusob_platby text, -- hotove | kartou | online | poukaz (nepovinné, dokud se nic nezaplatilo)
+  uhrazeno numeric not null default 0,
+  uhrazeno_kdy timestamptz, -- kdy se stav_platby naposledy stal "zaplaceno"
   vytvoreno timestamptz not null default now()
 );
 

@@ -551,8 +551,10 @@ app.get('/api/admin/rezervace', async (req, res) => {
 // na stejný čas. Rezervace se rovnou založí jako "potvrzena" a pošle se e-mail.
 app.post('/api/admin/rezervace', async (req, res) => {
   const { datum, cas_od, jmeno, telefon, email, cenik_id, poznamka } = req.body || {};
-  if (!datum || !cas_od || !jmeno || !cenik_id) {
-    return res.status(400).json({ chyba: 'Vyplňte prosím jméno, masáž, datum a čas.' });
+  // telefon je v databázi "not null" — bez kontroly tady by INSERT spadl na chybě
+  // databáze a vrátil nesrozumitelnou 500 míso jasné validační chyby.
+  if (!datum || !cas_od || !jmeno || !telefon || !cenik_id) {
+    return res.status(400).json({ chyba: 'Vyplňte prosím jméno, telefon, masáž, datum a čas.' });
   }
   const client = await db.connect();
   try {
@@ -613,6 +615,59 @@ app.patch('/api/admin/rezervace/:id/stav', async (req, res) => {
     }
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
+// Zaznamenání platby k rezervaci. Stav platby je záměrně nezávislý na stavu
+// rezervace (dokončená masáž může zůstat nezaplacená a naopak). "castka" se
+// PŘIČÍTÁ k dosavadní uhrazené částce (podporuje např. poukaz + doplatek
+// hotově ve dvou krocích), ne že by ji přepisovala — proto i tady, stejně jako
+// u uplatnění poukazu, běží update pod zámkem řádku (SELECT...FOR UPDATE), ať
+// dvě souběžně zaznamenané platby o sebe nepřijdou (tzv. lost update).
+// { reset: true } vrátí platbu zpátky na "nezaplaceno" (oprava omylu).
+app.patch('/api/admin/rezervace/:id/platba', async (req, res) => {
+  const { castka, zpusob_platby, reset } = req.body || {};
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: [r] } = await client.query('SELECT * FROM rezervace WHERE id = $1 FOR UPDATE', [req.params.id]);
+    if (!r) { await client.query('ROLLBACK'); return res.status(404).json({ chyba: 'Rezervace nebyla nalezena.' }); }
+
+    if (reset) {
+      const { rows: [aktualizovana] } = await client.query(
+        `UPDATE rezervace SET uhrazeno = 0, stav_platby = 'nezaplaceno', zpusob_platby = NULL, uhrazeno_kdy = NULL WHERE id = $1 RETURNING *`,
+        [req.params.id]
+      );
+      await client.query('COMMIT');
+      return res.json({ ok: true, rezervace: aktualizovana });
+    }
+
+    const castkaNum = Number(castka);
+    if (!Number.isFinite(castkaNum) || castkaNum <= 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ chyba: 'Zadejte prosím kladnou částku.' });
+    }
+    if (!['hotove', 'kartou', 'online', 'poukaz'].includes(zpusob_platby)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ chyba: 'Vyberte prosím způsob platby.' });
+    }
+
+    const cena = Number(r.cena) || 0;
+    const noveUhrazeno = Math.min(cena, Number(r.uhrazeno) + castkaNum);
+    const novyStav = noveUhrazeno <= 0 ? 'nezaplaceno' : (noveUhrazeno >= cena ? 'zaplaceno' : 'castecne_zaplaceno');
+    const noveUhrazenoKdy = (novyStav === 'zaplaceno' && r.stav_platby !== 'zaplaceno') ? new Date() : r.uhrazeno_kdy;
+
+    const { rows: [aktualizovana] } = await client.query(
+      `UPDATE rezervace SET uhrazeno = $1, stav_platby = $2, zpusob_platby = $3, uhrazeno_kdy = $4 WHERE id = $5 RETURNING *`,
+      [noveUhrazeno, novyStav, zpusob_platby, noveUhrazenoKdy, req.params.id]
+    );
+    await client.query('COMMIT');
+    res.json({ ok: true, rezervace: aktualizovana });
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch {}
+    res.status(500).json({ chyba: e.message });
+  } finally {
+    client.release();
+  }
 });
 
 app.delete('/api/admin/rezervace/:id', async (req, res) => {
@@ -802,8 +857,14 @@ app.patch('/api/admin/poukazy/:id/stav', async (req, res) => {
 // otevřené najednou), druhý počká, až první dopíše, a pak už vidí správný, už
 // snížený zůstatek. Stejný princip jako zámek proti dvojité rezervaci termínu,
 // jen tady jde o zámek konkrétního řádku místo dne v kalendáři.
+// Nepovinné rezervace_id: pokud se poukaz uplatňuje na konkrétní rezervaci,
+// uplatněná částka se ve stejné transakci rovnou zapíše i jako platba u té
+// rezervace (stav_platby/uhrazeno/zpusob_platby='poukaz') — takže propojení
+// rezervace↔poukaz zůstává zachované a obě strany (poukaz i rezervace) se
+// buď zapíšou obě, nebo ani jedna.
 app.post('/api/admin/poukazy/:id/uplatnit', async (req, res) => {
   const castka = Number(req.body && req.body.castka);
+  const rezervaceId = req.body && req.body.rezervace_id ? Number(req.body.rezervace_id) : null;
   if (!Number.isFinite(castka) || castka <= 0) {
     return res.status(400).json({ chyba: 'Zadejte prosím kladnou částku k uplatnění.' });
   }
@@ -826,6 +887,22 @@ app.post('/api/admin/poukazy/:id/uplatnit', async (req, res) => {
       await client.query('ROLLBACK');
       return res.status(400).json({ chyba: `Částka převyšuje zůstatek na poukazu (${poukaz.zustatek} Kč).` });
     }
+
+    let aktualizovanaRezervace = null;
+    if (rezervaceId) {
+      const { rows: [r] } = await client.query('SELECT * FROM rezervace WHERE id = $1 FOR UPDATE', [rezervaceId]);
+      if (!r) { await client.query('ROLLBACK'); return res.status(404).json({ chyba: 'Rezervace k propojení nebyla nalezena.' }); }
+      const cena = Number(r.cena) || 0;
+      const noveUhrazeno = Math.min(cena, Number(r.uhrazeno) + castka);
+      const novyStavPlatby = noveUhrazeno <= 0 ? 'nezaplaceno' : (noveUhrazeno >= cena ? 'zaplaceno' : 'castecne_zaplaceno');
+      const noveUhrazenoKdy = (novyStavPlatby === 'zaplaceno' && r.stav_platby !== 'zaplaceno') ? new Date() : r.uhrazeno_kdy;
+      const { rows: [aktRez] } = await client.query(
+        `UPDATE rezervace SET uhrazeno = $1, stav_platby = $2, zpusob_platby = 'poukaz', uhrazeno_kdy = $3 WHERE id = $4 RETURNING *`,
+        [noveUhrazeno, novyStavPlatby, noveUhrazenoKdy, rezervaceId]
+      );
+      aktualizovanaRezervace = aktRez;
+    }
+
     const novyZustatek = Number(poukaz.zustatek) - castka;
     const novyStav = novyZustatek <= 0 ? 'pouzity' : 'castecne_vyuzity';
     const { rows: [aktualizovany] } = await client.query(
@@ -833,7 +910,7 @@ app.post('/api/admin/poukazy/:id/uplatnit', async (req, res) => {
       [novyZustatek, novyStav, req.params.id]
     );
     await client.query('COMMIT');
-    res.json({ ok: true, poukaz: aktualizovany });
+    res.json({ ok: true, poukaz: aktualizovany, rezervace: aktualizovanaRezervace });
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch {}
     res.status(500).json({ chyba: e.message });
