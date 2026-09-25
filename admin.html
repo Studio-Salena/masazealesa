@@ -639,11 +639,11 @@ tr:hover td{background:#fffaf5}
   </div>
 </div>
 
-<!-- MODAL: Nová rezervace (ručně, mimo otevírací dobu apod.) -->
+<!-- MODAL: Nová / upravovaná rezervace -->
 <div class="modal-overlay" id="modalNovaRezervace">
   <div class="modal">
-    <h3>+ Přidat rezervaci</h3>
-    <p style="font-size:0.8rem;color:var(--text-light);margin-top:-8px">Jde i mimo běžnou otevírací dobu — hodí se pro klientky domluvené mimo web. Rezervace se rovnou založí jako potvrzená a pokud vyplníš e-mail, hned se jí pošle potvrzovací e-mail.</p>
+    <h3 id="nrModalNadpis">+ Přidat rezervaci</h3>
+    <p id="nrModalHint" style="font-size:0.8rem;color:var(--text-light);margin-top:-8px">Jde i mimo běžnou otevírací dobu — hodí se pro klientky domluvené mimo web. Rezervace se rovnou založí jako potvrzená a pokud vyplníš e-mail, hned se jí pošle potvrzovací e-mail.</p>
     <div id="novaRezervaceMsg"></div>
     <div class="form-group"><label>Masáž</label>
       <select id="nrMasaz" style="width:100%;border:1px solid var(--tan-light);border-radius:6px;padding:8px"><option value="">Načítám…</option></select>
@@ -660,7 +660,7 @@ tr:hover td{background:#fffaf5}
     <div class="form-group"><label>Poznámka</label><input type="text" id="nrPoznamka" placeholder="Nepovinné"></div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal('modalNovaRezervace')">Zrušit</button>
-      <button class="btn btn-primary" onclick="pridatRezervaci()">Přidat</button>
+      <button class="btn btn-primary" id="nrUlozitBtn" onclick="pridatRezervaci()">Přidat</button>
     </div>
   </div>
 </div>
@@ -907,7 +907,12 @@ function vykreslitAdminKalendar() {
   wrap.innerHTML = html;
 }
 
+let upravovanaRezervaceId = null;
 async function otevritNovouRezervaci() {
+  upravovanaRezervaceId = null;
+  document.getElementById('nrModalNadpis').textContent = '+ Přidat rezervaci';
+  document.getElementById('nrModalHint').textContent = 'Jde i mimo běžnou otevírací dobu — hodí se pro klientky domluvené mimo web. Rezervace se rovnou založí jako potvrzená a pokud vyplníš e-mail, hned se jí pošle potvrzovací e-mail.';
+  document.getElementById('nrUlozitBtn').textContent = 'Přidat';
   const sel = document.getElementById('nrMasaz');
   sel.innerHTML = '<option value="">Načítám…</option>';
   document.getElementById('novaRezervaceMsg').innerHTML = '';
@@ -921,6 +926,30 @@ async function otevritNovouRezervaci() {
   try {
     const cenik = await adminFetch(API + '/admin/cenik').then(r => r.json());
     sel.innerHTML = cenik.map(c => `<option value="${c.id}">${escapeHtml(c.skupina)} – ${escapeHtml(c.varianta)} (${c.delka_min} min)</option>`).join('');
+  } catch (e) {
+    sel.innerHTML = '<option value="">Nepodařilo se načíst ceník</option>';
+  }
+}
+async function otevritUpravitRezervaci(id) {
+  const r = vsechnyRezervace.find(x => x.id === id);
+  if (!r) return;
+  upravovanaRezervaceId = id;
+  document.getElementById('nrModalNadpis').textContent = '✏️ Upravit rezervaci';
+  document.getElementById('nrModalHint').textContent = 'Změna termínu se znovu ověří proti otevírací době, výjimkám a kolizím. Platby a jejich historie se úpravou nemění. E-mail o změně se pošle jen při skutečné změně termínu/masáže.';
+  document.getElementById('nrUlozitBtn').textContent = 'Uložit změny';
+  document.getElementById('novaRezervaceMsg').innerHTML = '';
+  document.getElementById('nrDatum').value = r.datum;
+  document.getElementById('nrCas').value = String(r.cas_od).slice(0, 5);
+  document.getElementById('nrJmeno').value = r.jmeno || '';
+  document.getElementById('nrTelefon').value = r.telefon || '';
+  document.getElementById('nrEmail').value = r.email || '';
+  document.getElementById('nrPoznamka').value = r.poznamka || '';
+  const sel = document.getElementById('nrMasaz');
+  sel.innerHTML = '<option value="">Načítám…</option>';
+  openModal('modalNovaRezervace');
+  try {
+    const cenik = await adminFetch(API + '/admin/cenik').then(r => r.json());
+    sel.innerHTML = cenik.map(c => `<option value="${c.id}"${c.id === r.cenik_id ? ' selected' : ''}>${escapeHtml(c.skupina)} – ${escapeHtml(c.varianta)} (${c.delka_min} min)</option>`).join('');
   } catch (e) {
     sel.innerHTML = '<option value="">Nepodařilo se načíst ceník</option>';
   }
@@ -939,16 +968,18 @@ async function pridatRezervaci() {
     return;
   }
   try {
-    const res = await adminFetch(API + '/admin/rezervace', {
-      method: 'POST',
+    const editace = !!upravovanaRezervaceId;
+    const res = await adminFetch(API + '/admin/rezervace' + (editace ? '/' + upravovanaRezervaceId : ''), {
+      method: editace ? 'PATCH' : 'POST',
       body: JSON.stringify({ cenik_id, datum, cas_od, jmeno, telefon, email, poznamka })
     });
     const data = await res.json();
     if (res.ok) {
       closeModal('modalNovaRezervace');
-      loadRezervace();
+      await loadRezervace();
+      if (editace) otevritDetailRezervace(upravovanaRezervaceId);
     } else {
-      msg.innerHTML = '<div class="error-msg">' + (data.chyba || 'Nepodařilo se přidat.') + '</div>';
+      msg.innerHTML = '<div class="error-msg">' + (data.chyba || 'Nepodařilo se uložit.') + '</div>';
     }
   } catch (e) {
     msg.innerHTML = '<div class="error-msg">Nejde se připojit k serveru.</div>';
@@ -1205,6 +1236,7 @@ function vykreslitDetailRezervace(r) {
     <div class="form-group"><label>Připomínka / žádost o recenzi</label><div>${r.pripomenuto ? 'připomínka odeslána' : 'připomínka zatím ne'} · ${r.pozadano_recenze ? 'recenze požádána' : 'recenze zatím ne'}</div></div>
   `;
   document.getElementById('detailRezervaceAkce').innerHTML = `
+    ${r.stav !== 'zrusena' ? `<button class="btn btn-outline btn-sm" onclick="closeModal('modalDetailRezervace');otevritUpravitRezervaci(${r.id})">✏️ Upravit</button>` : ''}
     ${r.stav !== 'potvrzena' ? `<button class="btn btn-green btn-sm" onclick="zmenitStavRez(${r.id},'potvrzena');closeModal('modalDetailRezervace')">✅ Potvrdit</button>` : ''}
     ${r.stav !== 'dokoncena' ? `<button class="btn btn-green btn-sm" onclick="zmenitStavRez(${r.id},'dokoncena');closeModal('modalDetailRezervace')">🌸 Dokončeno</button>` : ''}
     ${r.stav !== 'nedostavila_se' ? `<button class="btn btn-red btn-sm" onclick="zmenitStavRez(${r.id},'nedostavila_se');closeModal('modalDetailRezervace')">🚫 Nedostavila se</button>` : ''}

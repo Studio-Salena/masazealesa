@@ -249,6 +249,41 @@ function recenzeEmailHtml(r) {
   `);
 }
 
+// Rezervace změněna (odesílá se jen při skutečné změně data/času/služby v adminu)
+function zmenaEmailHtml(r) {
+  return emailSablona(`
+    <h2>Dobrý den, ${r.jmeno},</h2>
+    <p>vaše rezervace byla změněna. Nový termín:</p>
+    <table class="rez-detail" width="100%" cellpadding="0" cellspacing="0">
+      <tr><td>
+        <strong>Masáž:</strong> ${r.masaz}<br>
+        <strong>Datum:</strong> ${formatDatumCz(r.datum)}<br>
+        <strong>Čas:</strong> ${String(r.cas_od).slice(0,5)}–${String(r.cas_do).slice(0,5)}<br>
+        <strong>Cena:</strong> ${Number(r.cena).toLocaleString('cs-CZ')} Kč
+      </td></tr>
+    </table>
+    <p>Pokud vám nový termín nevyhovuje, ozvěte se mi prosím co nejdřív na tel. 736 734 951.</p>
+    <p>S pozdravem,<br><strong>Alena Hasalová</strong><br>Masáže Alesa</p>
+  `);
+}
+
+// Rezervace zrušena (odesílá se jen při skutečném přechodu do stavu "zrusena")
+function zruseniEmailHtml(r) {
+  return emailSablona(`
+    <h2>Dobrý den, ${r.jmeno},</h2>
+    <p>vaše rezervace byla zrušena:</p>
+    <table class="rez-detail" width="100%" cellpadding="0" cellspacing="0">
+      <tr><td>
+        <strong>Masáž:</strong> ${r.masaz}<br>
+        <strong>Datum:</strong> ${formatDatumCz(r.datum)}<br>
+        <strong>Čas:</strong> ${String(r.cas_od).slice(0,5)}–${String(r.cas_do).slice(0,5)}
+      </td></tr>
+    </table>
+    <p>Pokud jde o omyl nebo si chcete rezervovat jiný termín, ozvěte se mi prosím na tel. 736 734 951.</p>
+    <p>S pozdravem,<br><strong>Alena Hasalová</strong><br>Masáže Alesa</p>
+  `);
+}
+
 // ── LOGIN (admin) ──
 app.post('/api/login', (req, res) => {
   const { heslo } = req.body || {};
@@ -626,6 +661,111 @@ app.post('/api/admin/rezervace', async (req, res) => {
   }
 });
 
+// Úprava existující rezervace (datum, čas, masáž, jméno, telefon, e-mail, poznámka).
+// "Termín" (datum/čas/masáž — masáž proto, že mění délku a tím i konec) se znovu
+// validuje úplně stejně přísně jako u VEŘEJNÉ rezervace (otevírací doba, výjimky,
+// kolize) — ALE jen když se termín skutečně mění. Editace, která termín nemění
+// (např. jen oprava poznámky), tuhle kontrolu neprovádí — jinak by se nedala
+// upravit ani rezervace, kterou Alena záměrně založila mimo otevírací dobu
+// (viz Fáze 2), aniž by editace okamžitě spadla na "mimo otevírací dobu".
+// Platby (uhrazeno/stav_platby/historie v "platby") se tady NIKDY nezakládají
+// ani nemažou — jen se přepočte stav_platby podle (možná nové) ceny a už
+// existujícího uhrazeno, viz prepocitatSouhrnRezervace.
+app.patch('/api/admin/rezervace/:id', async (req, res) => {
+  const { datum, cas_od, cenik_id, jmeno, telefon, email, poznamka } = req.body || {};
+  if (!datum || !cas_od || !jmeno || !telefon || !cenik_id) {
+    return res.status(400).json({ chyba: 'Vyplňte prosím jméno, telefon, masáž, datum a čas.' });
+  }
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: [puvodni] } = await client.query('SELECT * FROM rezervace WHERE id = $1 FOR UPDATE', [req.params.id]);
+    if (!puvodni) { await client.query('ROLLBACK'); return res.status(404).json({ chyba: 'Rezervace nebyla nalezena.' }); }
+    if (puvodni.stav === 'zrusena') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ chyba: 'Zrušenou rezervaci nelze upravovat — nejdřív jí prosím vraťte jiný stav.' });
+    }
+
+    const { rows: [polozkaCeniku] } = await client.query('SELECT * FROM cenik WHERE id = $1', [cenik_id]);
+    if (!polozkaCeniku) { await client.query('ROLLBACK'); return res.status(404).json({ chyba: 'Tato masáž nebyla v ceníku nalezena.' }); }
+
+    const zacatek = casNaMinuty(cas_od);
+    const konec = zacatek + polozkaCeniku.delka_min;
+    const cas_do = minutyNaCas(konec);
+    const nazevMasaze = polozkaCeniku.skupina + ' – ' + polozkaCeniku.varianta;
+
+    const terminSeMeni = datum !== puvodni.datum
+      || cas_od !== String(puvodni.cas_od).slice(0, 5)
+      || Number(cenik_id) !== Number(puvodni.cenik_id);
+
+    if (terminSeMeni) {
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [datum]);
+
+      const oteviraciDoba = await ziskatEfektivniOtevrenoDobu(datum);
+      if (!oteviraciDoba) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ chyba: 'V tento den bohužel nerezervujeme (dovolená/svátek/zavřeno), vyberte prosím jiné datum.' });
+      }
+      const otevrenoOd = casNaMinuty(oteviraciDoba.otevreno_od);
+      const otevrenoDo = casNaMinuty(oteviraciDoba.otevreno_do);
+      if (zacatek < otevrenoOd || konec > otevrenoDo) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ chyba: 'Tento čas je mimo otevírací dobu, vyberte prosím jiný.' });
+      }
+      if (oteviraciDoba.pauza_od && oteviraciDoba.pauza_do) {
+        const pauzaOd = casNaMinuty(oteviraciDoba.pauza_od), pauzaDo = casNaMinuty(oteviraciDoba.pauza_do);
+        if (zacatek < pauzaDo && konec > pauzaOd) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ chyba: 'Tento čas spadá do polední pauzy, vyberte prosím jiný.' });
+        }
+      }
+
+      const bufferMin = await ziskatBufferMinut();
+      const { rows: existujici } = await client.query(
+        "SELECT id, cas_od, cas_do FROM rezervace WHERE datum = $1 AND stav <> 'zrusena' AND id <> $2",
+        [datum, req.params.id]
+      );
+      const koliduje = existujici.some(r => {
+        const oOd = casNaMinuty(r.cas_od) - bufferMin, oDo = casNaMinuty(r.cas_do) + bufferMin;
+        return zacatek < oDo && konec > oOd;
+      });
+      if (koliduje) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ chyba: 'Tento termín je již obsazený (nebo příliš blízko jiné rezervaci), vyberte prosím jiný.' });
+      }
+    }
+
+    await client.query(
+      `UPDATE rezervace SET cenik_id=$1, datum=$2, cas_od=$3, cas_do=$4, jmeno=$5, telefon=$6, email=$7, masaz=$8, poznamka=$9, cena=$10 WHERE id=$11`,
+      [cenik_id, datum, cas_od, cas_do, jmeno, telefon, email || null, nazevMasaze, poznamka || null, polozkaCeniku.cena, req.params.id]
+    );
+    // Cena se mohla změnit (jiná masáž) — uhrazeno se nedotýká, jen se z něj a
+    // z (nové) ceny přepočte stav_platby (viz komentář u funkce výš).
+    const aktualizovana = await prepocitatSouhrnRezervace(client, req.params.id);
+
+    await client.query('COMMIT');
+
+    const skutecnaZmena = terminSeMeni
+      || jmeno !== puvodni.jmeno
+      || telefon !== puvodni.telefon
+      || (email || null) !== puvodni.email
+      || (poznamka || null) !== puvodni.poznamka;
+
+    // E-mail o změně se posílá jen při změně termínu/masáže — ne když se opraví
+    // třeba jen telefon nebo poznámka (o tu klientka nežádá vědět).
+    if (terminSeMeni && aktualizovana.email) {
+      odeslatEmail(aktualizovana.email, 'Rezervace změněna – Masáže Alesa', zmenaEmailHtml(aktualizovana));
+    }
+
+    res.json({ ok: true, rezervace: aktualizovana, zmeneno: skutecnaZmena, terminZmenen: terminSeMeni });
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch {}
+    res.status(500).json({ chyba: e.message });
+  } finally {
+    client.release();
+  }
+});
+
 app.patch('/api/admin/rezervace/:id/stav', async (req, res) => {
   const { stav } = req.body || {};
   if (!['cekajici', 'potvrzena', 'dokoncena', 'nedostavila_se', 'zrusena'].includes(stav)) {
@@ -633,13 +773,22 @@ app.patch('/api/admin/rezervace/:id/stav', async (req, res) => {
   }
   try {
     const { rows: [predtim] } = await db.query('SELECT * FROM rezervace WHERE id = $1', [req.params.id]);
+    if (!predtim) return res.status(404).json({ chyba: 'Rezervace nebyla nalezena.' });
     await db.query('UPDATE rezervace SET stav = $1 WHERE id = $2', [stav, req.params.id]);
-    // E-mail o potvrzení se posílá jen při skutečném přechodu do stavu "potvrzena"
-    // (ne při každém uložení, ať se neposílá opakovaně).
-    if (predtim && stav === 'potvrzena' && predtim.stav !== 'potvrzena' && predtim.email) {
+    // E-maily o potvrzení/zrušení se posílají jen při SKUTEČNÉM přechodu do daného
+    // stavu (ne při každém uložení / opakovaném zrušení už zrušené rezervace), ať
+    // se neposílají opakovaně. emailOdeslan v odpovědi ať jde ověřit i bez
+    // přístupu ke schránce (a ať to admin.html může případně ukázat).
+    let emailOdeslan = false;
+    if (stav === 'potvrzena' && predtim.stav !== 'potvrzena' && predtim.email) {
       odeslatEmail(predtim.email, 'Rezervace potvrzena – Masáže Alesa', potvrzovaciEmailHtml(predtim));
+      emailOdeslan = true;
     }
-    res.json({ ok: true });
+    if (stav === 'zrusena' && predtim.stav !== 'zrusena' && predtim.email) {
+      odeslatEmail(predtim.email, 'Rezervace zrušena – Masáže Alesa', zruseniEmailHtml(predtim));
+      emailOdeslan = true;
+    }
+    res.json({ ok: true, emailOdeslan });
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
