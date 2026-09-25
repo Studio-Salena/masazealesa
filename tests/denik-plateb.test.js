@@ -220,12 +220,24 @@ async function main() {
     // Test 9: starší rezervace bez záznamu v deníku
     console.log('--- Test 9: rezervace bez záznamu v deníku ---');
     {
+      // Pozor: hledat podle "uhrazeno === 0" nestačí — platba a vratka se stejnou
+      // částkou (Test 5) taky vyjde na netto 0, ale v deníku 2 záznamy MÁ. Proto
+      // čerstvá rezervace, ke které se ještě vůbec nesáhlo.
+      const r = await vytvorRezervaci(polozka.id, '20', 30 + Math.floor(Math.random() * 300));
+      uklidRezervace.push(r.id);
+      assert.equal(Number(r.uhrazeno), 0);
+      assert.equal(r.stav_platby, 'nezaplaceno');
+      const historie = await historiePlateb(r.id);
+      assert.deepEqual(historie, [], 'Nová rezervace bez jakékoliv platby by měla mít prázdný deník, ne chybu');
+      console.log('OK — čerstvá rezervace bez platby (id ' + r.id + ') má prázdný deník, žádná chyba');
+
+      // A pro úplnost: skutečně HISTORICKÁ rezervace (z doby před deníkem plateb)
+      // musí být taky v pořádku čitelná, i když v deníku nikdy nic mít nebude.
       const seznam = await adminFetch('/admin/rezervace').then(res => res.json());
-      const bezPlatby = seznam.find(x => Number(x.uhrazeno) === 0 && x.stav_platby === 'nezaplaceno');
-      assert.ok(bezPlatby, 'V databázi není žádná nezaplacená rezervace pro kontrolu');
-      const historie = await historiePlateb(bezPlatby.id);
-      assert.deepEqual(historie, [], 'Rezervace bez platby by měla mít prázdný deník, ne chybu');
-      console.log('OK — rezervace bez platby (id ' + bezPlatby.id + ') má prázdný deník, žádná chyba');
+      const nejstarsi = [...seznam].sort((a, b) => a.id - b.id)[0];
+      const historieNejstarsi = await historiePlateb(nejstarsi.id);
+      assert.ok(Array.isArray(historieNejstarsi), 'Historie u nejstarší rezervace musí vrátit pole, ne chybu');
+      console.log('OK — historicky nejstarší rezervace v databázi (id ' + nejstarsi.id + ') je čitelná bez chyby, deník má ' + historieNejstarsi.length + ' záznamů');
     }
 
     // Test 10: rezervace.uhrazeno vždy odpovídá součtu deníku
