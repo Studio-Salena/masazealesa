@@ -1290,7 +1290,11 @@ app.get('/api/admin/ucetnictvi', async (req, res) => {
       prijatePlatby: {
         celkem: prijatePlatbyPolozky.reduce((s, p) => s + p.castka, 0),
         podleDne: seskupitPodleDne(prijatePlatbyPolozky, p => p.castka, p => p.datum),
-        seznam: platbyFiltr.map(p => ({
+        // I seznam jednotlivých položek musí vynechat zpusob_platby='poukaz' —
+        // jinak by se ta samá platba objevila v přehledu, i když do součtu výš
+        // (celkem/podleDne) správně nevstupuje. Peníze z poukazu jsou vidět
+        // zvlášť v prodejPoukazu (v den PRODEJE poukazu, ne uplatnění).
+        seznam: platbyFiltr.filter(p => p.zpusob_platby !== 'poukaz').map(p => ({
           id: p.id, rezervace_id: p.rezervace_id, castka: Number(p.castka), typ: p.typ,
           zpusob_platby: p.zpusob_platby, vytvoreno: p.vytvoreno.toISOString()
         }))
