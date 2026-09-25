@@ -462,25 +462,47 @@ tr:hover td{background:#fffaf5}
           <button class="refresh-btn" onclick="loadUcetnictvi()">↻ Obnovit</button>
         </div>
       </div>
-      <div class="stats-grid" style="grid-template-columns:repeat(4,1fr)">
-        <div class="stat-card"><div class="stat-label">Tržby celkem</div><div class="stat-value" id="ucetTrzby">—</div></div>
-        <div class="stat-card"><div class="stat-label">Tržby dnes</div><div class="stat-value stat-green" id="ucetDnes">—</div></div>
-        <div class="stat-card"><div class="stat-label">Počet položek</div><div class="stat-value" id="ucetPocet">—</div></div>
-        <div class="stat-card"><div class="stat-label">Průměrná položka</div><div class="stat-value" id="ucetPrumer">—</div></div>
+      <div class="table-wrap">
+        <div style="padding:14px 16px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <label style="font-size:0.82rem;color:var(--text-light)">Období od</label>
+          <input type="date" id="ucetOd" style="border:1px solid var(--tan-light);border-radius:6px;padding:6px 8px">
+          <label style="font-size:0.82rem;color:var(--text-light)">do</label>
+          <input type="date" id="ucetDo" style="border:1px solid var(--tan-light);border-radius:6px;padding:6px 8px">
+          <button class="btn btn-primary btn-sm" onclick="loadUcetnictvi()">Zobrazit</button>
+          <button class="btn btn-outline btn-sm" onclick="document.getElementById('ucetOd').value='';document.getElementById('ucetDo').value='';loadUcetnictvi()">Celé období</button>
+        </div>
       </div>
+      <p style="padding:0 4px;font-size:0.78rem;color:var(--text-light)">Čtyři různé věci, záměrně oddělené — nejde o jedno číslo. <strong>Tržby za služby</strong> = hodnota odvedené práce podle data masáže. <strong>Přijaté platby</strong> = skutečný pohyb peněz (poukaz se tu nepočítá znovu, ten už je v „Prodej poukazů“). <strong>Prodej poukazů</strong> = kdy se prodaly. <strong>Vráceno</strong> = kolik se vrátilo klientkám.</p>
+      <div class="stats-grid" style="grid-template-columns:repeat(4,1fr)">
+        <div class="stat-card"><div class="stat-label">🌸 Tržby za služby</div><div class="stat-value" id="ucetTrzbySluzby">—</div></div>
+        <div class="stat-card"><div class="stat-label">💰 Přijaté platby</div><div class="stat-value stat-green" id="ucetPrijatePlatby">—</div></div>
+        <div class="stat-card"><div class="stat-label">🎁 Prodané poukazy</div><div class="stat-value" id="ucetProdejPoukazu">—</div></div>
+        <div class="stat-card"><div class="stat-label">↺ Vráceno</div><div class="stat-value stat-orange" id="ucetVratky">—</div></div>
+      </div>
+
       <div class="form-grid-2">
         <div class="table-wrap">
-          <div class="table-header"><h3>📅 Tržby po měsících</h3></div>
-          <div id="ucetMesice"><div class="loading">Načítám...</div></div>
+          <div class="table-header"><h3>🌸 A) Tržby za služby — podle data masáže</h3></div>
+          <div id="ucetTrzbySluzbyDny"><div class="loading">Načítám...</div></div>
         </div>
         <div class="table-wrap">
-          <div class="table-header"><h3>🗓️ Tržby po dnech</h3></div>
-          <div id="ucetDny"><div class="loading">Načítám...</div></div>
+          <div class="table-header"><h3>💰 B) Přijaté platby — podle data platby</h3></div>
+          <div id="ucetPrijatePlatbyDny"><div class="loading">Načítám...</div></div>
         </div>
       </div>
       <div class="table-wrap">
-        <div class="table-header"><h3>📋 Všechny položky (rezervace, prodejna, poukazy)</h3></div>
-        <div id="ucetPolozky"><div class="loading">Načítám...</div></div>
+        <div class="table-header"><h3>💰 B) Jednotlivé přijaté platby</h3></div>
+        <div id="ucetPrijatePlatbySeznam"><div class="loading">Načítám...</div></div>
+      </div>
+      <div class="form-grid-2">
+        <div class="table-wrap">
+          <div class="table-header"><h3>🎁 C) Prodej poukazů — podle dnů</h3></div>
+          <div id="ucetProdejPoukazuDny"><div class="loading">Načítám...</div></div>
+        </div>
+        <div class="table-wrap">
+          <div class="table-header"><h3>↺ D) Vratky</h3></div>
+          <div id="ucetVratkySeznam"><div class="loading">Načítám...</div></div>
+        </div>
       </div>
     </div>
 
@@ -1103,9 +1125,16 @@ function vykreslitRezervace(filtr) {
       </td>
     </tr>`).join('')}</tbody></table>`;
 }
+const platbaZpusobLabel = { hotove: 'Hotově', kartou: 'Kartou', online: 'Online', poukaz: 'Poukaz' };
 function otevritDetailRezervace(id) {
   const r = vsechnyRezervace.find(x => x.id === id);
   if (!r) return;
+  vykreslitDetailRezervace(r);
+  document.getElementById('detailPlatebniHistorie').innerHTML = '<div class="loading">Načítám historii plateb...</div>';
+  openModal('modalDetailRezervace');
+  nacistHistoriiPlateb(id);
+}
+function vykreslitDetailRezervace(r) {
   const stavBadge = {
     cekajici: '<span class="badge badge-cekajici">⏳ Čeká</span>',
     potvrzena: '<span class="badge badge-ok">✅ Potvrzena</span>',
@@ -1118,7 +1147,6 @@ function otevritDetailRezervace(id) {
     castecne_zaplaceno: '<span class="badge badge-cekajici">🟡 Částečně zaplaceno</span>',
     zaplaceno: '<span class="badge badge-ok">✅ Zaplaceno</span>'
   };
-  const zpusobLabel = { hotove: 'Hotově', kartou: 'Kartou', online: 'Online', poukaz: 'Poukaz' };
   const cena = Number(r.cena) || 0;
   const uhrazeno = Number(r.uhrazeno) || 0;
   const zbyva = Math.max(0, cena - uhrazeno);
@@ -1135,7 +1163,7 @@ function otevritDetailRezervace(id) {
     <div class="form-group"><label>Poznámka</label><div>${escapeHtml(r.poznamka) || '—'}</div></div>
     <div class="form-group"><label>Stav</label><div>${stavBadge[r.stav] || r.stav}</div></div>
     <div class="form-group"><label>Platba</label>
-      <div>${platbaBadge[stavPlatby] || stavPlatby}${r.zpusob_platby ? ' · ' + (zpusobLabel[r.zpusob_platby] || r.zpusob_platby) : ''}</div>
+      <div>${platbaBadge[stavPlatby] || stavPlatby}${r.zpusob_platby ? ' · ' + (platbaZpusobLabel[r.zpusob_platby] || r.zpusob_platby) : ''}</div>
       <div style="font-size:0.82rem;color:var(--text-light);margin-top:2px">Cena ${cena.toLocaleString('cs-CZ')} Kč · Uhrazeno ${uhrazeno.toLocaleString('cs-CZ')} Kč · Zbývá ${zbyva.toLocaleString('cs-CZ')} Kč</div>
     </div>
     ${zbyva > 0 ? `
@@ -1159,7 +1187,20 @@ function otevritDetailRezervace(id) {
         <button class="btn btn-outline btn-sm" onclick="uplatnitPoukazNaRezervaci(${r.id},'${escapeJsAttr(r.poukaz_kod)}')">🎁 Uplatnit poukaz ${escapeHtml(r.poukaz_kod)} na tuto rezervaci</button>
       </div>
     </div>` : ''}` : ''}
-    ${uhrazeno > 0 ? `<div class="form-group"><button class="btn btn-outline btn-sm" onclick="resetovatPlatbu(${r.id})">↺ Vrátit platbu na nezaplaceno</button></div>` : ''}
+    ${uhrazeno > 0 ? `
+    <div class="form-group"><label>Vrátit platbu klientce</label>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        <select id="vratkaZpusob" style="border:1px solid var(--tan-light);border-radius:6px;padding:6px 8px">
+          <option value="hotove">Hotově</option>
+          <option value="kartou">Kartou</option>
+          <option value="online">Online</option>
+        </select>
+        <input type="number" id="vratkaCastka" value="${uhrazeno}" min="1" max="${uhrazeno}" style="width:100px;border:1px solid var(--tan-light);border-radius:6px;padding:6px 8px">
+        <span style="font-size:0.8rem;color:var(--text-light)">Kč</span>
+        <button class="btn btn-outline btn-sm" onclick="vratitPlatbu(${r.id})">↺ Vrátit</button>
+      </div>
+    </div>` : ''}
+    <div class="form-group"><label>Historie plateb</label><div id="detailPlatebniHistorie"></div></div>
     <div class="form-group"><label>Odesláno</label><div>${new Date(r.vytvoreno).toLocaleString('cs-CZ')}</div></div>
     <div class="form-group"><label>Připomínka / žádost o recenzi</label><div>${r.pripomenuto ? 'připomínka odeslána' : 'připomínka zatím ne'} · ${r.pozadano_recenze ? 'recenze požádána' : 'recenze zatím ne'}</div></div>
   `;
@@ -1170,7 +1211,26 @@ function otevritDetailRezervace(id) {
     ${r.stav !== 'zrusena' ? `<button class="btn btn-red btn-sm" onclick="zmenitStavRez(${r.id},'zrusena');closeModal('modalDetailRezervace')">❌ Zrušit</button>` : ''}
     <button class="btn btn-red btn-sm" onclick="smazatRezervaci(${r.id});closeModal('modalDetailRezervace')">🗑️ Smazat</button>
   `;
-  openModal('modalDetailRezervace');
+}
+async function nacistHistoriiPlateb(id) {
+  try {
+    const historie = await adminFetch(API + '/admin/rezervace/' + id + '/platby').then(r => r.json());
+    const el = document.getElementById('detailPlatebniHistorie');
+    if (!el) return; // modal mezitím zavřený/přerenderovaný
+    if (!historie.length) { el.innerHTML = '<span style="color:var(--text-light);font-size:0.85rem">Zatím žádná platba.</span>'; return; }
+    el.innerHTML = historie.map(p => {
+      const castka = Number(p.castka);
+      const barva = castka < 0 ? '#c0392b' : 'var(--text)';
+      const datum = new Date(p.vytvoreno).toLocaleDateString('cs-CZ');
+      const znamenko = castka > 0 ? '+' : '';
+      const zpusob = platbaZpusobLabel[p.zpusob_platby] || p.zpusob_platby;
+      const popis = p.typ === 'vratka' ? `vratka (${zpusob})` : zpusob;
+      return `<div style="font-size:0.85rem;padding:3px 0;color:${barva}">${datum} — ${escapeHtml(popis)} — ${znamenko}${castka.toLocaleString('cs-CZ')} Kč</div>`;
+    }).join('');
+  } catch (e) {
+    const el = document.getElementById('detailPlatebniHistorie');
+    if (el) el.innerHTML = '<span class="error-msg">Historii se nepodařilo načíst.</span>';
+  }
 }
 async function zaznamenatPlatbu(id) {
   const castka = Number(document.getElementById('platbaCastka').value);
@@ -1194,9 +1254,14 @@ async function uplatnitPoukazNaRezervaci(rezervaceId, kod) {
   await loadRezervace();
   otevritDetailRezervace(rezervaceId);
 }
-async function resetovatPlatbu(id) {
-  if (!confirm('Vrátit platbu u této rezervace zpět na "nezaplaceno"?')) return;
-  await adminFetch(API + '/admin/rezervace/' + id + '/platba', { method: 'PATCH', body: JSON.stringify({ reset: true }) });
+async function vratitPlatbu(id) {
+  const castka = Number(document.getElementById('vratkaCastka').value);
+  const zpusob_platby = document.getElementById('vratkaZpusob').value;
+  if (!castka || castka <= 0) { alert('Zadejte prosím kladnou částku.'); return; }
+  if (!confirm('Vrátit klientce ' + castka.toLocaleString('cs-CZ') + ' Kč? Platba i vratka zůstanou v historii.')) return;
+  const res = await adminFetch(API + '/admin/rezervace/' + id + '/platba', { method: 'PATCH', body: JSON.stringify({ castka, zpusob_platby, typ: 'vratka' }) });
+  const data = await res.json();
+  if (!res.ok) { alert(data.chyba || 'Vrácení platby se nepodařilo.'); return; }
   await loadRezervace();
   otevritDetailRezervace(id);
 }
@@ -1800,42 +1865,69 @@ async function smazatProdej(id) {
   loadProdejna();
 }
 
-// ── ÚČETNICTVÍ ──
+// ── ÚČETNICTVÍ (Fáze 3B) — 4 oddělené přehledy, ať jedno číslo nemusí
+// představovat čtyři různé věci (hodnota služby, přijaté peníze, prodej
+// poukazu, vratka). Viz GET /api/admin/ucetnictvi.
 let posledniUcetnictvi = null;
+function tabulkaPodleDne(data, prazdnyText) {
+  if (!data.length) return `<div class="empty">${prazdnyText}</div>`;
+  return `<table><thead><tr><th>Den</th><th>Částka</th></tr></thead>
+    <tbody>${data.slice(0, 60).map(d => `<tr><td>${new Date(d.den).toLocaleDateString('cs-CZ')}</td><td><strong>${Math.round(d.castka).toLocaleString('cs-CZ')} Kč</strong></td></tr>`).join('')}</tbody></table>`;
+}
 async function loadUcetnictvi() {
   try {
-    const d = await adminFetch(API + '/admin/ucetnictvi').then(r => r.json());
+    const od = document.getElementById('ucetOd').value;
+    const doDat = document.getElementById('ucetDo').value;
+    const params = new URLSearchParams();
+    if (od) params.set('od', od);
+    if (doDat) params.set('do', doDat);
+    const d = await adminFetch(API + '/admin/ucetnictvi' + (params.toString() ? '?' + params.toString() : '')).then(r => r.json());
     posledniUcetnictvi = d;
-    document.getElementById('ucetTrzby').textContent = Math.round(d.trzbyCelkem).toLocaleString('cs-CZ') + ' Kč';
-    document.getElementById('ucetDnes').textContent = Math.round(d.trzbyDnes).toLocaleString('cs-CZ') + ' Kč';
-    document.getElementById('ucetPocet').textContent = d.pocetPolozek;
-    document.getElementById('ucetPrumer').textContent = Math.round(d.prumernaPolozka).toLocaleString('cs-CZ') + ' Kč';
 
-    document.getElementById('ucetMesice').innerHTML = !d.mesicniPrehled.length ? '<div class="empty">Zatím žádná data</div>' : `
-      <table><thead><tr><th>Měsíc</th><th>Tržby</th></tr></thead>
-      <tbody>${d.mesicniPrehled.map(m => `<tr><td>${m.mesic}</td><td><strong>${Math.round(m.castka).toLocaleString('cs-CZ')} Kč</strong></td></tr>`).join('')}</tbody></table>`;
+    document.getElementById('ucetTrzbySluzby').textContent = Math.round(d.trzbyZaSluzby.celkem).toLocaleString('cs-CZ') + ' Kč';
+    document.getElementById('ucetPrijatePlatby').textContent = Math.round(d.prijatePlatby.celkem).toLocaleString('cs-CZ') + ' Kč';
+    document.getElementById('ucetProdejPoukazu').textContent = Math.round(d.prodejPoukazu.celkem).toLocaleString('cs-CZ') + ' Kč';
+    document.getElementById('ucetVratky').textContent = Math.round(d.vratky.celkem).toLocaleString('cs-CZ') + ' Kč';
 
-    document.getElementById('ucetDny').innerHTML = !d.denniPrehled.length ? '<div class="empty">Zatím žádná data</div>' : `
-      <table><thead><tr><th>Den</th><th>Tržby</th></tr></thead>
-      <tbody>${d.denniPrehled.slice(0, 31).map(den => `<tr><td>${new Date(den.den).toLocaleDateString('cs-CZ')}</td><td><strong>${Math.round(den.castka).toLocaleString('cs-CZ')} Kč</strong></td></tr>`).join('')}</tbody></table>`;
+    document.getElementById('ucetTrzbySluzbyDny').innerHTML = tabulkaPodleDne(d.trzbyZaSluzby.podleDne, 'Zatím žádné služby v tomto období');
+    document.getElementById('ucetPrijatePlatbyDny').innerHTML = tabulkaPodleDne(d.prijatePlatby.podleDne, 'Zatím žádné platby v tomto období');
+    document.getElementById('ucetProdejPoukazuDny').innerHTML = tabulkaPodleDne(d.prodejPoukazu.podleDne, 'Zatím žádné prodané poukazy v tomto období');
 
-    const zdrojLabel = { rezervace: '📅 Rezervace', prodejna: '🧖 Prodejna', poukaz: '🎁 Poukaz' };
-    document.getElementById('ucetPolozky').innerHTML = !d.polozky.length ? '<div class="empty">Zatím žádné položky</div>' : `
-      <table><thead><tr><th>Datum</th><th>Zdroj</th><th>Částka</th></tr></thead>
-      <tbody>${d.polozky.slice(0, 100).map(p => `<tr><td>${new Date(p.datum).toLocaleDateString('cs-CZ')}</td><td>${zdrojLabel[p.zdroj] || p.zdroj}</td><td>${Math.round(p.castka).toLocaleString('cs-CZ')} Kč</td></tr>`).join('')}</tbody></table>`;
-  } catch (e) { document.getElementById('ucetMesice').innerHTML = '<div class="error-msg">Chyba načítání.</div>'; }
+    const zpusobLabel = { hotove: 'Hotově', kartou: 'Kartou', online: 'Online', poukaz: 'Poukaz' };
+    document.getElementById('ucetPrijatePlatbySeznam').innerHTML = !d.prijatePlatby.seznam.length ? '<div class="empty">Zatím žádné platby v tomto období</div>' : `
+      <table><thead><tr><th>Datum</th><th>Typ</th><th>Způsob</th><th>Rezervace</th><th>Částka</th></tr></thead>
+      <tbody>${d.prijatePlatby.seznam.slice(0, 100).map(p => `<tr>
+        <td>${new Date(p.vytvoreno).toLocaleDateString('cs-CZ')}</td>
+        <td>${p.typ === 'vratka' ? '↺ vratka' : '✅ platba'}</td>
+        <td>${zpusobLabel[p.zpusob_platby] || p.zpusob_platby}</td>
+        <td>${p.rezervace_id ? '<a href="#" onclick="zobrazitRezervaciZUcetnictvi(' + p.rezervace_id + ');return false;">#' + p.rezervace_id + '</a>' : '—'}</td>
+        <td>${Number(p.castka) > 0 ? '+' : ''}${Math.round(p.castka).toLocaleString('cs-CZ')} Kč</td>
+      </tr>`).join('')}</tbody></table>`;
+
+    document.getElementById('ucetVratkySeznam').innerHTML = !d.vratky.seznam.length ? '<div class="empty">Zatím žádné vratky v tomto období</div>' : `
+      <table><thead><tr><th>Datum</th><th>Způsob</th><th>Rezervace</th><th>Částka</th></tr></thead>
+      <tbody>${d.vratky.seznam.slice(0, 100).map(p => `<tr>
+        <td>${new Date(p.vytvoreno).toLocaleDateString('cs-CZ')}</td>
+        <td>${zpusobLabel[p.zpusob_platby] || p.zpusob_platby}</td>
+        <td>${p.rezervace_id ? '<a href="#" onclick="zobrazitRezervaciZUcetnictvi(' + p.rezervace_id + ');return false;">#' + p.rezervace_id + '</a>' : '—'}</td>
+        <td style="color:#c0392b">${Math.round(p.castka).toLocaleString('cs-CZ')} Kč</td>
+      </tr>`).join('')}</tbody></table>`;
+  } catch (e) { document.getElementById('ucetTrzbySluzbyDny').innerHTML = '<div class="error-msg">Chyba načítání.</div>'; }
+}
+async function zobrazitRezervaciZUcetnictvi(id) {
+  if (!vsechnyRezervace.length) await loadRezervace();
+  otevritDetailRezervace(id);
 }
 function exportCsvUcetnictvi() {
   if (!posledniUcetnictvi) return;
-  const zdrojLabel = { rezervace: 'Rezervace', prodejna: 'Prodejna', poukaz: 'Poukaz' };
-  let csv = 'Datum;Zdroj;Castka\n';
-  posledniUcetnictvi.polozky.forEach(p => {
-    csv += `${new Date(p.datum).toLocaleDateString('cs-CZ')};${zdrojLabel[p.zdroj] || p.zdroj};${Math.round(p.castka)}\n`;
+  let csv = 'Datum;Typ;Zpusob;RezervaceId;Castka\n';
+  posledniUcetnictvi.prijatePlatby.seznam.forEach(p => {
+    csv += `${new Date(p.vytvoreno).toLocaleDateString('cs-CZ')};${p.typ};${p.zpusob_platby};${p.rezervace_id || ''};${Math.round(p.castka)}\n`;
   });
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'ucetnictvi-masaze-alesa.csv';
+  a.download = 'prijate-platby-masaze-alesa.csv';
   a.click();
 }
 </script>

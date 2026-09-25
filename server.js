@@ -51,6 +51,32 @@ async function ziskatRezervaceOd() {
   } catch { return null; }
 }
 
+// Přepočte rezervace.uhrazeno/stav_platby/zpusob_platby/uhrazeno_kdy jako souhrn
+// deníku "platby" pro danou rezervaci — VŽDY nově spočtený součet, ne postupné
+// přičítání, takže se nikdy nemůže rozejít s deníkem (jediný zdroj pravdy).
+// Musí běžet uvnitř transakce, která před tím zamkla řádek rezervace (FOR UPDATE),
+// a hned po zápisu nového řádku do "platby" ve stejné transakci.
+async function prepocitatSouhrnRezervace(client, rezervaceId) {
+  const { rows: [r] } = await client.query('SELECT * FROM rezervace WHERE id = $1', [rezervaceId]);
+  const { rows: [{ soucet }] } = await client.query(
+    'SELECT COALESCE(SUM(castka), 0) AS soucet FROM platby WHERE rezervace_id = $1', [rezervaceId]
+  );
+  const { rows: [posledni] } = await client.query(
+    'SELECT zpusob_platby FROM platby WHERE rezervace_id = $1 ORDER BY vytvoreno DESC, id DESC LIMIT 1', [rezervaceId]
+  );
+  const uhrazeno = Number(soucet);
+  const cena = Number(r.cena) || 0;
+  const novyStav = uhrazeno <= 0 ? 'nezaplaceno' : (uhrazeno >= cena ? 'zaplaceno' : 'castecne_zaplaceno');
+  const noveUhrazenoKdy = novyStav === 'zaplaceno'
+    ? (r.stav_platby === 'zaplaceno' ? r.uhrazeno_kdy : new Date())
+    : null;
+  const { rows: [aktualizovana] } = await client.query(
+    `UPDATE rezervace SET uhrazeno = $1, stav_platby = $2, zpusob_platby = $3, uhrazeno_kdy = $4 WHERE id = $5 RETURNING *`,
+    [uhrazeno, novyStav, posledni ? posledni.zpusob_platby : null, noveUhrazenoKdy, rezervaceId]
+  );
+  return aktualizovana;
+}
+
 function vyzadovatAdmina(req, res, next) {
   const heslo = req.headers['x-admin-heslo'] || '';
   if (!ADMIN_HESLO || heslo !== ADMIN_HESLO) {
@@ -617,49 +643,47 @@ app.patch('/api/admin/rezervace/:id/stav', async (req, res) => {
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
-// Zaznamenání platby k rezervaci. Stav platby je záměrně nezávislý na stavu
-// rezervace (dokončená masáž může zůstat nezaplacená a naopak). "castka" se
-// PŘIČÍTÁ k dosavadní uhrazené částce (podporuje např. poukaz + doplatek
-// hotově ve dvou krocích), ne že by ji přepisovala — proto i tady, stejně jako
-// u uplatnění poukazu, běží update pod zámkem řádku (SELECT...FOR UPDATE), ať
-// dvě souběžně zaznamenané platby o sebe nepřijdou (tzv. lost update).
-// { reset: true } vrátí platbu zpátky na "nezaplaceno" (oprava omylu).
+// Zaznamenání platby NEBO vratky k rezervaci — zapíše řádek do deníku "platby"
+// a ve STEJNÉ transakci přepočte souhrn na rezervaci (viz prepocitatSouhrnRezervace).
+// Buď se zapíše obojí, nebo nic (žádný poloviční zápis). Stav platby je záměrně
+// nezávislý na stavu rezervace (dokončená masáž může zůstat nezaplacená a naopak).
+// Zámek řádku rezervace (FOR UPDATE) chrání proti dvěma souběžným platbám, co by
+// si jinak navzájem přepsaly součet (tzv. lost update).
+// typ: 'platba' (výchozí) nebo 'vratka' — vratka se ukládá jako záporná částka,
+// ale zůstává v deníku navždy vedle původní platby (nemaže historii).
 app.patch('/api/admin/rezervace/:id/platba', async (req, res) => {
-  const { castka, zpusob_platby, reset } = req.body || {};
+  const { castka, zpusob_platby, typ } = req.body || {};
+  const druh = typ === 'vratka' ? 'vratka' : 'platba';
+  const castkaNum = Number(castka);
+  if (!Number.isFinite(castkaNum) || castkaNum <= 0) {
+    return res.status(400).json({ chyba: 'Zadejte prosím kladnou částku.' });
+  }
+  if (!['hotove', 'kartou', 'online', 'poukaz'].includes(zpusob_platby)) {
+    return res.status(400).json({ chyba: 'Vyberte prosím způsob platby.' });
+  }
   const client = await db.connect();
   try {
     await client.query('BEGIN');
     const { rows: [r] } = await client.query('SELECT * FROM rezervace WHERE id = $1 FOR UPDATE', [req.params.id]);
     if (!r) { await client.query('ROLLBACK'); return res.status(404).json({ chyba: 'Rezervace nebyla nalezena.' }); }
 
-    if (reset) {
-      const { rows: [aktualizovana] } = await client.query(
-        `UPDATE rezervace SET uhrazeno = 0, stav_platby = 'nezaplaceno', zpusob_platby = NULL, uhrazeno_kdy = NULL WHERE id = $1 RETURNING *`,
-        [req.params.id]
-      );
-      await client.query('COMMIT');
-      return res.json({ ok: true, rezervace: aktualizovana });
-    }
-
-    const castkaNum = Number(castka);
-    if (!Number.isFinite(castkaNum) || castkaNum <= 0) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ chyba: 'Zadejte prosím kladnou částku.' });
-    }
-    if (!['hotove', 'kartou', 'online', 'poukaz'].includes(zpusob_platby)) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ chyba: 'Vyberte prosím způsob platby.' });
-    }
-
     const cena = Number(r.cena) || 0;
-    const noveUhrazeno = Math.min(cena, Number(r.uhrazeno) + castkaNum);
-    const novyStav = noveUhrazeno <= 0 ? 'nezaplaceno' : (noveUhrazeno >= cena ? 'zaplaceno' : 'castecne_zaplaceno');
-    const noveUhrazenoKdy = (novyStav === 'zaplaceno' && r.stav_platby !== 'zaplaceno') ? new Date() : r.uhrazeno_kdy;
+    const aktualniUhrazeno = Number(r.uhrazeno) || 0;
 
-    const { rows: [aktualizovana] } = await client.query(
-      `UPDATE rezervace SET uhrazeno = $1, stav_platby = $2, zpusob_platby = $3, uhrazeno_kdy = $4 WHERE id = $5 RETURNING *`,
-      [noveUhrazeno, novyStav, zpusob_platby, noveUhrazenoKdy, req.params.id]
+    if (druh === 'platba' && aktualniUhrazeno + castkaNum > cena) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ chyba: `Částka převyšuje zbývající dluh (zbývá ${cena - aktualniUhrazeno} Kč).` });
+    }
+    if (druh === 'vratka' && castkaNum > aktualniUhrazeno) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ chyba: `Nelze vrátit víc, než je uhrazeno (uhrazeno ${aktualniUhrazeno} Kč).` });
+    }
+
+    await client.query(
+      `INSERT INTO platby (rezervace_id, castka, typ, zpusob_platby) VALUES ($1,$2,$3,$4)`,
+      [req.params.id, druh === 'vratka' ? -castkaNum : castkaNum, druh, zpusob_platby]
     );
+    const aktualizovana = await prepocitatSouhrnRezervace(client, req.params.id);
     await client.query('COMMIT');
     res.json({ ok: true, rezervace: aktualizovana });
   } catch (e) {
@@ -668,6 +692,17 @@ app.patch('/api/admin/rezervace/:id/platba', async (req, res) => {
   } finally {
     client.release();
   }
+});
+
+// Historie jednotlivých plateb/vratek k rezervaci (jen pro čtení) — pro zobrazení
+// v detailu rezervace v adminu.
+app.get('/api/admin/rezervace/:id/platby', async (req, res) => {
+  try {
+    const { rows } = await db.query(
+      'SELECT * FROM platby WHERE rezervace_id = $1 ORDER BY vytvoreno ASC, id ASC', [req.params.id]
+    );
+    res.json(rows);
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
 app.delete('/api/admin/rezervace/:id', async (req, res) => {
@@ -858,10 +893,10 @@ app.patch('/api/admin/poukazy/:id/stav', async (req, res) => {
 // snížený zůstatek. Stejný princip jako zámek proti dvojité rezervaci termínu,
 // jen tady jde o zámek konkrétního řádku místo dne v kalendáři.
 // Nepovinné rezervace_id: pokud se poukaz uplatňuje na konkrétní rezervaci,
-// uplatněná částka se ve stejné transakci rovnou zapíše i jako platba u té
-// rezervace (stav_platby/uhrazeno/zpusob_platby='poukaz') — takže propojení
-// rezervace↔poukaz zůstává zachované a obě strany (poukaz i rezervace) se
-// buď zapíšou obě, nebo ani jedna.
+// uplatněná částka se ve stejné transakci rovnou zapíše i jako řádek do deníku
+// "platby" (typ='platba', zpusob_platby='poukaz', poukaz_id=tenhle poukaz) a
+// souhrn rezervace se přepočte — takže propojení rezervace↔poukaz zůstává
+// zachované a obě strany (poukaz i rezervace) se buď zapíšou obě, nebo ani jedna.
 app.post('/api/admin/poukazy/:id/uplatnit', async (req, res) => {
   const castka = Number(req.body && req.body.castka);
   const rezervaceId = req.body && req.body.rezervace_id ? Number(req.body.rezervace_id) : null;
@@ -893,14 +928,16 @@ app.post('/api/admin/poukazy/:id/uplatnit', async (req, res) => {
       const { rows: [r] } = await client.query('SELECT * FROM rezervace WHERE id = $1 FOR UPDATE', [rezervaceId]);
       if (!r) { await client.query('ROLLBACK'); return res.status(404).json({ chyba: 'Rezervace k propojení nebyla nalezena.' }); }
       const cena = Number(r.cena) || 0;
-      const noveUhrazeno = Math.min(cena, Number(r.uhrazeno) + castka);
-      const novyStavPlatby = noveUhrazeno <= 0 ? 'nezaplaceno' : (noveUhrazeno >= cena ? 'zaplaceno' : 'castecne_zaplaceno');
-      const noveUhrazenoKdy = (novyStavPlatby === 'zaplaceno' && r.stav_platby !== 'zaplaceno') ? new Date() : r.uhrazeno_kdy;
-      const { rows: [aktRez] } = await client.query(
-        `UPDATE rezervace SET uhrazeno = $1, stav_platby = $2, zpusob_platby = 'poukaz', uhrazeno_kdy = $3 WHERE id = $4 RETURNING *`,
-        [noveUhrazeno, novyStavPlatby, noveUhrazenoKdy, rezervaceId]
+      const aktualniUhrazeno = Number(r.uhrazeno) || 0;
+      if (aktualniUhrazeno + castka > cena) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ chyba: `Částka převyšuje zbývající dluh na rezervaci (zbývá ${cena - aktualniUhrazeno} Kč).` });
+      }
+      await client.query(
+        `INSERT INTO platby (rezervace_id, castka, typ, zpusob_platby, poukaz_id) VALUES ($1,$2,'platba','poukaz',$3)`,
+        [rezervaceId, castka, req.params.id]
       );
-      aktualizovanaRezervace = aktRez;
+      aktualizovanaRezervace = await prepocitatSouhrnRezervace(client, rezervaceId);
     }
 
     const novyZustatek = Number(poukaz.zustatek) - castka;
@@ -1184,48 +1221,93 @@ app.delete('/api/admin/prodejna/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
-// -- Účetnictví: souhrn tržeb z rezervací, prodejny na místě a poukazů --
-// Tržba za rezervaci se počítá podle data MASÁŽE (rezervace.datum), ne podle data,
-// kdy klientka rezervaci vytvořila (vytvoreno) — jinak by se rezervace vytvořená
-// dnes na termín za měsíc mylně počítala do dnešní tržby. U prodejny (prodej na
-// místě) a poukazu (nákup poukazu) je to naopak správně podle vytvoreno, protože
-// tam k platbě dochází přesně v tu chvíli, ne později.
+// -- Účetnictví (Fáze 3B): 4 oddělené přehledy, ať jedno číslo nemusí
+// představovat čtyři různé věci najednou.
+//
+// A) TRŽBY ZA SLUŽBY — hodnota uskutečněné/objednané služby podle DATA MASÁŽE
+//    (rezervace.datum), bez ohledu na to, kdy/jestli už je zaplacená. Prodejna
+//    (walk-in prodej) sem patří taky, tam ale datum vytvoření = datum služby
+//    (platí se na místě hned), takže žádný rozdíl není.
+// B) PŘIJATÉ PLATBY — skutečný pohyb peněz podle deníku "platby" (+prodejna).
+//    Platby se zpusob_platby='poukaz' se sem NEPOČÍTAJÍ — ty peníze už byly
+//    jednou započítané v okamžiku PRODEJE poukazu (viz C), takže by se jinak
+//    počítaly dvakrát. Vratky (záporné částky) se přirozeně odečtou.
+// C) PRODEJ POUKAZŮ — kdy a kolik se prodalo dárkových poukazů (podle
+//    poukazy.vytvoreno = okamžik prodeje/platby za poukaz).
+// D) VRATKY — přehled všech vrácení peněz z deníku "platby" (typ='vratka'),
+//    bez ohledu na to, jestli šlo o platbu hotově/kartou/poukazem.
+//
+// Nepovinné query parametry ?od=YYYY-MM-DD&do=YYYY-MM-DD omezí období (podle
+// data té které položky — masáže, platby, nebo prodeje poukazu).
 app.get('/api/admin/ucetnictvi', async (req, res) => {
   try {
-    const [rez, prod, pouk] = await Promise.all([
-      db.query("SELECT cena, datum, vytvoreno FROM rezervace WHERE stav IN ('potvrzena', 'dokoncena')"),
+    const { od, do: doParam } = req.query;
+    const vObdobi = iso => (!od || iso >= od) && (!doParam || iso <= doParam);
+    const seskupitPodleDne = (radky, castka, datum) => {
+      const mapa = {};
+      radky.forEach(r => { const d = datum(r); mapa[d] = (mapa[d] || 0) + castka(r); });
+      return Object.entries(mapa).sort((a, b) => b[0].localeCompare(a[0])).map(([den, c]) => ({ den, castka: c }));
+    };
+
+    const [rez, prod, pouk, plat] = await Promise.all([
+      db.query("SELECT cena, datum FROM rezervace WHERE stav IN ('potvrzena', 'dokoncena')"),
       db.query('SELECT cena, vytvoreno FROM prodeje'),
-      db.query('SELECT hodnota, vytvoreno FROM poukazy')
+      db.query('SELECT id, hodnota, vytvoreno FROM poukazy'),
+      db.query('SELECT id, rezervace_id, castka, typ, zpusob_platby, vytvoreno FROM platby')
     ]);
 
-    const polozky = [
-      ...rez.rows.map(r => ({ zdroj: 'rezervace', castka: Number(r.cena) || 0, datum: r.datum, vytvoreno: r.vytvoreno.toISOString() })),
-      ...prod.rows.map(p => ({ zdroj: 'prodejna', castka: Number(p.cena) || 0, datum: p.vytvoreno.toISOString(), vytvoreno: p.vytvoreno.toISOString() })),
-      ...pouk.rows.map(p => ({ zdroj: 'poukaz', castka: Number(p.hodnota) || 0, datum: p.vytvoreno.toISOString(), vytvoreno: p.vytvoreno.toISOString() }))
+    const prodejnaPolozky = prod.rows.map(p => ({ castka: Number(p.cena) || 0, datum: p.vytvoreno.toISOString().slice(0, 10) }));
+
+    // A) Tržby za služby (rezervace podle data masáže + prodejna podle data prodeje)
+    const trzbyPolozky = [
+      ...rez.rows.filter(r => vObdobi(r.datum)).map(r => ({ castka: Number(r.cena) || 0, datum: r.datum })),
+      ...prodejnaPolozky.filter(p => vObdobi(p.datum))
     ];
 
-    const trzbyCelkem = polozky.reduce((s, p) => s + p.castka, 0);
-    const dnes = new Date().toISOString().slice(0, 10);
-    const trzbyDnes = polozky.filter(p => p.datum.slice(0, 10) === dnes).reduce((s, p) => s + p.castka, 0);
+    // B) Přijaté platby — deník bez poukazových řádků (ty patří do C) + prodejna
+    const platbyFiltr = plat.rows
+      .map(p => ({ ...p, den: p.vytvoreno.toISOString().slice(0, 10) }))
+      .filter(p => vObdobi(p.den));
+    const prijatePlatbyPolozky = [
+      ...platbyFiltr.filter(p => p.zpusob_platby !== 'poukaz').map(p => ({ castka: Number(p.castka), datum: p.den })),
+      ...prodejnaPolozky.filter(p => vObdobi(p.datum))
+    ];
 
-    const poMesicich = {};
-    const poDnech = {};
-    polozky.forEach(p => {
-      const mesic = p.datum.slice(0, 7); // YYYY-MM
-      const den = p.datum.slice(0, 10); // YYYY-MM-DD
-      poMesicich[mesic] = (poMesicich[mesic] || 0) + p.castka;
-      poDnech[den] = (poDnech[den] || 0) + p.castka;
-    });
-    const mesicniPrehled = Object.entries(poMesicich).sort((a, b) => b[0].localeCompare(a[0])).map(([mesic, castka]) => ({ mesic, castka }));
-    const denniPrehled = Object.entries(poDnech).sort((a, b) => b[0].localeCompare(a[0])).map(([den, castka]) => ({ den, castka }));
+    // C) Prodej poukazů
+    const poukazyFiltr = pouk.rows
+      .map(p => ({ ...p, den: p.vytvoreno.toISOString().slice(0, 10) }))
+      .filter(p => vObdobi(p.den));
+
+    // D) Vratky
+    const vratkyFiltr = platbyFiltr.filter(p => p.typ === 'vratka');
 
     res.json({
-      trzbyCelkem, trzbyDnes,
-      pocetPolozek: polozky.length,
-      prumernaPolozka: polozky.length ? trzbyCelkem / polozky.length : 0,
-      mesicniPrehled,
-      denniPrehled,
-      polozky: polozky.sort((a, b) => b.datum.localeCompare(a.datum))
+      obdobi: { od: od || null, do: doParam || null },
+      trzbyZaSluzby: {
+        celkem: trzbyPolozky.reduce((s, p) => s + p.castka, 0),
+        podleDne: seskupitPodleDne(trzbyPolozky, p => p.castka, p => p.datum)
+      },
+      prijatePlatby: {
+        celkem: prijatePlatbyPolozky.reduce((s, p) => s + p.castka, 0),
+        podleDne: seskupitPodleDne(prijatePlatbyPolozky, p => p.castka, p => p.datum),
+        seznam: platbyFiltr.map(p => ({
+          id: p.id, rezervace_id: p.rezervace_id, castka: Number(p.castka), typ: p.typ,
+          zpusob_platby: p.zpusob_platby, vytvoreno: p.vytvoreno.toISOString()
+        }))
+      },
+      prodejPoukazu: {
+        celkem: poukazyFiltr.reduce((s, p) => s + Number(p.hodnota), 0),
+        pocet: poukazyFiltr.length,
+        podleDne: seskupitPodleDne(poukazyFiltr, p => Number(p.hodnota), p => p.den)
+      },
+      vratky: {
+        celkem: vratkyFiltr.reduce((s, p) => s + Math.abs(Number(p.castka)), 0),
+        pocet: vratkyFiltr.length,
+        seznam: vratkyFiltr.map(p => ({
+          id: p.id, rezervace_id: p.rezervace_id, castka: Number(p.castka),
+          zpusob_platby: p.zpusob_platby, vytvoreno: p.vytvoreno.toISOString()
+        }))
+      }
     });
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });

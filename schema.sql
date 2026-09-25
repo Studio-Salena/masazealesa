@@ -87,10 +87,25 @@ create table if not exists rezervace (
   -- být nezaplacená a naopak. uhrazeno je průběžný součet (podporuje částečnou
   -- platbu, např. poukaz + doplatek hotově), stav_platby se z něj dopočítává.
   stav_platby text not null default 'nezaplaceno', -- nezaplaceno | castecne_zaplaceno | zaplaceno
-  zpusob_platby text, -- hotove | kartou | online | poukaz (nepovinné, dokud se nic nezaplatilo)
-  uhrazeno numeric not null default 0,
-  uhrazeno_kdy timestamptz, -- kdy se stav_platby naposledy stal "zaplaceno"
+  zpusob_platby text, -- hotove | kartou | online | poukaz — vždy způsob POSLEDNÍ transakce v "platby"
+  uhrazeno numeric not null default 0, -- vždy = SUM(platby.castka) pro tuhle rezervaci, viz níž
+  uhrazeno_kdy timestamptz, -- nastaveno, jen když je stav_platby právě teď "zaplaceno" (jinak null)
   vytvoreno timestamptz not null default now()
+);
+
+-- Deník jednotlivých plateb a vratek k rezervaci (Fáze 3B). rezervace.uhrazeno/
+-- stav_platby/zpusob_platby/uhrazeno_kdy zůstávají jako rychlý dopočtený souhrn
+-- (vždy přepočtený z tohohle deníku ve stejné transakci, nikdy se nerozejdou) —
+-- ale historie jednotlivých plateb (kdy, kolik, jak) žije jen tady.
+create table if not exists platby (
+  id serial primary key,
+  rezervace_id integer not null references rezervace(id) on delete cascade,
+  castka numeric not null, -- kladná = platba, záporná = vratka (viz typ níž)
+  typ text not null, -- platba | vratka
+  zpusob_platby text not null, -- hotove | kartou | online | poukaz
+  poukaz_id integer references poukazy(id) on delete set null, -- vyplněno jen když zpusob_platby = 'poukaz'
+  vytvoreno timestamptz not null default now(),
+  check ((typ = 'platba' and castka > 0) or (typ = 'vratka' and castka < 0))
 );
 
 -- Prodeje na místě v salónu (klientka bez rezervace, platí hned)
