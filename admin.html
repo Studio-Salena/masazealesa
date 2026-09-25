@@ -686,6 +686,30 @@ const API = 'https://masazealesa.onrender.com/api';
 
 let vsechnyRezervace = [];
 
+// Data od klientek (jméno, poznámka, telefon...) se vždycky ukládají a posílají
+// tak, jak je klientka napsala — bez úpravy. Zabezpečení proti XSS proto musí být
+// tady, při vykreslování do stránky, ne při ukládání. Použít na COKOLIV, co pochází
+// od klientky/z formuláře, než se to vloží do innerHTML.
+function escapeHtml(hodnota) {
+  if (hodnota === null || hodnota === undefined) return '';
+  return String(hodnota)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+// Pro hodnoty vkládané do inline onclick="...('ZDE')" — samotné escapeHtml nestačí,
+// protože prohlížeč HTML entity v atributu dekóduje ZPĚT dřív, než onclick spustí
+// jako JS (takže escapeHtml('") by JS řetězec před spuštěním stejně "rozbil").
+// Nejdřív se proto unikne pro JS řetězec (apostrof/zpětné lomítko), a až pak pro
+// HTML atribut — tím zůstane po zpětném dekódování v JS jen neškodný text.
+function escapeJsAttr(hodnota) {
+  if (hodnota === null || hodnota === undefined) return '';
+  const jsEscaped = String(hodnota).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, '');
+  return escapeHtml(jsEscaped);
+}
+
 function adminFetch(url, options = {}) {
   const heslo = sessionStorage.getItem('adminHeslo') || '';
   const headers = Object.assign({}, options.headers || {}, { 'x-admin-heslo': heslo, 'Content-Type': 'application/json' });
@@ -853,7 +877,7 @@ function vykreslitAdminKalendar() {
       const top = (od - minMin) * PX_MIN;
       const h = Math.max((doo - od) * PX_MIN, 15);
       const barva = barvy[r.stav] || '#b0a89f';
-      return `<div class="ak-blok" style="top:${top}px;height:${h}px;background:${barva}" onclick="otevritDetailRezervace(${r.id})" title="${r.jmeno} — ${r.masaz}"><strong>${String(r.cas_od).slice(0, 5)}</strong>${r.jmeno}</div>`;
+      return `<div class="ak-blok" style="top:${top}px;height:${h}px;background:${barva}" onclick="otevritDetailRezervace(${r.id})" title="${escapeHtml(r.jmeno)} — ${escapeHtml(r.masaz)}"><strong>${String(r.cas_od).slice(0, 5)}</strong>${escapeHtml(r.jmeno)}</div>`;
     }).join('');
     html += `<div class="ak-den" style="height:${vyska}px">${blokyHtml}</div>`;
   });
@@ -874,7 +898,7 @@ async function otevritNovouRezervaci() {
   openModal('modalNovaRezervace');
   try {
     const cenik = await adminFetch(API + '/admin/cenik').then(r => r.json());
-    sel.innerHTML = cenik.map(c => `<option value="${c.id}">${c.skupina} – ${c.varianta} (${c.delka_min} min)</option>`).join('');
+    sel.innerHTML = cenik.map(c => `<option value="${c.id}">${escapeHtml(c.skupina)} – ${escapeHtml(c.varianta)} (${c.delka_min} min)</option>`).join('');
   } catch (e) {
     sel.innerHTML = '<option value="">Nepodařilo se načíst ceník</option>';
   }
@@ -993,7 +1017,7 @@ async function loadVyjimky() {
       <tbody>${posledniVyjimky.map(v => `<tr>
         <td>${new Date(v.datum_od).toLocaleDateString('cs-CZ')}</td>
         <td>${new Date(v.datum_do).toLocaleDateString('cs-CZ')}</td>
-        <td>${v.popis || '—'}</td>
+        <td>${escapeHtml(v.popis) || '—'}</td>
         <td>${v.otevreno_od && v.otevreno_do ? v.otevreno_od.slice(0,5) + '–' + v.otevreno_do.slice(0,5) : 'zavřeno celý den'}</td>
         <td>
           <button class="btn btn-outline btn-sm" onclick="upravitVyjimku(${v.id})">✏️</button>
@@ -1066,9 +1090,9 @@ function vykreslitRezervace(filtr) {
     <table><thead><tr><th>Termín</th><th>Jméno</th><th>Kontakt</th><th>Masáž</th><th>Stav</th><th>Akce</th></tr></thead>
     <tbody>${seznam.map(r => `<tr class="row-clickable" onclick="otevritDetailRezervace(${r.id})">
       <td>${new Date(r.datum).toLocaleDateString('cs-CZ')} ${r.cas_od.slice(0,5)}–${r.cas_do.slice(0,5)}</td>
-      <td>${r.jmeno}</td>
-      <td>${r.telefon}${r.email ? '<br><small>' + r.email + '</small>' : ''}</td>
-      <td>${r.masaz}${r.poukaz_kod ? '<br><small>🎁 ' + r.poukaz_kod + '</small>' : ''}${r.poznamka ? '<br><small style="color:var(--text-light)">' + r.poznamka + '</small>' : ''}</td>
+      <td>${escapeHtml(r.jmeno)}</td>
+      <td>${escapeHtml(r.telefon)}${r.email ? '<br><small>' + escapeHtml(r.email) + '</small>' : ''}</td>
+      <td>${escapeHtml(r.masaz)}${r.poukaz_kod ? '<br><small>🎁 ' + escapeHtml(r.poukaz_kod) + '</small>' : ''}${r.poznamka ? '<br><small style="color:var(--text-light)">' + escapeHtml(r.poznamka) + '</small>' : ''}</td>
       <td>${stavBadge[r.stav] || r.stav}</td>
       <td style="display:flex;gap:4px;flex-wrap:wrap" onclick="event.stopPropagation()">
         ${r.stav !== 'potvrzena' ? `<button class="btn btn-green btn-sm" onclick="zmenitStavRez(${r.id},'potvrzena')" title="Potvrdit">✅</button>` : ''}
@@ -1091,13 +1115,13 @@ function otevritDetailRezervace(id) {
   };
   document.getElementById('detailRezervaceObsah').innerHTML = `
     <div class="form-group"><label>Termín</label><div>${new Date(r.datum).toLocaleDateString('cs-CZ')}, ${r.cas_od.slice(0,5)}–${r.cas_do.slice(0,5)}</div></div>
-    <div class="form-group"><label>Masáž</label><div>${r.masaz}</div></div>
+    <div class="form-group"><label>Masáž</label><div>${escapeHtml(r.masaz)}</div></div>
     <div class="form-group"><label>Cena</label><div>${Number(r.cena).toLocaleString('cs-CZ')} Kč</div></div>
-    <div class="form-group"><label>Jméno</label><div>${r.jmeno}</div></div>
-    <div class="form-group"><label>Telefon</label><div>${r.telefon || '—'}</div></div>
-    <div class="form-group"><label>E-mail</label><div>${r.email || '—'}</div></div>
-    ${r.poukaz_kod ? `<div class="form-group"><label>Kód poukazu</label><div>🎁 ${r.poukaz_kod}</div></div>` : ''}
-    <div class="form-group"><label>Poznámka</label><div>${r.poznamka || '—'}</div></div>
+    <div class="form-group"><label>Jméno</label><div>${escapeHtml(r.jmeno)}</div></div>
+    <div class="form-group"><label>Telefon</label><div>${escapeHtml(r.telefon) || '—'}</div></div>
+    <div class="form-group"><label>E-mail</label><div>${escapeHtml(r.email) || '—'}</div></div>
+    ${r.poukaz_kod ? `<div class="form-group"><label>Kód poukazu</label><div>🎁 ${escapeHtml(r.poukaz_kod)}</div></div>` : ''}
+    <div class="form-group"><label>Poznámka</label><div>${escapeHtml(r.poznamka) || '—'}</div></div>
     <div class="form-group"><label>Stav</label><div>${stavBadge[r.stav] || r.stav}</div></div>
     <div class="form-group"><label>Odesláno</label><div>${new Date(r.vytvoreno).toLocaleString('cs-CZ')}</div></div>
     <div class="form-group"><label>Připomínka / žádost o recenzi</label><div>${r.pripomenuto ? 'připomínka odeslána' : 'připomínka zatím ne'} · ${r.pozadano_recenze ? 'recenze požádána' : 'recenze zatím ne'}</div></div>
@@ -1132,28 +1156,27 @@ async function loadPoukazy() {
   try {
     const seznam = await adminFetch(API + '/admin/poukazy').then(r => r.json());
     posledniPoukazy = seznam;
-    const aktivni = seznam.filter(p => p.stav === 'aktivni');
+    const aktivni = seznam.filter(p => p.stav === 'aktivni' || p.stav === 'castecne_vyuzity');
     const vyuzite = seznam.filter(p => p.stav === 'pouzity');
     document.getElementById('poukazyAktivniHodnota').textContent = aktivni.reduce((s, p) => s + Number(p.zustatek), 0).toLocaleString('cs-CZ') + ' Kč';
     document.getElementById('poukazyPocet').textContent = seznam.length;
     document.getElementById('poukazyVyuzite').textContent = vyuzite.length;
     if (!seznam.length) { document.getElementById('poukazyTable').innerHTML = '<div class="empty">Zatím žádné vydané poukazy</div>'; }
     else {
-      const stavBadge = { aktivni: '<span class="badge badge-ok">✅ Aktivní</span>', pouzity: '<span class="badge badge-zruseno">✔️ Vyčerpaný</span>', zruseny: '<span class="badge badge-zruseno">❌ Zrušený</span>' };
       document.getElementById('poukazyTable').innerHTML = `
         <table><thead><tr><th>Kód</th><th>Hodnota</th><th>Zůstatek</th><th>Platnost do</th><th>Kupující</th><th>Stav</th><th>Akce</th></tr></thead>
-        <tbody>${seznam.map(p => `<tr>
-          <td><code style="background:var(--cream);padding:2px 6px;border-radius:4px">${p.kod}</code></td>
-          <td><strong>${Number(p.hodnota).toLocaleString('cs-CZ')} Kč</strong>${p.konkretni_masaz ? `<br><small style="color:var(--text-light)">🧖 ${p.konkretni_masaz}</small>` : ''}</td>
+        <tbody>${seznam.map(p => { const stav = poukazZobrazenyStav(p); const badgeTrida = { aktivni: 'badge-ok', castecne_vyuzity: 'badge-cekajici', prosly: 'badge-zruseno', pouzity: 'badge-zruseno', zruseny: 'badge-zruseno' }[stav.klic] || ''; return `<tr>
+          <td><code style="background:var(--cream);padding:2px 6px;border-radius:4px">${escapeHtml(p.kod)}</code></td>
+          <td><strong>${Number(p.hodnota).toLocaleString('cs-CZ')} Kč</strong>${p.konkretni_masaz ? `<br><small style="color:var(--text-light)">🧖 ${escapeHtml(p.konkretni_masaz)}</small>` : ''}</td>
           <td>${Number(p.zustatek).toLocaleString('cs-CZ')} Kč</td>
           <td>${new Date(p.platnost_do).toLocaleDateString('cs-CZ')}</td>
-          <td>${p.kupujici_jmeno || '—'}</td>
-          <td>${stavBadge[p.stav] || p.stav}</td>
+          <td>${escapeHtml(p.kupujici_jmeno) || '—'}</td>
+          <td><span class="badge ${badgeTrida}">${stav.text}</span></td>
           <td style="display:flex;gap:4px">
             <button class="btn btn-outline btn-sm" onclick="zobrazitPoukaz(${p.id})" title="Zobrazit / vytisknout">🖨️</button>
             <button class="btn btn-red btn-sm" onclick="smazatPoukaz(${p.id})">🗑️</button>
           </td>
-        </tr>`).join('')}</tbody></table>`;
+        </tr>`; }).join('')}</tbody></table>`;
     }
   } catch (e) { document.getElementById('poukazyTable').innerHTML = '<div class="error-msg">Chyba načítání.</div>'; }
   loadPoukazyZadosti();
@@ -1169,7 +1192,7 @@ async function loadPoukazyTypy() {
     if (npTyp) {
       const cenik = await adminFetch(API + '/admin/cenik').then(r => r.json()).catch(() => []);
       const masazeOptions = cenik.filter(c => c.rezervovatelna)
-        .map(c => `<option value="masaz:${c.id}">${c.skupina} – ${c.varianta} (${Number(c.cena).toLocaleString('cs-CZ')} Kč)</option>`).join('');
+        .map(c => `<option value="masaz:${c.id}">${escapeHtml(c.skupina)} – ${escapeHtml(c.varianta)} (${Number(c.cena).toLocaleString('cs-CZ')} Kč)</option>`).join('');
       const castkyOptions = posledniTypyPoukazu.length
         ? posledniTypyPoukazu.map(t => `<option value="typ:${t.id}">${Number(t.hodnota).toLocaleString('cs-CZ')} Kč — platí ${t.platnost_mesicu} měsíců</option>`).join('')
         : '';
@@ -1226,9 +1249,9 @@ async function loadPoukazyZadosti() {
       <table><thead><tr><th>Datum</th><th>Hodnota</th><th>Kupující</th><th>Pro koho</th><th>Platba</th><th>Stav</th><th>Akce</th></tr></thead>
       <tbody>${seznam.map(z => `<tr>
         <td>${new Date(z.vytvoreno).toLocaleDateString('cs-CZ')}</td>
-        <td><strong>${Number(z.hodnota).toLocaleString('cs-CZ')} Kč</strong>${z.konkretni_masaz ? `<br><small style="color:var(--text-light)">🧖 ${z.konkretni_masaz}</small>` : ''}</td>
-        <td>${z.kupujici_jmeno}<br><small>${z.kupujici_email}${z.kupujici_telefon ? ' | ' + z.kupujici_telefon : ''}</small></td>
-        <td>${z.pro_koho || '—'}</td>
+        <td><strong>${Number(z.hodnota).toLocaleString('cs-CZ')} Kč</strong>${z.konkretni_masaz ? `<br><small style="color:var(--text-light)">🧖 ${escapeHtml(z.konkretni_masaz)}</small>` : ''}</td>
+        <td>${escapeHtml(z.kupujici_jmeno)}<br><small>${escapeHtml(z.kupujici_email)}${z.kupujici_telefon ? ' | ' + escapeHtml(z.kupujici_telefon) : ''}</small></td>
+        <td>${escapeHtml(z.pro_koho) || '—'}</td>
         <td>${platbaLabel[z.zpusob_platby] || '—'}</td>
         <td>${stavBadge[z.stav] || z.stav}</td>
         <td style="display:flex;gap:4px">
@@ -1305,6 +1328,22 @@ function zavritSkener() {
   closeModal('modalSkener');
 }
 
+// Stav poukazu k zobrazení — "prošlý" se nikde neukládá, dopočítává se vždy podle
+// dnešního data (platnost_do), ať se stav nikdy nerozejde se skutečností.
+function poukazZobrazenyStav(p) {
+  const dnesIso = new Date().toISOString().slice(0, 10);
+  if ((p.stav === 'aktivni' || p.stav === 'castecne_vyuzity') && p.platnost_do < dnesIso) {
+    return { klic: 'prosly', text: '⏰ Prošlý' };
+  }
+  const mapa = {
+    aktivni: '✅ Aktivní',
+    castecne_vyuzity: '🟡 Částečně využitý',
+    pouzity: '✔️ Vyčerpaný',
+    zruseny: '❌ Zrušený'
+  };
+  return { klic: p.stav, text: mapa[p.stav] || p.stav };
+}
+
 // Vyhledání poukazu podle kódu nebo naskenovaného EAN (čárová čtečka funguje jako klávesnice + Enter)
 function najitPoukaz() {
   const vstup = document.getElementById('hledatPoukazKod').value.trim();
@@ -1312,19 +1351,29 @@ function najitPoukaz() {
   if (!vstup) { vysledek.innerHTML = ''; return; }
   const p = posledniPoukazy.find(x => (x.kod && x.kod.toLowerCase() === vstup.toLowerCase()) || (x.ean && x.ean === vstup));
   if (!p) { vysledek.innerHTML = '<div class="error-msg">Poukaz s tímto kódem nebyl nalezen.</div>'; return; }
-  const stavText = { aktivni: '✅ Aktivní', pouzity: '✔️ Již vyčerpaný', zruseny: '❌ Zrušený' }[p.stav] || p.stav;
+  const { klic, text } = poukazZobrazenyStav(p);
+  const lzeUplatnit = klic === 'aktivni' || klic === 'castecne_vyuzity';
   vysledek.innerHTML = `
     <div class="poukaz-hledani-vysledek">
       <div>
-        <div style="font-family:'Cormorant',serif;font-size:1.25rem;color:var(--brown)"><code>${p.kod}</code> — ${Number(p.zustatek).toLocaleString('cs-CZ')} Kč z ${Number(p.hodnota).toLocaleString('cs-CZ')} Kč</div>
-        <div style="color:var(--text-light);font-size:0.85rem">${stavText} · platnost do ${new Date(p.platnost_do).toLocaleDateString('cs-CZ')} · ${p.kupujici_jmeno || 'bez jména'}</div>
+        <div style="font-family:'Cormorant',serif;font-size:1.25rem;color:var(--brown)"><code>${escapeHtml(p.kod)}</code> — ${Number(p.zustatek).toLocaleString('cs-CZ')} Kč z ${Number(p.hodnota).toLocaleString('cs-CZ')} Kč</div>
+        <div style="color:var(--text-light);font-size:0.85rem">${text} · platnost do ${new Date(p.platnost_do).toLocaleDateString('cs-CZ')} · ${escapeHtml(p.kupujici_jmeno) || 'bez jména'}</div>
       </div>
-      ${p.stav === 'aktivni' ? `<button class="btn btn-green" onclick="oznacitPouzity(${p.id})">✔️ Označit jako uplatněný</button>` : ''}
+      ${lzeUplatnit ? `
+        <div style="display:flex;gap:6px;align-items:center">
+          <input type="number" id="uplatnitCastka${p.id}" value="${Number(p.zustatek)}" min="1" max="${Number(p.zustatek)}" step="1" style="width:100px;border:1px solid var(--tan-light);border-radius:6px;padding:6px 8px">
+          <span style="font-size:0.8rem;color:var(--text-light)">Kč</span>
+          <button class="btn btn-green" onclick="uplatnitPoukaz(${p.id})">✔️ Uplatnit</button>
+        </div>` : ''}
     </div>`;
 }
-async function oznacitPouzity(id) {
-  if (!confirm('Označit poukaz jako plně uplatněný?')) return;
-  await adminFetch(API + '/admin/poukazy/' + id + '/stav', { method: 'PATCH', body: JSON.stringify({ stav: 'pouzity' }) });
+async function uplatnitPoukaz(id) {
+  const castka = Number(document.getElementById('uplatnitCastka' + id).value);
+  if (!castka || castka <= 0) { alert('Zadejte prosím kladnou částku.'); return; }
+  if (!confirm('Uplatnit ' + castka.toLocaleString('cs-CZ') + ' Kč z tohoto poukazu?')) return;
+  const res = await adminFetch(API + '/admin/poukazy/' + id + '/uplatnit', { method: 'POST', body: JSON.stringify({ castka }) });
+  const data = await res.json();
+  if (!res.ok) { alert(data.chyba || 'Uplatnění se nepodařilo.'); return; }
   document.getElementById('hledatPoukazKod').value = '';
   document.getElementById('poukazHledaniVysledek').innerHTML = '';
   loadPoukazy();
@@ -1399,8 +1448,8 @@ function vykreslitNahledPoukazu() {
       <img src="assets/logo.png" alt="Masáže Alesa" style="max-width:100%;max-height:44px;display:block;margin:0 auto">
       <div class="pp-title-text">Dárkový poukaz</div>
     </div>` : ''}
-    <div class="pp-radek${stin}" style="top:${s.radky.pro};left:${s.box.left};right:${s.box.right}">Pro: <strong>${p.pro_koho || p.kupujici_jmeno || ''}</strong></div>
-    <div class="pp-radek${stin}" style="top:${s.radky.hodnota};left:${s.box.left};right:${s.box.right}">${p.konkretni_masaz ? `Masáž: <strong>${p.konkretni_masaz}</strong>` : `Hodnota: <strong>${Number(p.hodnota).toLocaleString('cs-CZ')} Kč</strong>`}</div>
+    <div class="pp-radek${stin}" style="top:${s.radky.pro};left:${s.box.left};right:${s.box.right}">Pro: <strong>${escapeHtml(p.pro_koho) || escapeHtml(p.kupujici_jmeno) || ''}</strong></div>
+    <div class="pp-radek${stin}" style="top:${s.radky.hodnota};left:${s.box.left};right:${s.box.right}">${p.konkretni_masaz ? `Masáž: <strong>${escapeHtml(p.konkretni_masaz)}</strong>` : `Hodnota: <strong>${Number(p.hodnota).toLocaleString('cs-CZ')} Kč</strong>`}</div>
     <div class="pp-radek${stin}" style="top:${s.radky.platnost};left:${s.box.left};right:${s.box.right}">Platnost: <strong>${new Date(p.platnost_do).toLocaleDateString('cs-CZ')}</strong></div>
     <div class="pp-bottom" style="top:${s.spodek.top};left:${s.spodek.left};right:${s.spodek.right}">
       ${p.ean ? `<div class="pp-barcode-col">
@@ -1431,22 +1480,22 @@ function vykreslitZakazniky() {
   document.getElementById('zakazniciTable').innerHTML = `
     <table><thead><tr><th>Jméno</th><th>Kontakt</th><th>Návštěvy</th><th>Celkem utraceno</th><th>Poslední návštěva</th><th>Aktivní poukazy</th><th>Poznámka / alergie / preference</th></tr></thead>
     <tbody>${seznam.map(z => `<tr>
-      <td>${z.jmeno || '—'}</td>
-      <td>${z.telefon}${z.email ? '<br><small>' + z.email + '</small>' : ''}</td>
+      <td>${escapeHtml(z.jmeno) || '—'}</td>
+      <td>${escapeHtml(z.telefon)}${z.email ? '<br><small>' + escapeHtml(z.email) + '</small>' : ''}</td>
       <td>${z.pocetNavstev}</td>
       <td><strong>${Number(z.celkemUtraceno).toLocaleString('cs-CZ')} Kč</strong></td>
       <td>${z.posledniNavstiva ? new Date(z.posledniNavstiva).toLocaleDateString('cs-CZ') : '—'}</td>
       <td>${z.aktivniPoukazy > 0 ? '🎁 ' + z.aktivniPoukazy : '—'}</td>
       <td>
         <div style="display:flex;flex-direction:column;gap:4px;min-width:260px">
-          <input type="text" class="zk-poznamka" value="${(z.poznamka || '').replace(/"/g, '&quot;')}" placeholder="Poznámka…" style="border:1px solid var(--tan-light);border-radius:6px;padding:5px 8px;font-family:'Nunito',sans-serif">
+          <input type="text" class="zk-poznamka" value="${escapeHtml(z.poznamka)}" placeholder="Poznámka…" style="border:1px solid var(--tan-light);border-radius:6px;padding:5px 8px;font-family:'Nunito',sans-serif">
           <div style="display:flex;gap:4px">
-            <input type="text" class="zk-alergie" value="${(z.alergie || '').replace(/"/g, '&quot;')}" placeholder="Alergie…" style="border:1px solid var(--tan-light);border-radius:6px;padding:5px 8px;font-family:'Nunito',sans-serif;flex:1">
-            <input type="text" class="zk-preference" value="${(z.preference || '').replace(/"/g, '&quot;')}" placeholder="Preference…" style="border:1px solid var(--tan-light);border-radius:6px;padding:5px 8px;font-family:'Nunito',sans-serif;flex:1">
+            <input type="text" class="zk-alergie" value="${escapeHtml(z.alergie)}" placeholder="Alergie…" style="border:1px solid var(--tan-light);border-radius:6px;padding:5px 8px;font-family:'Nunito',sans-serif;flex:1">
+            <input type="text" class="zk-preference" value="${escapeHtml(z.preference)}" placeholder="Preference…" style="border:1px solid var(--tan-light);border-radius:6px;padding:5px 8px;font-family:'Nunito',sans-serif;flex:1">
           </div>
           <div style="display:flex;gap:4px">
-            <button class="btn btn-green btn-sm" onclick="ulozitZakaznici(this,'${z.telefon.replace(/'/g, "\\'")}')">💾 Uložit</button>
-            <button class="btn btn-red btn-sm" onclick="smazatZakaznici('${z.telefon.replace(/'/g, "\\'")}')">🗑️</button>
+            <button class="btn btn-green btn-sm" onclick="ulozitZakaznici(this,'${escapeJsAttr(z.telefon)}')">💾 Uložit</button>
+            <button class="btn btn-red btn-sm" onclick="smazatZakaznici('${escapeJsAttr(z.telefon)}')">🗑️</button>
           </div>
         </div>
       </td>
@@ -1496,8 +1545,8 @@ async function loadNewsletter() {
     document.getElementById('newsletterTable').innerHTML = !posledniNewsletter.length ? '<div class="empty">Zatím žádné odběratelky</div>' : `
       <table><thead><tr><th>E-mail</th><th>Jméno</th><th>Přihlášena</th><th>Stav</th><th></th></tr></thead>
       <tbody>${posledniNewsletter.map(n => `<tr>
-        <td>${n.email}</td>
-        <td>${n.jmeno || '—'}</td>
+        <td>${escapeHtml(n.email)}</td>
+        <td>${escapeHtml(n.jmeno) || '—'}</td>
         <td>${new Date(n.vytvoreno).toLocaleDateString('cs-CZ')}</td>
         <td>${n.aktivni ? '<span class="badge badge-ok">✅ Aktivní</span>' : '<span class="badge badge-zruseno">❌ Odhlášena</span>'}</td>
         <td><button class="btn btn-red btn-sm" onclick="smazatOdberatelku(${n.id})">🗑️</button></td>
@@ -1510,7 +1559,7 @@ async function loadNewsletter() {
       <table><thead><tr><th>Odesláno</th><th>Předmět</th><th>Počet příjemců</th></tr></thead>
       <tbody>${historie.map(h => `<tr>
         <td>${new Date(h.odeslano).toLocaleDateString('cs-CZ')} ${new Date(h.odeslano).toLocaleTimeString('cs-CZ',{hour:'2-digit',minute:'2-digit'})}</td>
-        <td>${h.predmet}</td>
+        <td>${escapeHtml(h.predmet)}</td>
         <td>${h.pocet_prijemcu}</td>
       </tr>`).join('')}</tbody></table>`;
   } catch (e) { document.getElementById('newsletterHistorie').innerHTML = '<div class="error-msg">Chyba načítání.</div>'; }
@@ -1558,9 +1607,9 @@ async function loadCenik() {
     posledniCenik.forEach(c => { (skupiny[c.skupina] = skupiny[c.skupina] || []).push(c); });
     document.getElementById('cenikTable').innerHTML = Object.entries(skupiny).map(([nazev, varianty]) => `
       <div style="padding:14px 20px;border-bottom:1px solid var(--tan-light)">
-        <div style="font-family:'Cormorant',serif;font-size:1.1rem;color:var(--brown);margin-bottom:8px">${varianty[0].emoji} ${nazev}</div>
+        <div style="font-family:'Cormorant',serif;font-size:1.1rem;color:var(--brown);margin-bottom:8px">${varianty[0].emoji} ${escapeHtml(nazev)}</div>
         <table><tbody>${varianty.map(c => `<tr>
-          <td style="width:35%"><input value="${c.varianta}" id="cn-var-${c.id}" style="border:1px solid var(--tan-light);border-radius:6px;padding:5px 8px;width:100%;font-family:'Nunito',sans-serif"></td>
+          <td style="width:35%"><input value="${escapeHtml(c.varianta)}" id="cn-var-${c.id}" style="border:1px solid var(--tan-light);border-radius:6px;padding:5px 8px;width:100%;font-family:'Nunito',sans-serif"></td>
           <td><input type="number" value="${c.delka_min}" id="cn-delka-${c.id}" style="border:1px solid var(--tan-light);border-radius:6px;padding:5px 8px;width:65px;font-family:'Nunito',sans-serif"> min</td>
           <td><input type="number" value="${c.cena}" id="cn-cena-${c.id}" style="border:1px solid var(--tan-light);border-radius:6px;padding:5px 8px;width:85px;font-family:'Nunito',sans-serif"> Kč</td>
           <td><label style="font-size:0.72rem;color:var(--text-light);display:flex;align-items:center;gap:4px"><input type="checkbox" id="cn-rez-${c.id}" ${c.rezervovatelna ? 'checked' : ''}> lze rezervovat</label></td>
@@ -1621,9 +1670,9 @@ async function loadProdejna() {
         <div class="prodej-grid" style="margin-bottom:14px">
           ${Object.entries(skupiny).map(([nazev, varianty]) => `
             <div>
-              <div style="font-family:'Cormorant',serif;font-size:1.05rem;color:var(--brown);margin:10px 0 6px">${varianty[0].emoji} ${nazev}</div>
+              <div style="font-family:'Cormorant',serif;font-size:1.05rem;color:var(--brown);margin:10px 0 6px">${varianty[0].emoji} ${escapeHtml(nazev)}</div>
               <div style="display:flex;flex-direction:column;gap:6px">
-                ${varianty.map(c => `<button class="btn btn-outline" style="display:flex;justify-content:space-between;gap:10px;width:100%;text-align:left" onclick="otevritProdej(${c.id},'${(c.skupina + ' – ' + c.varianta).replace(/'/g,"\\'")}',${c.cena})"><span>${c.varianta}</span><strong>${c.cena} Kč</strong></button>`).join('')}
+                ${varianty.map(c => `<button class="btn btn-outline" style="display:flex;justify-content:space-between;gap:10px;width:100%;text-align:left" onclick="otevritProdej(${c.id},'${escapeJsAttr(c.skupina + ' – ' + c.varianta)}',${c.cena})"><span>${escapeHtml(c.varianta)}</span><strong>${c.cena} Kč</strong></button>`).join('')}
               </div>
             </div>`).join('')}
         </div>
@@ -1655,7 +1704,7 @@ async function loadProdejna() {
       <table><thead><tr><th>Datum</th><th>Masáž</th><th>Cena</th><th>Platba</th><th></th></tr></thead>
       <tbody>${seznam.map(p => `<tr>
         <td>${new Date(p.vytvoreno).toLocaleDateString('cs-CZ')} ${new Date(p.vytvoreno).toLocaleTimeString('cs-CZ',{hour:'2-digit',minute:'2-digit'})}</td>
-        <td>${p.masaz}</td>
+        <td>${escapeHtml(p.masaz)}</td>
         <td><strong>${Number(p.cena).toLocaleString('cs-CZ')} Kč</strong></td>
         <td>${p.zpusob_platby === 'qr' ? 'QR kód' : 'Hotově'}</td>
         <td><button class="btn btn-red btn-sm" onclick="smazatProdej(${p.id})">🗑️</button></td>

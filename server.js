@@ -393,14 +393,28 @@ app.post('/api/rezervace', async (req, res) => {
     });
     if (koliduje) { await client.query('ROLLBACK'); return res.status(409).json({ chyba: 'Tento termín je již obsazený (nebo příliš blízko jiné rezervaci), vyberte prosím jiný.' }); }
 
+    // Ověření poukazu je tu jen informativní (skutečné uplatnění/odečtení zůstatku
+    // dělá Alena ručně při platbě v salonu přes POST /api/admin/poukazy/:id/uplatnit,
+    // který to dělá bezpečně/atomicky) — ale ověřuje se pořádně, ať poznámka u
+    // rezervace neříká "ověřen", když je poukaz ve skutečnosti nepoužitelný.
     let poukazPoznamka = '';
     if (poukaz_kod && poukaz_kod.trim()) {
       const { rows: [poukaz] } = await client.query(
-        "SELECT * FROM poukazy WHERE (kod = $1 OR ean = $1) AND stav = 'aktivni'", [poukaz_kod.trim()]
+        'SELECT * FROM poukazy WHERE kod = $1 OR ean = $1', [poukaz_kod.trim()]
       );
-      poukazPoznamka = poukaz
-        ? ` Poukaz ${poukaz.kod} ověřen (zůstatek ${poukaz.zustatek} Kč).`
-        : ` Pozor: zadaný poukaz "${poukaz_kod.trim()}" nebyl nalezen nebo není aktivní — ověřit ručně.`;
+      if (!poukaz) {
+        poukazPoznamka = ` Pozor: zadaný poukaz "${poukaz_kod.trim()}" nebyl nalezen — ověřit ručně.`;
+      } else if (poukaz.stav === 'zruseny') {
+        poukazPoznamka = ` Pozor: poukaz ${poukaz.kod} je zrušený.`;
+      } else if (poukaz.stav === 'pouzity' || Number(poukaz.zustatek) <= 0) {
+        poukazPoznamka = ` Pozor: poukaz ${poukaz.kod} je už plně vyčerpaný.`;
+      } else if (poukaz.platnost_do < datum) {
+        poukazPoznamka = ` Pozor: poukaz ${poukaz.kod} bude mít v den masáže (${formatDatumCz(datum)}) už prošlou platnost (platí do ${formatDatumCz(poukaz.platnost_do)}).`;
+      } else if (poukaz.konkretni_masaz && poukaz.konkretni_masaz !== nazevMasaze) {
+        poukazPoznamka = ` Pozor: poukaz ${poukaz.kod} platí jen na "${poukaz.konkretni_masaz}", ne na vybranou masáž — ověřit ručně.`;
+      } else {
+        poukazPoznamka = ` Poukaz ${poukaz.kod} ověřen (zůstatek ${poukaz.zustatek} Kč, platí do ${formatDatumCz(poukaz.platnost_do)}).`;
+      }
     }
 
     const celaPoznamka = ((poznamka || '') + poukazPoznamka).trim() || null;
@@ -774,11 +788,58 @@ app.post('/api/admin/poukazy', async (req, res) => {
 
 app.patch('/api/admin/poukazy/:id/stav', async (req, res) => {
   const { stav } = req.body || {};
-  if (!['aktivni', 'pouzity', 'zruseny'].includes(stav)) return res.status(400).json({ chyba: 'Neplatný stav.' });
+  if (!['aktivni', 'castecne_vyuzity', 'pouzity', 'zruseny'].includes(stav)) return res.status(400).json({ chyba: 'Neplatný stav.' });
   try {
     await db.query('UPDATE poukazy SET stav = $1 WHERE id = $2', [stav, req.params.id]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
+// Skutečné uplatnění poukazu (odečtení částky ze zůstatku) — jediné místo, kde se
+// zůstatek opravdu mění. Běží v transakci se "SELECT ... FOR UPDATE", což zamkne
+// řádek toho konkrétního poukazu, dokud transakce neskončí — kdyby přišly dva
+// požadavky na uplatnění stejného poukazu skoro současně (např. dva panely admina
+// otevřené najednou), druhý počká, až první dopíše, a pak už vidí správný, už
+// snížený zůstatek. Stejný princip jako zámek proti dvojité rezervaci termínu,
+// jen tady jde o zámek konkrétního řádku místo dne v kalendáři.
+app.post('/api/admin/poukazy/:id/uplatnit', async (req, res) => {
+  const castka = Number(req.body && req.body.castka);
+  if (!Number.isFinite(castka) || castka <= 0) {
+    return res.status(400).json({ chyba: 'Zadejte prosím kladnou částku k uplatnění.' });
+  }
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: [poukaz] } = await client.query('SELECT * FROM poukazy WHERE id = $1 FOR UPDATE', [req.params.id]);
+    if (!poukaz) { await client.query('ROLLBACK'); return res.status(404).json({ chyba: 'Poukaz nebyl nalezen.' }); }
+    if (poukaz.stav === 'zruseny') { await client.query('ROLLBACK'); return res.status(400).json({ chyba: 'Poukaz je zrušený, nelze ho uplatnit.' }); }
+    if (poukaz.stav === 'pouzity' || Number(poukaz.zustatek) <= 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ chyba: 'Poukaz je už plně vyčerpaný.' });
+    }
+    const dnesIso = new Date().toISOString().slice(0, 10);
+    if (poukaz.platnost_do < dnesIso) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ chyba: `Poukaz je prošlý (platnost do ${formatDatumCz(poukaz.platnost_do)}).` });
+    }
+    if (castka > Number(poukaz.zustatek)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ chyba: `Částka převyšuje zůstatek na poukazu (${poukaz.zustatek} Kč).` });
+    }
+    const novyZustatek = Number(poukaz.zustatek) - castka;
+    const novyStav = novyZustatek <= 0 ? 'pouzity' : 'castecne_vyuzity';
+    const { rows: [aktualizovany] } = await client.query(
+      'UPDATE poukazy SET zustatek = $1, stav = $2 WHERE id = $3 RETURNING *',
+      [novyZustatek, novyStav, req.params.id]
+    );
+    await client.query('COMMIT');
+    res.json({ ok: true, poukaz: aktualizovany });
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch {}
+    res.status(500).json({ chyba: e.message });
+  } finally {
+    client.release();
+  }
 });
 
 app.delete('/api/admin/poukazy/:id', async (req, res) => {
@@ -1047,18 +1108,23 @@ app.delete('/api/admin/prodejna/:id', async (req, res) => {
 });
 
 // -- Účetnictví: souhrn tržeb z rezervací, prodejny na místě a poukazů --
+// Tržba za rezervaci se počítá podle data MASÁŽE (rezervace.datum), ne podle data,
+// kdy klientka rezervaci vytvořila (vytvoreno) — jinak by se rezervace vytvořená
+// dnes na termín za měsíc mylně počítala do dnešní tržby. U prodejny (prodej na
+// místě) a poukazu (nákup poukazu) je to naopak správně podle vytvoreno, protože
+// tam k platbě dochází přesně v tu chvíli, ne později.
 app.get('/api/admin/ucetnictvi', async (req, res) => {
   try {
     const [rez, prod, pouk] = await Promise.all([
-      db.query("SELECT cena, vytvoreno FROM rezervace WHERE stav IN ('potvrzena', 'dokoncena')"),
+      db.query("SELECT cena, datum, vytvoreno FROM rezervace WHERE stav IN ('potvrzena', 'dokoncena')"),
       db.query('SELECT cena, vytvoreno FROM prodeje'),
       db.query('SELECT hodnota, vytvoreno FROM poukazy')
     ]);
 
     const polozky = [
-      ...rez.rows.map(r => ({ zdroj: 'rezervace', castka: Number(r.cena) || 0, datum: r.vytvoreno.toISOString() })),
-      ...prod.rows.map(p => ({ zdroj: 'prodejna', castka: Number(p.cena) || 0, datum: p.vytvoreno.toISOString() })),
-      ...pouk.rows.map(p => ({ zdroj: 'poukaz', castka: Number(p.hodnota) || 0, datum: p.vytvoreno.toISOString() }))
+      ...rez.rows.map(r => ({ zdroj: 'rezervace', castka: Number(r.cena) || 0, datum: r.datum, vytvoreno: r.vytvoreno.toISOString() })),
+      ...prod.rows.map(p => ({ zdroj: 'prodejna', castka: Number(p.cena) || 0, datum: p.vytvoreno.toISOString(), vytvoreno: p.vytvoreno.toISOString() })),
+      ...pouk.rows.map(p => ({ zdroj: 'poukaz', castka: Number(p.hodnota) || 0, datum: p.vytvoreno.toISOString(), vytvoreno: p.vytvoreno.toISOString() }))
     ];
 
     const trzbyCelkem = polozky.reduce((s, p) => s + p.castka, 0);

@@ -125,7 +125,9 @@ create table if not exists poukazy (
   pro_koho text,
   konkretni_masaz text, -- nepovinné: pokud poukaz platí jen na jednu konkrétní masáž, ne na libovolnou částku
   zpusob_platby text, -- qr | prevodem | pri_prevzeti | hotove (nepovinné, jen u poukazů z webu)
-  stav text not null default 'aktivni', -- aktivni | pouzity | zruseny
+  stav text not null default 'aktivni', -- aktivni | castecne_vyuzity | pouzity | zruseny
+  -- "prošlý" se nikde neukládá jako stav — dopočítává se za běhu z platnost_do,
+  -- ať je vždy aktuální bez nutnosti plánované úlohy, která by stav přepínala.
   vytvoreno timestamptz not null default now()
 );
 
