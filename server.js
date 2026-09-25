@@ -256,27 +256,6 @@ app.post('/api/login', (req, res) => {
   res.status(401).json({ ok: false });
 });
 
-// ── JEDNORÁZOVÁ MIGRACE: nová tabulka "platby" (deník). Čistě přídavná —
-// nic nemaže ani nemění na existujících tabulkách/sloupcích. Po ověření se
-// zase odstraní (stejný postup jako v předchozích fázích).
-app.post('/api/admin/migrace-2026-09d', vyzadovatAdmina, async (req, res) => {
-  try {
-    await db.query(`
-      CREATE TABLE IF NOT EXISTS platby (
-        id serial primary key,
-        rezervace_id integer not null references rezervace(id) on delete cascade,
-        castka numeric not null,
-        typ text not null,
-        zpusob_platby text not null,
-        poukaz_id integer references poukazy(id) on delete set null,
-        vytvoreno timestamptz not null default now(),
-        check ((typ = 'platba' and castka > 0) or (typ = 'vratka' and castka < 0))
-      );
-    `);
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ chyba: e.message }); }
-});
-
 // ══════════════ VEŘEJNÉ ENDPOINTY ══════════════
 
 // Ceník pro zobrazení na webu (seřazeno podle skupiny a varianty)
