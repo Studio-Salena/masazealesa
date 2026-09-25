@@ -36,6 +36,10 @@ create table if not exists nastaveni (
   hodnota text not null
 );
 insert into nastaveni (klic, hodnota) values ('buffer_minut', '30') on conflict (klic) do nothing;
+-- Fáze 5B, nepovinné klíče (chybí-li řádek, chová se to jako výchozí hodnota
+-- níže — proto se pro ně záměrně NEVKLÁDÁ žádný řádek při nasazení):
+--   pripominky_zapnuto           'false' vypne odesílání připomínek; cokoliv jiné (i chybějící) = zapnuto
+--   pripominka_predstih_hodin    kolik hodin předem se má připomínka poslat (výchozí 24, platný rozsah 1–168)
 
 -- Jednorázové výjimky provozu (dovolená, svátek) — blokují celý den(y) mimo týdenní rozvrh
 -- otevreno_od/otevreno_do nepovinné: když jsou vyplněné, výjimka pro dané dny
@@ -81,7 +85,11 @@ create table if not exists rezervace (
   poznamka text,
   poukaz_kod text, -- nepovinné: kód dárkového poukazu, který chce zákaznice uplatnit na místě
   stav text not null default 'cekajici', -- cekajici | potvrzena | dokoncena | nedostavila_se | zrusena
-  pripomenuto boolean not null default false, -- už odeslána 24h připomínka (ať se neposílá vícekrát)
+  pripomenuto boolean not null default false, -- už úspěšně odeslána připomínka (ať se neposílá vícekrát)
+  pripomenuto_pokus_kdy timestamptz, -- Fáze 5B: kdy naposledy začal pokus o odeslání připomínky (atomické
+    -- "claimnutí" proti duplicitě při souběžném volání cron endpointu — viz komentář
+    -- u /api/cron/denni). Claim starší než 10 minut se bere jako zaseklý a smí se převzít.
+    -- NULL = žádný rozdělaný pokus.
   pozadano_recenze boolean not null default false, -- už odeslána žádost o recenzi
   -- Platba je záměrně oddělená od stavu rezervace (stav) — dokončená masáž může
   -- být nezaplacená a naopak. uhrazeno je průběžný součet (podporuje částečnou

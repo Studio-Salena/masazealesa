@@ -279,6 +279,19 @@ tr:hover td{background:#fffaf5}
           <button class="btn btn-outline btn-sm" onclick="zrusitRezOd()">Zrušit omezení</button>
           <span id="rezOdZprava" style="font-size:0.82rem;color:var(--text-light)"></span>
         </div>
+        <div style="padding:0 16px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;border-top:1px solid var(--tan-light);margin-top:4px;padding-top:16px">
+          <label style="font-size:0.85rem;color:var(--text-light)">Připomínky rezervací e-mailem</label>
+          <select id="nastaveniPripominkyZapnuto" style="border:1px solid var(--tan-light);border-radius:6px;padding:6px 8px">
+            <option value="true">Zapnuto</option>
+            <option value="false">Vypnuto</option>
+          </select>
+          <label style="font-size:0.85rem;color:var(--text-light)">Připomínka předem</label>
+          <input type="number" id="nastaveniPripominkaPredstih" min="1" max="168" step="1" style="width:70px;border:1px solid var(--tan-light);border-radius:6px;padding:6px 8px">
+          <span style="font-size:0.85rem;color:var(--text-light)">hodin</span>
+          <button class="btn btn-green btn-sm" onclick="ulozitPripominky()">💾 Uložit</button>
+          <span id="pripominkyZprava" style="font-size:0.82rem;color:var(--text-light)"></span>
+          <span style="flex-basis:100%;font-size:0.75rem;color:var(--text-light)">Žádosti o recenzi (den po masáži) jsou na tomto přepínači nezávislé a fungují vždy.</span>
+        </div>
       </div>
       <div class="table-wrap">
         <div class="table-header">
@@ -1038,6 +1051,10 @@ async function loadNastaveni() {
     document.getElementById('nastaveniBuffer').value = buffer ? buffer.hodnota : 30;
     const rezOd = nastaveni.find(n => n.klic === 'rezervace_od');
     document.getElementById('nastaveniRezOd').value = rezOd ? rezOd.hodnota : '';
+    const pripZap = nastaveni.find(n => n.klic === 'pripominky_zapnuto');
+    document.getElementById('nastaveniPripominkyZapnuto').value = (pripZap && pripZap.hodnota === 'false') ? 'false' : 'true';
+    const pripPredstih = nastaveni.find(n => n.klic === 'pripominka_predstih_hodin');
+    document.getElementById('nastaveniPripominkaPredstih').value = pripPredstih ? pripPredstih.hodnota : 24;
   } catch (e) { /* necháme prázdné, chyba se ukáže až při uložení */ }
 }
 async function ulozitBuffer() {
@@ -1057,6 +1074,23 @@ async function zrusitRezOd() {
   const zprava = document.getElementById('rezOdZprava');
   await adminFetch(API + '/admin/nastaveni/rezervace_od', { method: 'DELETE' });
   zprava.style.color = '#3a7a4a'; zprava.textContent = 'Omezení zrušeno ✓';
+}
+async function ulozitPripominky() {
+  const zprava = document.getElementById('pripominkyZprava');
+  const zapnuto = document.getElementById('nastaveniPripominkyZapnuto').value;
+  const predstihRaw = document.getElementById('nastaveniPripominkaPredstih').value;
+  const predstih = parseInt(predstihRaw, 10);
+  if (!Number.isFinite(predstih) || predstih < 1 || predstih > 168) {
+    zprava.style.color = '#b8402a'; zprava.textContent = 'Předstih zadejte v rozmezí 1–168 hodin.';
+    return;
+  }
+  try {
+    await adminFetch(API + '/admin/nastaveni/pripominky_zapnuto', { method: 'PUT', body: JSON.stringify({ hodnota: zapnuto }) });
+    await adminFetch(API + '/admin/nastaveni/pripominka_predstih_hodin', { method: 'PUT', body: JSON.stringify({ hodnota: String(predstih) }) });
+    zprava.style.color = '#3a7a4a'; zprava.textContent = 'Uloženo ✓';
+  } catch (e) {
+    zprava.style.color = '#b8402a'; zprava.textContent = 'Uložení se nepodařilo, zkuste to prosím znovu.';
+  }
 }
 
 // ── VÝJIMKY PROVOZU (dovolená, svátky) ──

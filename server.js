@@ -51,6 +51,31 @@ async function ziskatRezervaceOd() {
   } catch { return null; }
 }
 
+// Nastavení automatických připomínek (denní cron úloha) — čte se ze stejné
+// obecné tabulky "nastaveni" jako buffer/rezervace_od, žádná nová tabulka.
+// Chybějící klíč = výchozí chování (ZAPNUTO, 24 hodin předem), aby čerstvě
+// nasazená DB měla přesně současné chování beze změny.
+// - pripominky_zapnuto: 'false' vypíná posílání připomínek (cokoliv jiného
+//   včetně chybějícího záznamu = zapnuto). Žádosti o recenzi tímto nejsou
+//   ovlivněné — jsou úplně nezávislý mechanismus (viz cron endpoint).
+// - pripominka_predstih_hodin: kolik hodin před termínem se má připomínka
+//   nejpozději poslat. Mimo rozsah 1–168 (týden) nebo nečíselná hodnota se
+//   ignoruje a použije se výchozích 24, ať špatně zapsaná hodnota v DB nikdy
+//   nezpůsobí, že se přestanou posílat úplně všechny připomínky.
+async function ziskatNastaveniPripominek() {
+  try {
+    const { rows } = await db.query(
+      "SELECT klic, hodnota FROM nastaveni WHERE klic IN ('pripominky_zapnuto','pripominka_predstih_hodin')"
+    );
+    const mapa = {};
+    rows.forEach(r => { mapa[r.klic] = r.hodnota; });
+    const zapnuto = mapa.pripominky_zapnuto !== 'false';
+    const predstihRaw = parseInt(mapa.pripominka_predstih_hodin, 10);
+    const predstihHodin = Number.isFinite(predstihRaw) && predstihRaw >= 1 && predstihRaw <= 168 ? predstihRaw : 24;
+    return { zapnuto, predstihHodin };
+  } catch { return { zapnuto: true, predstihHodin: 24 }; }
+}
+
 // Přepočte rezervace.uhrazeno/stav_platby/zpusob_platby/uhrazeno_kdy jako souhrn
 // deníku "platby" pro danou rezervaci — VŽDY nově spočtený součet, ne postupné
 // přičítání, takže se nikdy nemůže rozejít s deníkem (jediný zdroj pravdy).
@@ -220,11 +245,13 @@ function potvrzovaciEmailHtml(r) {
   `);
 }
 
-// Připomínka den předem (denní cron úloha)
+// Připomínka rezervace (denní cron úloha) — text záměrně neříká "zítra", protože
+// skutečný předstih je konfigurovatelný (viz ziskatNastaveniPripominek) a u pozdě
+// vytvořených rezervací může jít i o pár hodin dopředu, ne celý den.
 function pripomenkaEmailHtml(r) {
   return emailSablona(`
     <h2>Dobrý den, ${r.jmeno},</h2>
-    <p>připomínám vaši rezervaci na zítra:</p>
+    <p>připomínám vaši blížící se rezervaci:</p>
     <table class="rez-detail" width="100%" cellpadding="0" cellspacing="0">
       <tr><td>
         <strong>Masáž:</strong> ${r.masaz}<br>
@@ -735,8 +762,14 @@ app.patch('/api/admin/rezervace/:id', async (req, res) => {
       }
     }
 
+    // Když se termín skutečně mění, je to nový termín, ke kterému ještě žádná
+    // připomínka nešla — resetujeme pripomenuto (a rozdělaný "pokus" o odeslání,
+    // viz cron endpoint), ať klientka dostane připomínku k SPRÁVNÉMU termínu.
+    // Jen oprava jména/telefonu/e-mailu/poznámky termín nemění, takže se
+    // pripomenuto nedotýká (Fáze 5B, bod 3). pozadano_recenze se nedotýká nikdy
+    // — recenze je nezávislý mechanismus mimo rozsah téhle fáze.
     await client.query(
-      `UPDATE rezervace SET cenik_id=$1, datum=$2, cas_od=$3, cas_do=$4, jmeno=$5, telefon=$6, email=$7, masaz=$8, poznamka=$9, cena=$10 WHERE id=$11`,
+      `UPDATE rezervace SET cenik_id=$1, datum=$2, cas_od=$3, cas_do=$4, jmeno=$5, telefon=$6, email=$7, masaz=$8, poznamka=$9, cena=$10${terminSeMeni ? ', pripomenuto=false, pripomenuto_pokus_kdy=NULL' : ''} WHERE id=$11`,
       [cenik_id, datum, cas_od, cas_do, jmeno, telefon, email || null, nazevMasaze, poznamka || null, polozkaCeniku.cena, req.params.id]
     );
     // Cena se mohla změnit (jiná masáž) — uhrazeno se nedotýká, jen se z něj a
@@ -909,6 +942,19 @@ app.delete('/api/admin/nastaveni/:klic', async (req, res) => {
   try {
     await db.query('DELETE FROM nastaveni WHERE klic = $1', [req.params.klic]);
     res.json({ ok: true });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
+// DOČASNÝ migrační endpoint (Fáze 5B) — přidá sloupec pro atomické "claimnutí"
+// připomínky (viz cron endpoint). Čistě přídavná, idempotentní změna — nemaže
+// a nepřepisuje nic existujícího (pripomenuto/pozadano_recenze se nedotýká).
+// Po jednorázovém spuštění a ověření se tento endpoint v dalším commitu odstraní.
+app.post('/api/admin/migrace-2026-09-5b', async (req, res) => {
+  try {
+    const pred = await db.query('SELECT count(*) AS pocet, count(*) FILTER (WHERE pripomenuto) AS pripomenuto_true, count(*) FILTER (WHERE pozadano_recenze) AS recenze_true FROM rezervace');
+    await db.query('ALTER TABLE rezervace ADD COLUMN IF NOT EXISTS pripomenuto_pokus_kdy timestamptz');
+    const po = await db.query('SELECT count(*) AS pocet, count(*) FILTER (WHERE pripomenuto) AS pripomenuto_true, count(*) FILTER (WHERE pozadano_recenze) AS recenze_true FROM rezervace');
+    res.json({ ok: true, pred: pred.rows[0], po: po.rows[0] });
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
@@ -1465,47 +1511,102 @@ app.get('/api/admin/ucetnictvi', async (req, res) => {
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
-// Denní úloha spouštěná zvenčí (cron-job.org apod.) přes tajný klíč v URL:
-// GET /api/cron/denni?klic=...
-// 1) pošle připomínku zítřejších rezervací (jednou, hlídá se přes pripomenuto)
-// 2) pošle žádost o recenzi za včerejší rezervace (jednou, hlídá se přes pozadano_recenze)
+// Denní (resp. libovolně častěji volaná — viz níže) úloha spouštěná zvenčí
+// (cron-job.org apod.) přes tajný klíč v URL: GET /api/cron/denni?klic=...
+//
+// 1) PŘIPOMÍNKY — místo přesného "datum = zítra" se teď bere časové OKNO:
+//    "termín je v budoucnu a zároveň už je blíž než nastavený předstih"
+//    (výchozí 24 h, nastavitelné v adminu, viz ziskatNastaveniPripominek).
+//    Díky tomu funguje endpoint správně i když:
+//      - je volán vícekrát denně / v jiný čas než přesně o půlnoci,
+//      - běžel s výpadkem (rezervace, které v mezičase "propadly" do okna,
+//        se prostě chytí na dalším běhu — ale rezervace daleko v budoucnu se
+//        NIKDY nepošle předčasně, protože do okna ještě nespadá),
+//      - je rezervace vytvořená pozdě (např. večer na zítřejší ráno) — i ta
+//        spadne do okna a připomínku dostane, dokud termín ještě neproběhl.
+//    Datum/čas rezervace jsou uložené jako "místní" hodnoty bez časové zóny
+//    (stejně jako jinde v projektu) — okno se proto počítá v JS na hodiny/dny,
+//    ne přesně na minuty, s běžnou tolerancí řádu jednotek hodin (viz níže).
+//
+//    ATOMICKÉ "CLAIMNUTÍ" (ochrana proti duplicitnímu odeslání při souběžném
+//    volání): než se e-mail vůbec pošle, jediným atomickým UPDATE se rezervace
+//    "zabere" (nastaví se pripomenuto_pokus_kdy = now()), a to jen když ještě
+//    není odeslaná A není zabraná (nebo je zabraná už > 10 minut, což bereme
+//    jako zaseklý/spadlý pokus a dovolíme převzetí). Teprve PAK se posílá
+//    e-mail — DB zámek se tedy nedrží po dobu síťového volání na Resend.
+//    Když odeslání selže, claim se hned uvolní (pripomenuto zůstává false),
+//    takže to může zkusit i úplně následující běh, ne až za 10 minut.
+//
+// 2) ŽÁDOSTI O RECENZI — beze změny (nezávislý mechanismus, viz Fáze 5A audit),
+//    pořád "datum = včera", pořád vlastní pozadano_recenze, není ovlivněný
+//    vypnutím připomínek.
 app.get('/api/cron/denni', async (req, res) => {
   if (!CRON_KLIC || req.query.klic !== CRON_KLIC) {
     return res.status(401).json({ chyba: 'Neplatný klíč.' });
   }
   try {
-    const zitra = new Date(); zitra.setDate(zitra.getDate() + 1);
-    const zitraIso = zitra.toISOString().slice(0, 10);
-    const vcera = new Date(); vcera.setDate(vcera.getDate() - 1);
-    const vceraIso = vcera.toISOString().slice(0, 10);
+    const pripominky = { zapnuto: true, zkontrolovano: 0, odeslano: 0, selhalo: 0, preskoceno: 0, predstihHodin: 24 };
+    const { zapnuto, predstihHodin } = await ziskatNastaveniPripominek();
+    pripominky.zapnuto = zapnuto;
+    pripominky.predstihHodin = predstihHodin;
 
-    let pripomenutoPocet = 0;
-    const { rows: zitrejsi } = await db.query(
-      `SELECT * FROM rezervace WHERE datum = $1 AND stav IN ('cekajici','potvrzena') AND pripomenuto = false AND email IS NOT NULL`,
-      [zitraIso]
-    );
-    for (const r of zitrejsi) {
-      const odeslano = await odeslatEmail(r.email, 'Připomínka rezervace zítra – Masáže Alesa', pripomenkaEmailHtml(r));
-      if (odeslano) {
-        await db.query('UPDATE rezervace SET pripomenuto = true WHERE id = $1', [r.id]);
-        pripomenutoPocet++;
+    if (zapnuto) {
+      const ted = new Date();
+      const oknoKonec = new Date(ted.getTime() + predstihHodin * 60 * 60 * 1000);
+      const dnesIso = ted.toISOString().slice(0, 10);
+
+      // Levný SQL předfiltr jen podle data (od dneška), přesné okno na hodiny
+      // se řeší až v JS níže — viz komentář výš u časových zón.
+      const { rows: kandidati } = await db.query(
+        `SELECT * FROM rezervace WHERE stav IN ('cekajici','potvrzena') AND pripomenuto = false AND email IS NOT NULL AND datum >= $1`,
+        [dnesIso]
+      );
+
+      for (const r of kandidati) {
+        const terminCas = new Date(r.datum + 'T' + String(r.cas_od).slice(0, 5) + ':00');
+        if (!(terminCas > ted && terminCas <= oknoKonec)) continue; // mimo okno — moc brzo, nebo už proběhlo
+
+        pripominky.zkontrolovano++;
+
+        const { rows: [claimnuto] } = await db.query(
+          `UPDATE rezervace SET pripomenuto_pokus_kdy = now()
+           WHERE id = $1 AND pripomenuto = false
+             AND (pripomenuto_pokus_kdy IS NULL OR pripomenuto_pokus_kdy < now() - interval '10 minutes')
+           RETURNING *`,
+          [r.id]
+        );
+        if (!claimnuto) { pripominky.preskoceno++; continue; }
+
+        const odeslano = await odeslatEmail(claimnuto.email, 'Připomínka rezervace – Masáže Alesa', pripomenkaEmailHtml(claimnuto));
+        if (odeslano) {
+          await db.query('UPDATE rezervace SET pripomenuto = true WHERE id = $1', [r.id]);
+          pripominky.odeslano++;
+        } else {
+          await db.query('UPDATE rezervace SET pripomenuto_pokus_kdy = NULL WHERE id = $1', [r.id]);
+          pripominky.selhalo++;
+        }
       }
     }
 
-    let recenzePocet = 0;
+    const recenze = { zkontrolovano: 0, odeslano: 0, selhalo: 0 };
+    const vcera = new Date(); vcera.setDate(vcera.getDate() - 1);
+    const vceraIso = vcera.toISOString().slice(0, 10);
     const { rows: vcerejsi } = await db.query(
       `SELECT * FROM rezervace WHERE datum = $1 AND stav IN ('potvrzena','dokoncena') AND pozadano_recenze = false AND email IS NOT NULL`,
       [vceraIso]
     );
+    recenze.zkontrolovano = vcerejsi.length;
     for (const r of vcerejsi) {
       const odeslano = await odeslatEmail(r.email, 'Jak jste byla spokojená? – Masáže Alesa', recenzeEmailHtml(r));
       if (odeslano) {
         await db.query('UPDATE rezervace SET pozadano_recenze = true WHERE id = $1', [r.id]);
-        recenzePocet++;
+        recenze.odeslano++;
+      } else {
+        recenze.selhalo++;
       }
     }
 
-    res.json({ ok: true, pripomenutoOdeslano: pripomenutoPocet, zCelkem: zitrejsi.length, recenzeOdeslano: recenzePocet, zCelkemVcera: vcerejsi.length });
+    res.json({ ok: true, pripominky, recenze });
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
