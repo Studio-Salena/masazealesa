@@ -1184,62 +1184,123 @@ app.delete('/api/admin/poukazy/zadosti/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
-// -- Zákazníci (ručně přidané + odvozené z rezervací a poukazů, seskupeno podle telefonu) --
-app.get('/api/admin/zakaznici', async (req, res) => {
-  try {
-    const [rez, pouk, zak] = await Promise.all([
-      db.query('SELECT jmeno, telefon, email, datum, cena, stav FROM rezervace'),
-      db.query('SELECT kupujici_jmeno, kupujici_telefon, kupujici_email, hodnota, stav FROM poukazy'),
-      db.query('SELECT telefon, jmeno, email, poznamka, alergie, preference FROM zakaznici')
-    ]);
+// -- Zákazníci (ručně přidané + odvozené z rezervací a poukazů, seskupeno podle
+// telefonu) — Fáze 6B: jedna sdílená funkce pro seznam i detail, ať se žádná
+// metrika nepočítá na dvou místech dvěma různými způsoby.
+//
+// "Celkem uhrazeno" a "počet návštěv" se počítají VÝHRADNĚ z rezervací se
+// stav='dokoncena', a částka se bere z rezervace.uhrazeno (ne z cena) — to je
+// vždy = SUM(platby.castka) pro danou rezervaci, tedy čistý součet plateb minus
+// vratky (viz prepocitatSouhrnRezervace, Fáze 3B), včetně případné poukazové
+// části uplatněné NA TUHLE rezervaci. Cenu samotného NÁKUPU poukazu
+// (poukazy.hodnota) sem záměrně nepřičítáme — jinak by se stejná koruna
+// započetla jednou při prodeji poukazu a podruhé při jeho uplatnění na
+// dokončenou masáž (dvojí započítání, které audit Fáze 6A odhalil).
+async function spocitatKlientky() {
+  const [rez, pouk, zak] = await Promise.all([
+    db.query('SELECT id, jmeno, telefon, email, datum, cas_od, cas_do, masaz, cena, uhrazeno, stav, stav_platby, zpusob_platby, poukaz_kod, poznamka FROM rezervace'),
+    db.query('SELECT kupujici_jmeno, kupujici_telefon, kupujici_email, stav FROM poukazy'),
+    db.query('SELECT telefon, jmeno, email, poznamka, alergie, preference FROM zakaznici')
+  ]);
 
-    const rucne = {};
-    zak.rows.forEach(z => { rucne[z.telefon] = z; });
+  const rucne = {};
+  zak.rows.forEach(z => { rucne[z.telefon] = z; });
 
-    const zakaznici = {};
-    function najit(telefon) {
-      const klic = (telefon || '').trim();
-      if (!klic) return null;
-      if (!zakaznici[klic]) {
-        const r = rucne[klic];
-        zakaznici[klic] = {
-          telefon: klic, jmeno: r?.jmeno || null, email: r?.email || null,
-          pocetNavstev: 0, celkemUtraceno: 0, posledniNavstiva: null,
-          aktivniPoukazy: 0, poznamka: r?.poznamka || '',
-          alergie: r?.alergie || '', preference: r?.preference || ''
-        };
-      }
-      return zakaznici[klic];
+  const klientky = {};
+  function najit(telefon) {
+    const klic = (telefon || '').trim();
+    if (!klic) return null;
+    if (!klientky[klic]) {
+      const r = rucne[klic];
+      klientky[klic] = {
+        telefon: klic, jmeno: r?.jmeno || null, email: r?.email || null,
+        poznamka: r?.poznamka || '', alergie: r?.alergie || '', preference: r?.preference || '',
+        pocetNavstev: 0, celkemUtraceno: 0, posledniNavstiva: null,
+        dalsiRezervace: null, aktivniPoukazy: 0, rezervace: []
+      };
+    }
+    return klientky[klic];
+  }
+
+  zak.rows.forEach(z => najit(z.telefon));
+
+  const ted = new Date();
+
+  rez.rows.forEach(r => {
+    const z = najit(r.telefon);
+    if (!z) return;
+    if (r.jmeno) z.jmeno = r.jmeno;
+    if (r.email) z.email = r.email;
+
+    // Historie obsahuje ÚPLNĚ všechny rezervace (i zrušené/nedostavené), ať jde
+    // dohledat skutečná historie klientky — ale do statistik níž se počítají
+    // jen dokončené/budoucí podle příslušných pravidel.
+    z.rezervace.push({
+      id: r.id, datum: r.datum, cas_od: r.cas_od, cas_do: r.cas_do, masaz: r.masaz,
+      cena: Number(r.cena) || 0, uhrazeno: Number(r.uhrazeno) || 0, stav: r.stav,
+      stav_platby: r.stav_platby, zpusob_platby: r.zpusob_platby,
+      poukaz_kod: r.poukaz_kod, poznamka: r.poznamka
+    });
+
+    if (r.stav === 'dokoncena') {
+      z.pocetNavstev++;
+      z.celkemUtraceno += Number(r.uhrazeno) || 0;
+      if (!z.posledniNavstiva || r.datum > z.posledniNavstiva) z.posledniNavstiva = r.datum;
     }
 
-    zak.rows.forEach(z => najit(z.telefon));
-
-    rez.rows.forEach(r => {
-      const z = najit(r.telefon);
-      if (!z) return;
-      if (r.jmeno) z.jmeno = r.jmeno;
-      if (r.email) z.email = r.email;
-      if (!['zrusena', 'nedostavila_se'].includes(r.stav)) {
-        z.pocetNavstev++;
-        z.celkemUtraceno += Number(r.cena) || 0;
-        if (!z.posledniNavstiva || r.datum > z.posledniNavstiva) z.posledniNavstiva = r.datum;
+    // "Další rezervace" — nejbližší budoucí termín, který není zrušený ani
+    // "nedostavila se" (klidně i cekajici/potvrzena/dokoncena, kdyby byl
+    // omylem označený dokoncena předem — bereme jen podle termínu v budoucnu).
+    if (!['zrusena', 'nedostavila_se'].includes(r.stav)) {
+      const terminCas = new Date(r.datum + 'T' + String(r.cas_od).slice(0, 5) + ':00');
+      if (terminCas > ted) {
+        const stavajiciCas = z.dalsiRezervace
+          ? new Date(z.dalsiRezervace.datum + 'T' + String(z.dalsiRezervace.cas_od).slice(0, 5) + ':00')
+          : null;
+        if (!stavajiciCas || terminCas < stavajiciCas) {
+          z.dalsiRezervace = { datum: r.datum, cas_od: r.cas_od, cas_do: r.cas_do, masaz: r.masaz, stav: r.stav };
+        }
       }
-    });
-    pouk.rows.forEach(p => {
-      const z = najit(p.kupujici_telefon);
-      if (!z) return;
-      if (p.kupujici_jmeno && !z.jmeno) z.jmeno = p.kupujici_jmeno;
-      if (p.kupujici_email && !z.email) z.email = p.kupujici_email;
-      z.celkemUtraceno += Number(p.hodnota) || 0;
-      if (p.stav === 'aktivni') z.aktivniPoukazy++;
-    });
+    }
+  });
 
-    const seznam = Object.values(zakaznici).sort((a, b) => {
-      if (!a.posledniNavstiva) return 1;
-      if (!b.posledniNavstiva) return -1;
-      return b.posledniNavstiva.localeCompare(a.posledniNavstiva);
-    });
+  pouk.rows.forEach(p => {
+    const z = najit(p.kupujici_telefon);
+    if (!z) return;
+    if (p.kupujici_jmeno && !z.jmeno) z.jmeno = p.kupujici_jmeno;
+    if (p.kupujici_email && !z.email) z.email = p.kupujici_email;
+    if (p.stav === 'aktivni') z.aktivniPoukazy++;
+  });
+
+  Object.values(klientky).forEach(z => {
+    z.prumernaNavsteva = z.pocetNavstev > 0 ? Math.round(z.celkemUtraceno / z.pocetNavstev) : null;
+    z.rezervace.sort((a, b) => (b.datum + String(b.cas_od)).localeCompare(a.datum + String(a.cas_od)));
+  });
+
+  return klientky; // { [telefon]: {...} }
+}
+
+app.get('/api/admin/zakaznici', async (req, res) => {
+  try {
+    const klientky = await spocitatKlientky();
+    const seznam = Object.values(klientky)
+      .map(({ rezervace, ...zbytek }) => zbytek) // seznam nenese celou historii, jen souhrn (viz detail níž)
+      .sort((a, b) => {
+        if (!a.posledniNavstiva) return 1;
+        if (!b.posledniNavstiva) return -1;
+        return b.posledniNavstiva.localeCompare(a.posledniNavstiva);
+      });
     res.json(seznam);
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
+// Detail jedné klientky (podle telefonu) — souhrn + úplná historie rezervací.
+app.get('/api/admin/zakaznici/:telefon', async (req, res) => {
+  try {
+    const klientky = await spocitatKlientky();
+    const z = klientky[(req.params.telefon || '').trim()];
+    if (!z) return res.status(404).json({ chyba: 'Zákaznice s tímto telefonem nebyla nalezena.' });
+    res.json(z);
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 

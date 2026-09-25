@@ -388,13 +388,13 @@ tr:hover td{background:#fffaf5}
       </div>
       <div class="stats-grid" style="grid-template-columns:repeat(3,1fr)">
         <div class="stat-card"><div class="stat-label">Celkem zákaznic</div><div class="stat-value" id="zakCelkem">—</div></div>
-        <div class="stat-card"><div class="stat-label">Průměrně utraceno</div><div class="stat-value" id="zakPrumer">—</div></div>
+        <div class="stat-card"><div class="stat-label">Průměrně utraceno (na klientku)</div><div class="stat-value" id="zakPrumer">—</div></div>
         <div class="stat-card"><div class="stat-label">S aktivním poukazem</div><div class="stat-value stat-green" id="zakAktivniPoukaz">—</div></div>
       </div>
       <div class="table-wrap">
         <div class="table-header">
           <h3>📋 Seznam zákaznic</h3>
-          <input type="text" id="zakazniciHledat" placeholder="Hledat podle jména nebo telefonu…" oninput="vykreslitZakazniky()" style="padding:7px 12px;border:2px solid var(--tan-light);border-radius:8px;font-family:'Nunito',sans-serif;font-size:0.85rem;outline:none;min-width:220px">
+          <input type="text" id="zakazniciHledat" placeholder="Hledat podle jména, telefonu nebo e-mailu…" oninput="vykreslitZakazniky()" style="padding:7px 12px;border:2px solid var(--tan-light);border-radius:8px;font-family:'Nunito',sans-serif;font-size:0.85rem;outline:none;min-width:220px">
         </div>
         <div id="zakazniciTable"><div class="loading">Načítám...</div></div>
       </div>
@@ -636,6 +636,17 @@ tr:hover td{background:#fffaf5}
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal('modalNovaZakaznice')">Zrušit</button>
       <button class="btn btn-primary" onclick="pridatZakaznici()">Přidat</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Detail zákaznice (Fáze 6B) -->
+<div class="modal-overlay" id="modalDetailZakaznice">
+  <div class="modal" style="max-width:760px">
+    <h3>Detail zákaznice</h3>
+    <div id="detailZakazniceObsah"></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modalDetailZakaznice')">Zavřít</button>
     </div>
   </div>
 </div>
@@ -1198,6 +1209,24 @@ function otevritDetailRezervace(id) {
   document.getElementById('detailPlatebniHistorie').innerHTML = '<div class="loading">Načítám historii plateb...</div>';
   openModal('modalDetailRezervace');
   nacistHistoriiPlateb(id);
+  nacistAlergiePreferenceProRezervaci(r.telefon);
+}
+// Read-only zobrazení alergie/preference klientky u detailu rezervace (Fáze 6B) —
+// jen čte přes existující /api/admin/zakaznici/:telefon, nic tu neupravuje ani
+// nepřepisuje. Když se podle telefonu nic nenajde, zobrazí se "neuvedeno".
+async function nacistAlergiePreferenceProRezervaci(telefon) {
+  const el = document.getElementById('detailRezAlergiePreference');
+  if (!el) return;
+  if (!telefon) { el.textContent = 'neuvedeno'; return; }
+  try {
+    const res = await adminFetch(API + '/admin/zakaznici/' + encodeURIComponent(telefon));
+    if (!res.ok) { el.textContent = 'neuvedeno'; return; }
+    const z = await res.json();
+    const casti = [];
+    if (z.alergie) casti.push('Alergie: ' + z.alergie);
+    if (z.preference) casti.push('Preference: ' + z.preference);
+    el.textContent = casti.length ? casti.join(' · ') : 'neuvedeno'; // textContent, ne innerHTML — bez rizika XSS, žádné HTML se neparsuje
+  } catch (e) { el.textContent = 'neuvedeno'; }
 }
 function vykreslitDetailRezervace(r) {
   const stavBadge = {
@@ -1226,6 +1255,7 @@ function vykreslitDetailRezervace(r) {
     <div class="form-group"><label>E-mail</label><div>${escapeHtml(r.email) || '—'}</div></div>
     ${r.poukaz_kod ? `<div class="form-group"><label>Kód poukazu</label><div>🎁 ${escapeHtml(r.poukaz_kod)}</div></div>` : ''}
     <div class="form-group"><label>Poznámka</label><div>${escapeHtml(r.poznamka) || '—'}</div></div>
+    <div class="form-group"><label>Alergie / preference klientky</label><div id="detailRezAlergiePreference" style="font-size:0.85rem;color:var(--text-light)">Načítám...</div></div>
     <div class="form-group"><label>Stav</label><div>${stavBadge[r.stav] || r.stav}</div></div>
     <div class="form-group"><label>Platba</label>
       <div>${platbaBadge[stavPlatby] || stavPlatby}${r.zpusob_platby ? ' · ' + (platbaZpusobLabel[r.zpusob_platby] || r.zpusob_platby) : ''}</div>
@@ -1671,10 +1701,13 @@ async function loadZakaznici() {
 }
 function vykreslitZakazniky() {
   const hledat = document.getElementById('zakazniciHledat').value.trim().toLowerCase();
-  const seznam = posledniZakaznici.filter(z => !hledat || (z.jmeno || '').toLowerCase().includes(hledat) || z.telefon.includes(hledat));
+  const seznam = posledniZakaznici.filter(z => !hledat
+    || (z.jmeno || '').toLowerCase().includes(hledat)
+    || z.telefon.includes(hledat)
+    || (z.email || '').toLowerCase().includes(hledat));
   if (!seznam.length) { document.getElementById('zakazniciTable').innerHTML = '<div class="empty">Žádné zákaznice nenalezeny</div>'; return; }
   document.getElementById('zakazniciTable').innerHTML = `
-    <table><thead><tr><th>Jméno</th><th>Kontakt</th><th>Návštěvy</th><th>Celkem utraceno</th><th>Poslední návštěva</th><th>Aktivní poukazy</th><th>Poznámka / alergie / preference</th></tr></thead>
+    <table><thead><tr><th>Jméno</th><th>Kontakt</th><th>Návštěvy (dokončené)</th><th>Celkem uhrazeno</th><th>Poslední návštěva</th><th>Aktivní poukazy</th><th>Poznámka / alergie / preference</th><th></th></tr></thead>
     <tbody>${seznam.map(z => `<tr>
       <td>${escapeHtml(z.jmeno) || '—'}</td>
       <td>${escapeHtml(z.telefon)}${z.email ? '<br><small>' + escapeHtml(z.email) + '</small>' : ''}</td>
@@ -1695,7 +1728,61 @@ function vykreslitZakazniky() {
           </div>
         </div>
       </td>
+      <td><button class="btn btn-outline btn-sm" onclick="otevritDetailZakaznice('${escapeJsAttr(z.telefon)}')">🔍 Detail</button></td>
     </tr>`).join('')}</tbody></table>`;
+}
+
+// Detail klientky (Fáze 6B) — souhrn + úplná historie rezervací (i zrušené/
+// nedostavené, jen pro dohledání historie — do statistik se nepočítají, viz
+// server: spocitatKlientky).
+async function otevritDetailZakaznice(telefon) {
+  const obsah = document.getElementById('detailZakazniceObsah');
+  obsah.innerHTML = '<div class="loading">Načítám...</div>';
+  openModal('modalDetailZakaznice');
+  try {
+    const res = await adminFetch(API + '/admin/zakaznici/' + encodeURIComponent(telefon));
+    if (!res.ok) { obsah.innerHTML = '<div class="error-msg">Zákaznice nenalezena.</div>'; return; }
+    const z = await res.json();
+    const stavBadge = {
+      cekajici: '⏳ Čeká', potvrzena: '✅ Potvrzena', dokoncena: '🌸 Dokončena',
+      nedostavila_se: '🚫 Nedostavila se', zrusena: '❌ Zrušena'
+    };
+    const platbaLabel = { nezaplaceno: '💸 Nezaplaceno', castecne_zaplaceno: '🟡 Částečně', zaplaceno: '✅ Zaplaceno' };
+    obsah.innerHTML = `
+      <div class="form-grid-2">
+        <div class="form-group"><label>Jméno</label><div>${escapeHtml(z.jmeno) || '—'}</div></div>
+        <div class="form-group"><label>Telefon</label><div>${escapeHtml(z.telefon)}</div></div>
+      </div>
+      <div class="form-group"><label>E-mail</label><div>${escapeHtml(z.email) || '—'}</div></div>
+      <div class="form-grid-2">
+        <div class="form-group"><label>Alergie</label><div>${escapeHtml(z.alergie) || '—'}</div></div>
+        <div class="form-group"><label>Preference</label><div>${escapeHtml(z.preference) || '—'}</div></div>
+      </div>
+      <div class="form-group"><label>Interní poznámka</label><div>${escapeHtml(z.poznamka) || '—'}</div></div>
+      <div class="stats-grid" style="grid-template-columns:repeat(3,1fr);margin:12px 0">
+        <div class="stat-card"><div class="stat-label">Návštěvy (dokončené)</div><div class="stat-value">${z.pocetNavstev}</div></div>
+        <div class="stat-card"><div class="stat-label">Celkem uhrazeno</div><div class="stat-value">${Number(z.celkemUtraceno).toLocaleString('cs-CZ')} Kč</div></div>
+        <div class="stat-card"><div class="stat-label">Průměr / návštěvu</div><div class="stat-value">${z.prumernaNavsteva === null ? '—' : Number(z.prumernaNavsteva).toLocaleString('cs-CZ') + ' Kč'}</div></div>
+        <div class="stat-card"><div class="stat-label">Poslední návštěva</div><div class="stat-value" style="font-size:1.1rem">${z.posledniNavstiva ? new Date(z.posledniNavstiva).toLocaleDateString('cs-CZ') : '—'}</div></div>
+        <div class="stat-card"><div class="stat-label">Další rezervace</div><div class="stat-value" style="font-size:1rem">${z.dalsiRezervace ? new Date(z.dalsiRezervace.datum).toLocaleDateString('cs-CZ') + ' ' + String(z.dalsiRezervace.cas_od).slice(0,5) : 'Žádná další rezervace'}</div></div>
+        <div class="stat-card"><div class="stat-label">Aktivní poukazy</div><div class="stat-value stat-green">${z.aktivniPoukazy}</div></div>
+      </div>
+      ${z.dalsiRezervace ? `<div style="font-size:0.82rem;color:var(--text-light);margin:-6px 0 12px">Další: ${escapeHtml(z.dalsiRezervace.masaz)} (${stavBadge[z.dalsiRezervace.stav] || z.dalsiRezervace.stav})</div>` : ''}
+      <h3 style="margin:16px 0 8px;font-size:1rem">📜 Historie rezervací (${z.rezervace.length})</h3>
+      <div class="table-wrap" style="margin:0">
+        <table><thead><tr><th>Termín</th><th>Služba</th><th>Cena</th><th>Stav</th><th>Platba</th><th>Poznámka</th></tr></thead>
+        <tbody>${z.rezervace.length ? z.rezervace.map(r => `<tr>
+          <td>${new Date(r.datum).toLocaleDateString('cs-CZ')} ${String(r.cas_od).slice(0,5)}</td>
+          <td>${escapeHtml(r.masaz)}${r.poukaz_kod ? '<br><small>🎁 ' + escapeHtml(r.poukaz_kod) + '</small>' : ''}</td>
+          <td>${Number(r.cena).toLocaleString('cs-CZ')} Kč</td>
+          <td>${stavBadge[r.stav] || r.stav}</td>
+          <td>${platbaLabel[r.stav_platby] || r.stav_platby}<br><small>${Number(r.uhrazeno).toLocaleString('cs-CZ')} Kč</small></td>
+          <td><small>${escapeHtml(r.poznamka) || '—'}</small></td>
+        </tr>`).join('') : '<tr><td colspan="6" style="text-align:center;color:var(--text-light)">Žádné rezervace</td></tr>'}</tbody></table>
+      </div>`;
+  } catch (e) {
+    obsah.innerHTML = '<div class="error-msg">Chyba načítání detailu.</div>';
+  }
 }
 async function ulozitZakaznici(btn, telefon) {
   const td = btn.closest('td');
