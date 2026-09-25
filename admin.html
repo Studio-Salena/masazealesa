@@ -71,6 +71,17 @@ td{padding:12px 14px;border-bottom:1px solid #faf0e6;font-size:0.85rem;vertical-
 tr:last-child td{border-bottom:none}
 .row-clickable{cursor:pointer}
 .row-clickable:hover td{background:var(--cream)}
+
+/* PŘEHLED KALENDÁŘE */
+.ak-grid{display:grid;grid-template-columns:52px repeat(7,minmax(110px,1fr));min-width:850px;border:1px solid var(--tan-light);border-radius:12px;overflow:hidden}
+.ak-roh{background:var(--cream);border-bottom:1.5px solid var(--tan-light)}
+.ak-hlavicka{background:var(--cream);padding:8px 4px;text-align:center;font-weight:700;color:var(--brown);font-size:0.72rem;border-bottom:1.5px solid var(--tan-light);border-left:1px solid var(--tan-light)}
+.ak-hlavicka small{display:block;font-weight:400;color:var(--text-light);font-size:0.65rem}
+.ak-hlavicka.dnes{color:var(--tan)}
+.ak-hodiny-col{position:relative}
+.ak-den{position:relative;border-left:1px solid #f4e9e0;border-top:1px solid #f4e9e0}
+.ak-blok{position:absolute;left:2px;right:2px;border-radius:5px;padding:2px 5px;font-size:0.62rem;line-height:1.25;color:#fff;overflow:hidden;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,0.15)}
+.ak-blok strong{display:block;font-size:0.66rem}
 tr:hover td{background:#fffaf5}
 
 /* BADGES */
@@ -275,6 +286,24 @@ tr:hover td{background:#fffaf5}
           <button class="btn btn-primary btn-sm" onclick="otevritNovouVyjimku()">+ Přidat výjimku</button>
         </div>
         <div id="vyjimkyTable"><div class="loading">Načítám...</div></div>
+      </div>
+      <div class="table-wrap">
+        <div class="table-header">
+          <h3>📆 Přehled kalendáře</h3>
+          <div style="display:flex;align-items:center;gap:10px">
+            <button class="btn btn-outline btn-sm" onclick="akPosunTyden(-1)">◀</button>
+            <span id="akTydenLabel" style="font-size:0.85rem;font-weight:700;color:var(--brown)"></span>
+            <button class="btn btn-outline btn-sm" onclick="akPosunTyden(1)">▶</button>
+          </div>
+        </div>
+        <div id="adminKalendarWrap" style="overflow-x:auto">
+          <div id="adminKalendar" class="ak-grid"></div>
+        </div>
+        <div style="padding:10px 16px;display:flex;gap:14px;flex-wrap:wrap;font-size:0.75rem;color:var(--text-light)">
+          <span><i style="display:inline-block;width:11px;height:11px;border-radius:3px;background:#f0b429;margin-right:4px;vertical-align:middle"></i>Čeká na potvrzení</span>
+          <span><i style="display:inline-block;width:11px;height:11px;border-radius:3px;background:#3a9d5f;margin-right:4px;vertical-align:middle"></i>Potvrzeno / dokončeno</span>
+          <span><i style="display:inline-block;width:11px;height:11px;border-radius:3px;background:#b0a89f;margin-right:4px;vertical-align:middle"></i>Nedostavila se</span>
+        </div>
       </div>
       <div class="table-wrap">
         <div class="table-header">
@@ -741,12 +770,95 @@ async function loadRezervace() {
     document.getElementById('rezStatCelkem').textContent = vsechnyRezervace.length;
     document.getElementById('rezStatCekajici').textContent = vsechnyRezervace.filter(r => r.stav === 'cekajici').length;
     vykreslitRezervace('vse');
+    vykreslitAdminKalendar();
   } catch (e) {
     document.getElementById('rezervaceTable').innerHTML = '<div class="error-msg">Chyba načítání — zkontroluj, že je vyplněná adresa API a backend běží.</div>';
   }
   loadPracovniDoba();
   loadNastaveni();
   loadVyjimky();
+}
+
+// ── PŘEHLED KALENDÁŘE (jak je zaplněný týden) ──
+let akTydenZacatek = null;
+function akPondeliTydne(d) {
+  const den = d.getDay();
+  const posun = den === 0 ? -6 : 1 - den;
+  const p = new Date(d);
+  p.setDate(p.getDate() + posun);
+  p.setHours(0, 0, 0, 0);
+  return p;
+}
+function akPosunTyden(smer) {
+  if (!akTydenZacatek) akTydenZacatek = akPondeliTydne(new Date());
+  const novy = new Date(akTydenZacatek);
+  novy.setDate(novy.getDate() + smer * 7);
+  akTydenZacatek = novy;
+  vykreslitAdminKalendar();
+}
+function akCasNaMin(cas) { const p = String(cas).split(':'); return Number(p[0]) * 60 + Number(p[1]); }
+function akMinNaCas(m) { const h = Math.floor(m / 60), mm = m % 60; return String(h).padStart(2, '0') + ':' + String(mm).padStart(2, '0'); }
+function akIso(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+
+function vykreslitAdminKalendar() {
+  const wrap = document.getElementById('adminKalendar');
+  if (!wrap) return;
+  if (!akTydenZacatek) akTydenZacatek = akPondeliTydne(new Date());
+  const NAZVY = ['Ne', 'Po', 'Út', 'St', 'Čt', 'Pá', 'So'];
+  const dny = [];
+  for (let i = 0; i < 7; i++) { const d = new Date(akTydenZacatek); d.setDate(d.getDate() + i); dny.push(d); }
+  const isoDny = dny.map(akIso);
+  const dnesIso = akIso(new Date());
+  const formatKratky = d => d.getDate() + '.' + (d.getMonth() + 1) + '.';
+  document.getElementById('akTydenLabel').textContent = formatKratky(dny[0]) + ' – ' + formatKratky(dny[6]) + ' ' + dny[6].getFullYear();
+
+  // Rozsah hodin, které se zobrazí: podle otevírací doby aktivních dnů a podle
+  // skutečných rezervací tento týden (ať je vidět i rezervace mimo otevírací dobu).
+  let minMin = null, maxMin = null;
+  (vsechnyDnyPD || []).forEach(pd => {
+    if (!pd.aktivni) return;
+    const od = akCasNaMin(pd.otevreno_od), doo = akCasNaMin(pd.otevreno_do);
+    if (minMin === null || od < minMin) minMin = od;
+    if (maxMin === null || doo > maxMin) maxMin = doo;
+  });
+  const tydenniRez = (vsechnyRezervace || []).filter(r => isoDny.includes(r.datum) && r.stav !== 'zrusena');
+  tydenniRez.forEach(r => {
+    const od = akCasNaMin(r.cas_od), doo = akCasNaMin(r.cas_do);
+    if (minMin === null || od < minMin) minMin = od;
+    if (maxMin === null || doo > maxMin) maxMin = doo;
+  });
+  if (minMin === null) { minMin = 8 * 60; maxMin = 17 * 60; }
+  minMin = Math.floor(minMin / 60) * 60;
+  maxMin = Math.ceil(maxMin / 60) * 60;
+
+  const PX_MIN = 1;
+  const vyska = Math.max((maxMin - minMin) * PX_MIN, 40);
+  const barvy = { cekajici: '#f0b429', potvrzena: '#3a9d5f', dokoncena: '#3a9d5f', nedostavila_se: '#b0a89f' };
+
+  let html = '<div class="ak-roh"></div>';
+  dny.forEach((d, i) => {
+    html += `<div class="ak-hlavicka${isoDny[i] === dnesIso ? ' dnes' : ''}">${NAZVY[d.getDay()]}<small>${d.getDate()}.${d.getMonth() + 1}.</small></div>`;
+  });
+
+  let hodinyHtml = '';
+  for (let m = minMin; m <= maxMin; m += 60) {
+    hodinyHtml += `<div style="position:absolute;top:${(m - minMin) * PX_MIN}px;right:5px;font-size:0.6rem;color:var(--text-light)">${akMinNaCas(m)}</div>`;
+  }
+  html += `<div class="ak-hodiny-col" style="height:${vyska}px">${hodinyHtml}</div>`;
+
+  dny.forEach((d, i) => {
+    const denRez = tydenniRez.filter(r => r.datum === isoDny[i]);
+    const blokyHtml = denRez.map(r => {
+      const od = akCasNaMin(r.cas_od), doo = akCasNaMin(r.cas_do);
+      const top = (od - minMin) * PX_MIN;
+      const h = Math.max((doo - od) * PX_MIN, 15);
+      const barva = barvy[r.stav] || '#b0a89f';
+      return `<div class="ak-blok" style="top:${top}px;height:${h}px;background:${barva}" onclick="otevritDetailRezervace(${r.id})" title="${r.jmeno} — ${r.masaz}"><strong>${String(r.cas_od).slice(0, 5)}</strong>${r.jmeno}</div>`;
+    }).join('');
+    html += `<div class="ak-den" style="height:${vyska}px">${blokyHtml}</div>`;
+  });
+
+  wrap.innerHTML = html;
 }
 
 async function otevritNovouRezervaci() {
@@ -815,6 +927,7 @@ async function loadPracovniDoba() {
         <button class="btn btn-green btn-sm" id="pdUlozitBtn" onclick="ulozitVsechnyDny()">💾 Uložit pracovní dobu</button>
         <span id="pdUlozitZprava" style="font-size:0.82rem;color:var(--text-light)"></span>
       </div>`;
+    vykreslitAdminKalendar();
   } catch (e) { document.getElementById('pracovniDobaTable').innerHTML = '<div class="error-msg">Chyba načítání.</div>'; }
 }
 async function ulozitVsechnyDny() {
