@@ -230,20 +230,6 @@ app.post('/api/login', (req, res) => {
   res.status(401).json({ ok: false });
 });
 
-// ── JEDNORÁZOVÁ MIGRACE: doplní sloupce pro stav platby do rezervace.
-// Po ověření, že proběhla, se zase odstraní (stejný postup jako v předchozích fázích).
-app.post('/api/admin/migrace-2026-09c', vyzadovatAdmina, async (req, res) => {
-  try {
-    await db.query(`
-      ALTER TABLE rezervace ADD COLUMN IF NOT EXISTS stav_platby text NOT NULL DEFAULT 'nezaplaceno';
-      ALTER TABLE rezervace ADD COLUMN IF NOT EXISTS zpusob_platby text;
-      ALTER TABLE rezervace ADD COLUMN IF NOT EXISTS uhrazeno numeric NOT NULL DEFAULT 0;
-      ALTER TABLE rezervace ADD COLUMN IF NOT EXISTS uhrazeno_kdy timestamptz;
-    `);
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ chyba: e.message }); }
-});
-
 // ══════════════ VEŘEJNÉ ENDPOINTY ══════════════
 
 // Ceník pro zobrazení na webu (seřazeno podle skupiny a varianty)
