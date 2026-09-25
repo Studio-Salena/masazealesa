@@ -945,19 +945,6 @@ app.delete('/api/admin/nastaveni/:klic', async (req, res) => {
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
-// DOČASNÝ migrační endpoint (Fáze 5B) — přidá sloupec pro atomické "claimnutí"
-// připomínky (viz cron endpoint). Čistě přídavná, idempotentní změna — nemaže
-// a nepřepisuje nic existujícího (pripomenuto/pozadano_recenze se nedotýká).
-// Po jednorázovém spuštění a ověření se tento endpoint v dalším commitu odstraní.
-app.post('/api/admin/migrace-2026-09-5b', async (req, res) => {
-  try {
-    const pred = await db.query('SELECT count(*) AS pocet, count(*) FILTER (WHERE pripomenuto) AS pripomenuto_true, count(*) FILTER (WHERE pozadano_recenze) AS recenze_true FROM rezervace');
-    await db.query('ALTER TABLE rezervace ADD COLUMN IF NOT EXISTS pripomenuto_pokus_kdy timestamptz');
-    const po = await db.query('SELECT count(*) AS pocet, count(*) FILTER (WHERE pripomenuto) AS pripomenuto_true, count(*) FILTER (WHERE pozadano_recenze) AS recenze_true FROM rezervace');
-    res.json({ ok: true, pred: pred.rows[0], po: po.rows[0] });
-  } catch (e) { res.status(500).json({ chyba: e.message }); }
-});
-
 // -- Provozní výjimky (dovolená, svátky) --
 app.get('/api/admin/vyjimky', async (req, res) => {
   try {
