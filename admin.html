@@ -1209,17 +1209,19 @@ function otevritDetailRezervace(id) {
   document.getElementById('detailPlatebniHistorie').innerHTML = '<div class="loading">Načítám historii plateb...</div>';
   openModal('modalDetailRezervace');
   nacistHistoriiPlateb(id);
-  nacistAlergiePreferenceProRezervaci(r.telefon);
+  nacistAlergiePreferenceProRezervaci(r.klientka_id);
 }
-// Read-only zobrazení alergie/preference klientky u detailu rezervace (Fáze 6B) —
-// jen čte přes existující /api/admin/zakaznici/:telefon, nic tu neupravuje ani
-// nepřepisuje. Když se podle telefonu nic nenajde, zobrazí se "neuvedeno".
-async function nacistAlergiePreferenceProRezervaci(telefon) {
+// Read-only zobrazení alergie/preference klientky u detailu rezervace (Fáze 6B,
+// od Fáze 6D čte z /api/admin/klientky/:id přes skutečnou vazbu klientka_id
+// místo shody podle telefonu) — nic tu neupravuje ani nepřepisuje. Když
+// rezervace nemá klientka_id (nebo klientka nemá alergii/preferenci), zobrazí
+// se "neuvedeno".
+async function nacistAlergiePreferenceProRezervaci(klientkaId) {
   const el = document.getElementById('detailRezAlergiePreference');
   if (!el) return;
-  if (!telefon) { el.textContent = 'neuvedeno'; return; }
+  if (!klientkaId) { el.textContent = 'neuvedeno'; return; }
   try {
-    const res = await adminFetch(API + '/admin/zakaznici/' + encodeURIComponent(telefon));
+    const res = await adminFetch(API + '/admin/klientky/' + encodeURIComponent(klientkaId));
     if (!res.ok) { el.textContent = 'neuvedeno'; return; }
     const z = await res.json();
     const casti = [];
@@ -1686,11 +1688,14 @@ function vykreslitNahledPoukazu() {
   `;
 }
 
-// ── ZÁKAZNÍCI ── (odvozeno z rezervací a poukazů podle telefonu, viz /api/admin/zakaznici)
+// ── ZÁKAZNÍCI / KLIENTKY ── Od Fáze 6D čte a zapisuje primárně
+// /api/admin/klientky (skutečná entita s vlastním id, viz Fáze 6C/6D) —
+// dřívější /api/admin/zakaznici (podle telefonu) zůstává v serveru jen jako
+// dočasná kompatibilní vrstva, admin.html už ji nepoužívá.
 let posledniZakaznici = [];
 async function loadZakaznici() {
   try {
-    posledniZakaznici = await adminFetch(API + '/admin/zakaznici').then(r => r.json());
+    posledniZakaznici = await adminFetch(API + '/admin/klientky').then(r => r.json());
     const sAktivnim = posledniZakaznici.filter(z => z.aktivniPoukazy > 0).length;
     const celkemUtraceno = posledniZakaznici.reduce((s, z) => s + Number(z.celkemUtraceno), 0);
     document.getElementById('zakCelkem').textContent = posledniZakaznici.length;
@@ -1703,14 +1708,14 @@ function vykreslitZakazniky() {
   const hledat = document.getElementById('zakazniciHledat').value.trim().toLowerCase();
   const seznam = posledniZakaznici.filter(z => !hledat
     || (z.jmeno || '').toLowerCase().includes(hledat)
-    || z.telefon.includes(hledat)
+    || (z.telefon || '').includes(hledat)
     || (z.email || '').toLowerCase().includes(hledat));
   if (!seznam.length) { document.getElementById('zakazniciTable').innerHTML = '<div class="empty">Žádné zákaznice nenalezeny</div>'; return; }
   document.getElementById('zakazniciTable').innerHTML = `
     <table><thead><tr><th>Jméno</th><th>Kontakt</th><th>Návštěvy (dokončené)</th><th>Celkem uhrazeno</th><th>Poslední návštěva</th><th>Aktivní poukazy</th><th>Poznámka / alergie / preference</th><th></th></tr></thead>
     <tbody>${seznam.map(z => `<tr>
       <td>${escapeHtml(z.jmeno) || '—'}</td>
-      <td>${escapeHtml(z.telefon)}${z.email ? '<br><small>' + escapeHtml(z.email) + '</small>' : ''}</td>
+      <td>${escapeHtml(z.telefon) || '—'}${z.email ? '<br><small>' + escapeHtml(z.email) + '</small>' : ''}</td>
       <td>${z.pocetNavstev}</td>
       <td><strong>${Number(z.celkemUtraceno).toLocaleString('cs-CZ')} Kč</strong></td>
       <td>${z.posledniNavstiva ? new Date(z.posledniNavstiva).toLocaleDateString('cs-CZ') : '—'}</td>
@@ -1723,24 +1728,24 @@ function vykreslitZakazniky() {
             <input type="text" class="zk-preference" value="${escapeHtml(z.preference)}" placeholder="Preference…" style="border:1px solid var(--tan-light);border-radius:6px;padding:5px 8px;font-family:'Nunito',sans-serif;flex:1">
           </div>
           <div style="display:flex;gap:4px">
-            <button class="btn btn-green btn-sm" onclick="ulozitZakaznici(this,'${escapeJsAttr(z.telefon)}')">💾 Uložit</button>
-            <button class="btn btn-red btn-sm" onclick="smazatZakaznici('${escapeJsAttr(z.telefon)}')">🗑️</button>
+            <button class="btn btn-green btn-sm" onclick="ulozitZakaznici(this,${z.id})">💾 Uložit</button>
+            <button class="btn btn-red btn-sm" onclick="smazatZakaznici(${z.id})">🗑️</button>
           </div>
         </div>
       </td>
-      <td><button class="btn btn-outline btn-sm" onclick="otevritDetailZakaznice('${escapeJsAttr(z.telefon)}')">🔍 Detail</button></td>
+      <td><button class="btn btn-outline btn-sm" onclick="otevritDetailZakaznice(${z.id})">🔍 Detail</button></td>
     </tr>`).join('')}</tbody></table>`;
 }
 
-// Detail klientky (Fáze 6B) — souhrn + úplná historie rezervací (i zrušené/
-// nedostavené, jen pro dohledání historie — do statistik se nepočítají, viz
-// server: spocitatKlientky).
-async function otevritDetailZakaznice(telefon) {
+// Detail klientky (Fáze 6B, od Fáze 6D podle klientky.id) — souhrn + úplná
+// historie rezervací (i zrušené/nedostavené, jen pro dohledání historie — do
+// statistik se nepočítají, viz server: nacistKlientkyReal).
+async function otevritDetailZakaznice(id) {
   const obsah = document.getElementById('detailZakazniceObsah');
   obsah.innerHTML = '<div class="loading">Načítám...</div>';
   openModal('modalDetailZakaznice');
   try {
-    const res = await adminFetch(API + '/admin/zakaznici/' + encodeURIComponent(telefon));
+    const res = await adminFetch(API + '/admin/klientky/' + encodeURIComponent(id));
     if (!res.ok) { obsah.innerHTML = '<div class="error-msg">Zákaznice nenalezena.</div>'; return; }
     const z = await res.json();
     const stavBadge = {
@@ -1784,12 +1789,12 @@ async function otevritDetailZakaznice(telefon) {
     obsah.innerHTML = '<div class="error-msg">Chyba načítání detailu.</div>';
   }
 }
-async function ulozitZakaznici(btn, telefon) {
+async function ulozitZakaznici(btn, id) {
   const td = btn.closest('td');
   const poznamka = td.querySelector('.zk-poznamka').value;
   const alergie = td.querySelector('.zk-alergie').value;
   const preference = td.querySelector('.zk-preference').value;
-  await adminFetch(API + '/admin/zakaznici/poznamka', { method: 'PUT', body: JSON.stringify({ telefon, poznamka, alergie, preference }) });
+  await adminFetch(API + '/admin/klientky/' + encodeURIComponent(id), { method: 'PUT', body: JSON.stringify({ poznamka, alergie, preference }) });
 }
 async function pridatZakaznici() {
   const jmeno = document.getElementById('zkJmeno').value.trim();
@@ -1801,7 +1806,7 @@ async function pridatZakaznici() {
   const msg = document.getElementById('novaZakazniceMsg');
   if (!telefon) { msg.innerHTML = '<div class="error-msg">Vyplňte telefon.</div>'; return; }
   try {
-    const res = await adminFetch(API + '/admin/zakaznici', { method: 'POST', body: JSON.stringify({ jmeno, telefon, email, poznamka, alergie, preference }) });
+    const res = await adminFetch(API + '/admin/klientky', { method: 'POST', body: JSON.stringify({ jmeno, telefon, email, poznamka, alergie, preference }) });
     if (res.ok) {
       closeModal('modalNovaZakaznice');
       document.getElementById('zkJmeno').value = ''; document.getElementById('zkTelefon').value = '';
@@ -1812,9 +1817,10 @@ async function pridatZakaznici() {
     } else msg.innerHTML = '<div class="error-msg">Nepodařilo se přidat.</div>';
   } catch (e) { msg.innerHTML = '<div class="error-msg">Nejde se připojit k serveru.</div>'; }
 }
-async function smazatZakaznici(telefon) {
-  if (!confirm('Smazat tuto zákaznici ze seznamu? (Pokud má rezervace nebo poukazy, znovu se objeví při dalším načtení.)')) return;
-  await adminFetch(API + '/admin/zakaznici/' + encodeURIComponent(telefon), { method: 'DELETE' });
+async function smazatZakaznici(id) {
+  if (!confirm('Smazat tuto klientku? (Jde jen tehdy, když nemá žádnou rezervaci ani poukaz — jinak by se ztratila historie.)')) return;
+  const res = await adminFetch(API + '/admin/klientky/' + encodeURIComponent(id), { method: 'DELETE' });
+  if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.chyba || 'Smazání se nepodařilo.'); }
   loadZakaznici();
 }
 

@@ -111,7 +111,7 @@ function normalizovatEmail(raw) {
 // rezervace úplně nové klientky obě zkusily založit stejný telefon_normalizovany
 // (což by jinak spadlo na UNIQUE indexu) — stejný princip jako zámek na datum
 // u rezervací, jen jiný "klíč".
-async function najitNeboVytvoritKlientku(client, { jmeno, telefon, email, alergie, preference }) {
+async function najitNeboVytvoritKlientku(client, { jmeno, telefon, email, alergie, preference, poznamka }) {
   const tn = normalizovatTelefon(telefon);
   if (!tn) return null;
   await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['klientka:' + tn]);
@@ -125,16 +125,17 @@ async function najitNeboVytvoritKlientku(client, { jmeno, telefon, email, alergi
          email_normalizovany = COALESCE(email_normalizovany, $4),
          alergie = COALESCE($5, alergie),
          preference = COALESCE($6, preference),
+         poznamka = COALESCE(poznamka, $7),
          upraveno = now()
        WHERE id = $1`,
-      [existujici.id, jmeno || null, email || null, normalizovatEmail(email), alergie || null, preference || null]
+      [existujici.id, jmeno || null, email || null, normalizovatEmail(email), alergie || null, preference || null, poznamka || null]
     );
     return existujici.id;
   }
   const { rows: [nova] } = await client.query(
-    `INSERT INTO klientky (jmeno, telefon, telefon_normalizovany, email, email_normalizovany, alergie, preference)
-     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-    [jmeno || null, telefon || null, tn, email || null, normalizovatEmail(email), alergie || null, preference || null]
+    `INSERT INTO klientky (jmeno, telefon, telefon_normalizovany, email, email_normalizovany, alergie, preference, poznamka)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+    [jmeno || null, telefon || null, tn, email || null, normalizovatEmail(email), alergie || null, preference || null, poznamka || null]
   );
   return nova.id;
 }
@@ -568,29 +569,20 @@ app.post('/api/rezervace', async (req, res) => {
       }
     }
 
+    // Klientka (Fáze 6D) — najde/založí se podle normalizovaného telefonu VE
+    // STEJNÉ transakci jako rezervace, takže buď se zapíše obojí, nebo nic.
+    // "zakaznici" (starší tabulka) se od téhle fáze už dál nezapisuje — nový
+    // zdroj pravdy pro alergie/preference je "klientky" (viz Fáze 6C/6D).
+    const klientkaId = await najitNeboVytvoritKlientku(client, { jmeno, telefon, email, alergie, preference });
+
     const celaPoznamka = ((poznamka || '') + poukazPoznamka).trim() || null;
     const { rows: [rezervace] } = await client.query(
-      `INSERT INTO rezervace (cenik_id, datum, cas_od, cas_do, jmeno, telefon, email, masaz, poznamka, poukaz_kod, stav, cena)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'cekajici',$11) RETURNING *`,
-      [cenik_id, datum, cas_od, cas_do, jmeno, telefon, email || null, nazevMasaze, celaPoznamka, poukaz_kod || null, polozkaCeniku.cena]
+      `INSERT INTO rezervace (cenik_id, datum, cas_od, cas_do, jmeno, telefon, email, masaz, poznamka, poukaz_kod, stav, cena, klientka_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'cekajici',$11,$12) RETURNING *`,
+      [cenik_id, datum, cas_od, cas_do, jmeno, telefon, email || null, nazevMasaze, celaPoznamka, poukaz_kod || null, polozkaCeniku.cena, klientkaId]
     );
 
     await client.query('COMMIT');
-
-    // Alergie/preference se ukládají k zákaznici (podle telefonu), ať je Alena vidí
-    // příště u každé další rezervace, ne jen jako poznámku u tohohle jednoho termínu.
-    if (alergie || preference) {
-      db.query(
-        `INSERT INTO zakaznici (telefon, jmeno, email, alergie, preference, upraveno) VALUES ($1,$2,$3,$4,$5,now())
-         ON CONFLICT (telefon) DO UPDATE SET
-           jmeno = COALESCE($2, zakaznici.jmeno),
-           email = COALESCE($3, zakaznici.email),
-           alergie = COALESCE($4, zakaznici.alergie),
-           preference = COALESCE($5, zakaznici.preference),
-           upraveno = now()`,
-        [telefon.trim(), jmeno || null, email || null, alergie || null, preference || null]
-      ).catch(() => {});
-    }
 
     if (souhlas_newsletter && email) {
       const token = crypto.randomBytes(20).toString('hex');
@@ -730,10 +722,12 @@ app.post('/api/admin/rezervace', async (req, res) => {
     });
     if (koliduje) { await client.query('ROLLBACK'); return res.status(409).json({ chyba: 'Tento termín koliduje s jinou rezervací (nebo je jí příliš blízko).' }); }
 
+    const klientkaId = await najitNeboVytvoritKlientku(client, { jmeno, telefon, email });
+
     const { rows: [rezervace] } = await client.query(
-      `INSERT INTO rezervace (cenik_id, datum, cas_od, cas_do, jmeno, telefon, email, masaz, poznamka, stav, cena)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'potvrzena',$10) RETURNING *`,
-      [cenik_id, datum, cas_od, cas_do, jmeno, telefon || null, email || null, nazevMasaze, poznamka || null, polozkaCeniku.cena]
+      `INSERT INTO rezervace (cenik_id, datum, cas_od, cas_do, jmeno, telefon, email, masaz, poznamka, stav, cena, klientka_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'potvrzena',$10,$11) RETURNING *`,
+      [cenik_id, datum, cas_od, cas_do, jmeno, telefon || null, email || null, nazevMasaze, poznamka || null, polozkaCeniku.cena, klientkaId]
     );
 
     await client.query('COMMIT');
@@ -831,9 +825,20 @@ app.patch('/api/admin/rezervace/:id', async (req, res) => {
     // Jen oprava jména/telefonu/e-mailu/poznámky termín nemění, takže se
     // pripomenuto nedotýká (Fáze 5B, bod 3). pozadano_recenze se nedotýká nikdy
     // — recenze je nezávislý mechanismus mimo rozsah téhle fáze.
+    //
+    // Klientka (Fáze 6D) se znovu určuje podle AKTUÁLNÍHO (možná změněného)
+    // telefonu při každé editaci — nejde jen "přepsat" rezervace.telefon a
+    // nechat klientka_id ukazovat na starý profil. Když se telefon nezměnil,
+    // najitNeboVytvoritKlientku najde tu samou klientku (žádná změna). Když se
+    // telefon změnil, napojí se na jinou (existující nebo nově založenou)
+    // klientku — PŮVODNÍ klientce se přitom telefon nikdy nepřepisuje (viz
+    // komentář u funkce), takže žádná jiná rezervace/poukaz navázaný na ni se
+    // touhle editací nedotkne.
+    const klientkaId = await najitNeboVytvoritKlientku(client, { jmeno, telefon, email });
+
     await client.query(
-      `UPDATE rezervace SET cenik_id=$1, datum=$2, cas_od=$3, cas_do=$4, jmeno=$5, telefon=$6, email=$7, masaz=$8, poznamka=$9, cena=$10${terminSeMeni ? ', pripomenuto=false, pripomenuto_pokus_kdy=NULL' : ''} WHERE id=$11`,
-      [cenik_id, datum, cas_od, cas_do, jmeno, telefon, email || null, nazevMasaze, poznamka || null, polozkaCeniku.cena, req.params.id]
+      `UPDATE rezervace SET cenik_id=$1, datum=$2, cas_od=$3, cas_do=$4, jmeno=$5, telefon=$6, email=$7, masaz=$8, poznamka=$9, cena=$10, klientka_id=$11${terminSeMeni ? ', pripomenuto=false, pripomenuto_pokus_kdy=NULL' : ''} WHERE id=$12`,
+      [cenik_id, datum, cas_od, cas_do, jmeno, telefon, email || null, nazevMasaze, poznamka || null, polozkaCeniku.cena, klientkaId, req.params.id]
     );
     // Cena se mohla změnit (jiná masáž) — uhrazeno se nedotýká, jen se z něj a
     // z (nové) ceny přepočte stav_platby (viz komentář u funkce výš).
@@ -1096,29 +1101,42 @@ app.get('/api/admin/poukazy', async (req, res) => {
 app.post('/api/admin/poukazy', async (req, res) => {
   const { poukaz_typ_id, cenik_id, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, zakoupeno_kde } = req.body || {};
   if (!poukaz_typ_id && !cenik_id) return res.status(400).json({ chyba: 'Vyberte variantu poukazu nebo konkrétní masáž.' });
+  const client = await db.connect();
   try {
+    await client.query('BEGIN');
     let hodnota, platnostMesicu, konkretniMasaz = null;
     if (cenik_id) {
-      const { rows: [polozka] } = await db.query('SELECT * FROM cenik WHERE id = $1', [cenik_id]);
-      if (!polozka) return res.status(404).json({ chyba: 'Tato masáž nebyla v ceníku nalezena.' });
+      const { rows: [polozka] } = await client.query('SELECT * FROM cenik WHERE id = $1', [cenik_id]);
+      if (!polozka) { await client.query('ROLLBACK'); return res.status(404).json({ chyba: 'Tato masáž nebyla v ceníku nalezena.' }); }
       hodnota = polozka.cena;
       platnostMesicu = 12;
       konkretniMasaz = polozka.skupina + ' – ' + polozka.varianta;
     } else {
-      const { rows: [typ] } = await db.query('SELECT * FROM poukazy_typy WHERE id = $1', [poukaz_typ_id]);
-      if (!typ) return res.status(404).json({ chyba: 'Tato varianta poukazu nebyla nalezena.' });
+      const { rows: [typ] } = await client.query('SELECT * FROM poukazy_typy WHERE id = $1', [poukaz_typ_id]);
+      if (!typ) { await client.query('ROLLBACK'); return res.status(404).json({ chyba: 'Tato varianta poukazu nebyla nalezena.' }); }
       hodnota = typ.hodnota;
       platnostMesicu = typ.platnost_mesicu;
     }
     const platnostDo = new Date();
     platnostDo.setMonth(platnostDo.getMonth() + platnostMesicu);
-    const { rows: [poukaz] } = await db.query(
-      `INSERT INTO poukazy (kod, ean, hodnota, zustatek, platnost_do, zakoupeno_kde, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, konkretni_masaz, stav)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'aktivni') RETURNING *`,
-      [vygenerovatKod(), vygenerovatEan(), hodnota, hodnota, platnostDo.toISOString().slice(0, 10), zakoupeno_kde || 'osobne', kupujici_jmeno || null, kupujici_email || null, kupujici_telefon || null, pro_koho || null, konkretniMasaz]
+
+    // Klientka (Fáze 6D) — jen pokud je vyplněný telefon; bez telefonu zůstává
+    // klientka_id NULL (nelze bezpečně určit jen podle jména/e-mailu).
+    const klientkaId = await najitNeboVytvoritKlientku(client, { jmeno: kupujici_jmeno, telefon: kupujici_telefon, email: kupujici_email });
+
+    const { rows: [poukaz] } = await client.query(
+      `INSERT INTO poukazy (kod, ean, hodnota, zustatek, platnost_do, zakoupeno_kde, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, konkretni_masaz, stav, klientka_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'aktivni',$12) RETURNING *`,
+      [vygenerovatKod(), vygenerovatEan(), hodnota, hodnota, platnostDo.toISOString().slice(0, 10), zakoupeno_kde || 'osobne', kupujici_jmeno || null, kupujici_email || null, kupujici_telefon || null, pro_koho || null, konkretniMasaz, klientkaId]
     );
+    await client.query('COMMIT');
     res.json({ ok: true, poukaz });
-  } catch (e) { res.status(500).json({ chyba: e.message }); }
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch {}
+    res.status(500).json({ chyba: e.message });
+  } finally {
+    client.release();
+  }
 });
 
 app.patch('/api/admin/poukazy/:id/stav', async (req, res) => {
@@ -1220,24 +1238,34 @@ app.get('/api/admin/poukazy/zadosti', async (req, res) => {
 app.patch('/api/admin/poukazy/zadosti/:id/stav', async (req, res) => {
   const { stav } = req.body || {};
   if (!['nova', 'vyrizena', 'zamitnuta'].includes(stav)) return res.status(400).json({ chyba: 'Neplatný stav.' });
+  const client = await db.connect();
   try {
-    const { rows: [zadost] } = await db.query('SELECT * FROM poukazy_zadosti WHERE id = $1', [req.params.id]);
-    if (!zadost) return res.status(404).json({ chyba: 'Žádost nenalezena.' });
+    await client.query('BEGIN');
+    const { rows: [zadost] } = await client.query('SELECT * FROM poukazy_zadosti WHERE id = $1', [req.params.id]);
+    if (!zadost) { await client.query('ROLLBACK'); return res.status(404).json({ chyba: 'Žádost nenalezena.' }); }
 
-    await db.query('UPDATE poukazy_zadosti SET stav = $1 WHERE id = $2', [stav, req.params.id]);
+    await client.query('UPDATE poukazy_zadosti SET stav = $1 WHERE id = $2', [stav, req.params.id]);
 
     if (stav === 'vyrizena') {
       const platnostDo = new Date();
       platnostDo.setFullYear(platnostDo.getFullYear() + 1);
-      const { rows: [poukaz] } = await db.query(
-        `INSERT INTO poukazy (kod, ean, hodnota, zustatek, platnost_do, zakoupeno_kde, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, konkretni_masaz, zpusob_platby, stav)
-         VALUES ($1,$2,$3,$4,$5,'web',$6,$7,$8,$9,$10,$11,'aktivni') RETURNING *`,
-        [vygenerovatKod(), vygenerovatEan(), zadost.hodnota, zadost.hodnota, platnostDo.toISOString().slice(0, 10), zadost.kupujici_jmeno, zadost.kupujici_email, zadost.kupujici_telefon, zadost.pro_koho, zadost.konkretni_masaz, zadost.zpusob_platby]
+      const klientkaId = await najitNeboVytvoritKlientku(client, { jmeno: zadost.kupujici_jmeno, telefon: zadost.kupujici_telefon, email: zadost.kupujici_email });
+      const { rows: [poukaz] } = await client.query(
+        `INSERT INTO poukazy (kod, ean, hodnota, zustatek, platnost_do, zakoupeno_kde, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, konkretni_masaz, zpusob_platby, stav, klientka_id)
+         VALUES ($1,$2,$3,$4,$5,'web',$6,$7,$8,$9,$10,$11,'aktivni',$12) RETURNING *`,
+        [vygenerovatKod(), vygenerovatEan(), zadost.hodnota, zadost.hodnota, platnostDo.toISOString().slice(0, 10), zadost.kupujici_jmeno, zadost.kupujici_email, zadost.kupujici_telefon, zadost.pro_koho, zadost.konkretni_masaz, zadost.zpusob_platby, klientkaId]
       );
+      await client.query('COMMIT');
       return res.json({ ok: true, poukaz });
     }
+    await client.query('COMMIT');
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ chyba: e.message }); }
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch {}
+    res.status(500).json({ chyba: e.message });
+  } finally {
+    client.release();
+  }
 });
 
 app.delete('/api/admin/poukazy/zadosti/:id', async (req, res) => {
@@ -1427,6 +1455,155 @@ app.post('/api/admin/migrace-2026-09-klientky', async (req, res) => {
   } finally {
     client.release();
   }
+});
+
+// -- Klientky (Fáze 6D) — NOVÝ zdroj pravdy pro CRM, nahrazuje seskupování
+// podle telefonu (spocitatKlientky/"zakaznici" níž zůstávají beze změny jako
+// dočasná kompatibilní vrstva, ale admin.html od téhle fáze čte a zapisuje
+// primárně tady). Stejná pravidla jako Fáze 6B, jen napojení přes klientka_id
+// (skutečná FK), ne přes shodu telefonního řetězce:
+// - "pocetNavstev"/"celkemUtraceno" jen ze stav='dokoncena', částka z
+//   rezervace.uhrazeno (skutečně zaplaceno, ne cena),
+// - "posledniNavstiva" jen z dokončených,
+// - "dalsiRezervace" nejbližší budoucí, není zrušená/nedostavila se,
+// - "prumernaNavsteva" = celkemUtraceno/pocetNavstev, null při 0 návštěvách,
+// - "aktivniPoukazy" jen stav='aktivni'.
+async function nacistKlientkyReal() {
+  const [klienti, rez, pouk] = await Promise.all([
+    db.query('SELECT * FROM klientky WHERE aktivni = true'),
+    db.query(`SELECT id, klientka_id, jmeno, telefon, email, datum, cas_od, cas_do, masaz, cena, uhrazeno,
+                      stav, stav_platby, zpusob_platby, poukaz_kod, poznamka
+               FROM rezervace WHERE klientka_id IS NOT NULL`),
+    db.query('SELECT klientka_id, stav FROM poukazy WHERE klientka_id IS NOT NULL')
+  ]);
+
+  const mapa = new Map();
+  klienti.rows.forEach(k => mapa.set(k.id, {
+    id: k.id, jmeno: k.jmeno, telefon: k.telefon, email: k.email,
+    poznamka: k.poznamka || '', alergie: k.alergie || '', preference: k.preference || '',
+    pocetNavstev: 0, celkemUtraceno: 0, posledniNavstiva: null, dalsiRezervace: null,
+    aktivniPoukazy: 0, rezervace: []
+  }));
+
+  const ted = new Date();
+  rez.rows.forEach(r => {
+    const k = mapa.get(r.klientka_id);
+    if (!k) return; // FK garantuje konzistenci, ale pro jistotu
+    k.rezervace.push({
+      id: r.id, datum: r.datum, cas_od: r.cas_od, cas_do: r.cas_do, masaz: r.masaz,
+      cena: Number(r.cena) || 0, uhrazeno: Number(r.uhrazeno) || 0, stav: r.stav,
+      stav_platby: r.stav_platby, zpusob_platby: r.zpusob_platby,
+      poukaz_kod: r.poukaz_kod, poznamka: r.poznamka
+    });
+    if (r.stav === 'dokoncena') {
+      k.pocetNavstev++;
+      k.celkemUtraceno += Number(r.uhrazeno) || 0;
+      if (!k.posledniNavstiva || r.datum > k.posledniNavstiva) k.posledniNavstiva = r.datum;
+    }
+    if (!['zrusena', 'nedostavila_se'].includes(r.stav)) {
+      const terminCas = new Date(r.datum + 'T' + String(r.cas_od).slice(0, 5) + ':00');
+      if (terminCas > ted) {
+        const stavajiciCas = k.dalsiRezervace
+          ? new Date(k.dalsiRezervace.datum + 'T' + String(k.dalsiRezervace.cas_od).slice(0, 5) + ':00')
+          : null;
+        if (!stavajiciCas || terminCas < stavajiciCas) {
+          k.dalsiRezervace = { datum: r.datum, cas_od: r.cas_od, cas_do: r.cas_do, masaz: r.masaz, stav: r.stav };
+        }
+      }
+    }
+  });
+  pouk.rows.forEach(p => {
+    const k = mapa.get(p.klientka_id);
+    if (!k) return;
+    if (p.stav === 'aktivni') k.aktivniPoukazy++;
+  });
+
+  mapa.forEach(k => {
+    k.prumernaNavsteva = k.pocetNavstev > 0 ? Math.round(k.celkemUtraceno / k.pocetNavstev) : null;
+    k.rezervace.sort((a, b) => (b.datum + String(b.cas_od)).localeCompare(a.datum + String(a.cas_od)));
+  });
+
+  return mapa; // Map<klientka.id, {...}>
+}
+
+app.get('/api/admin/klientky', async (req, res) => {
+  try {
+    const mapa = await nacistKlientkyReal();
+    const seznam = [...mapa.values()]
+      .map(({ rezervace, ...zbytek }) => zbytek)
+      .sort((a, b) => {
+        if (!a.posledniNavstiva) return 1;
+        if (!b.posledniNavstiva) return -1;
+        return b.posledniNavstiva.localeCompare(a.posledniNavstiva);
+      });
+    res.json(seznam);
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
+app.get('/api/admin/klientky/:id', async (req, res) => {
+  try {
+    const mapa = await nacistKlientkyReal();
+    const k = mapa.get(Number(req.params.id));
+    if (!k) return res.status(404).json({ chyba: 'Klientka nebyla nalezena.' });
+    res.json(k);
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
+// Ruční přidání klientky bez rezervace (nebo doplnění jména/e-mailu k
+// existující) — najde/založí podle normalizovaného telefonu, stejně jako
+// najitNeboVytvoritKlientku, ale mimo transakci rezervace/poukazu.
+app.post('/api/admin/klientky', async (req, res) => {
+  const { telefon, jmeno, email, poznamka, alergie, preference } = req.body || {};
+  if (!telefon) return res.status(400).json({ chyba: 'Chybí telefon.' });
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const id = await najitNeboVytvoritKlientku(client, { jmeno, telefon, email, alergie, preference, poznamka });
+    const { rows: [klientka] } = await client.query('SELECT * FROM klientky WHERE id = $1', [id]);
+    await client.query('COMMIT');
+    res.json({ ok: true, klientka });
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch {}
+    res.status(500).json({ chyba: e.message });
+  } finally {
+    client.release();
+  }
+});
+
+// Úprava poznámky/alergie/preference existující klientky — přímé nastavení
+// (ne COALESCE), stejné chování jako dřívější PUT /api/admin/zakaznici/poznamka:
+// admin tu explicitně zadává hodnotu, prázdné pole hodnotu smaže.
+app.put('/api/admin/klientky/:id', async (req, res) => {
+  const { poznamka, alergie, preference } = req.body || {};
+  try {
+    const { rows: [klientka] } = await db.query(
+      'UPDATE klientky SET poznamka = $2, alergie = $3, preference = $4, upraveno = now() WHERE id = $1 RETURNING *',
+      [req.params.id, poznamka || null, alergie || null, preference || null]
+    );
+    if (!klientka) return res.status(404).json({ chyba: 'Klientka nebyla nalezena.' });
+    res.json({ ok: true, klientka });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
+// Smazání klientky — POVOLENO jen když nemá žádnou rezervaci ani poukaz (jinak
+// by se nenávratně přišlo o CRM vazbu na reálnou historii — na rozdíl od staré
+// "zakaznici", kde se řádek při dalším načtení tiše obnovil, tady je klientka
+// skutečná trvalá entita, viz Fáze 6C/6D). Historické rezervace/poukazy samotné
+// se tímhle nikdy nemažou.
+app.delete('/api/admin/klientky/:id', async (req, res) => {
+  try {
+    const { rows: [pocty] } = await db.query(
+      `SELECT
+         (SELECT count(*) FROM rezervace WHERE klientka_id = $1) AS rezervaci,
+         (SELECT count(*) FROM poukazy WHERE klientka_id = $1) AS poukazu`,
+      [req.params.id]
+    );
+    if (Number(pocty.rezervaci) > 0 || Number(pocty.poukazu) > 0) {
+      return res.status(400).json({ chyba: `Klientku nelze smazat — má ${pocty.rezervaci} rezervací a ${pocty.poukazu} poukazů, historie by se ztratila.` });
+    }
+    await db.query('DELETE FROM klientky WHERE id = $1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
 // -- Zákazníci (ručně přidané + odvozené z rezervací a poukazů, seskupeno podle
