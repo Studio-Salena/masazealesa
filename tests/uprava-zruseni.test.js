@@ -59,11 +59,18 @@ async function vytvorRezervaci(cenikId, telefonSuffix, odpocetDni) {
   });
   const data = await res.json();
   assert.equal(res.status, 200, 'Vytvoření testovací rezervace selhalo: ' + JSON.stringify(data));
+  // Od Fáze 6D vytvoření rezervace s telefonem vždy najde/založí klientku —
+  // sledujeme klientka_id, ať ji "finally" uklidí stejně jako rezervaci.
+  if (data.rezervace.klientka_id) uklidKlientky.add(data.rezervace.klientka_id);
   return data.rezervace;
 }
 async function upravit(id, zmeny) {
   const res = await adminFetch(`/admin/rezervace/${id}`, { method: 'PATCH', body: JSON.stringify(zmeny) });
-  return { status: res.status, data: await res.json() };
+  const data = await res.json();
+  // Editace se ZMĚNOU telefonu (Test 5) může napojit rezervaci na JINOU
+  // (novou) klientku — sledujeme i tenhle případ, ať se po testu uklidí i ta.
+  if (data.rezervace && data.rezervace.klientka_id) uklidKlientky.add(data.rezervace.klientka_id);
+  return { status: res.status, data };
 }
 async function historiePlateb(id) {
   return adminFetch(`/admin/rezervace/${id}/platby`).then(r => r.json());
@@ -71,6 +78,7 @@ async function historiePlateb(id) {
 
 const uklidRezervace = [];
 const uklidPoukazy = [];
+const uklidKlientky = new Set();
 
 async function main() {
   try {
@@ -169,8 +177,10 @@ async function main() {
       const { datum, cas1, cas2 } = await dvaVolneTerminySameDen(polozka.id, 30 + Math.floor(Math.random() * 100));
       const rA = await adminFetch('/admin/rezervace', { method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, datum, cas_od: cas1, jmeno: 'TEST-UPRAVA-A (smazat)', telefon: '000000035' }) }).then(x => x.json());
       uklidRezervace.push(rA.rezervace.id);
+      if (rA.rezervace.klientka_id) uklidKlientky.add(rA.rezervace.klientka_id);
       const rB = await adminFetch('/admin/rezervace', { method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, datum, cas_od: cas2, jmeno: 'TEST-UPRAVA-B (smazat)', telefon: '000000036' }) }).then(x => x.json());
       uklidRezervace.push(rB.rezervace.id);
+      if (rB.rezervace.klientka_id) uklidKlientky.add(rB.rezervace.klientka_id);
 
       const t = zakladniTvar(rB.rezervace); t.cas_od = cas1; // pokusit se přesunout B na čas A
       const { status, data } = await upravit(rB.rezervace.id, t);
@@ -374,8 +384,17 @@ async function main() {
   } finally {
     for (const id of uklidRezervace) await adminFetch(`/admin/rezervace/${id}`, { method: 'DELETE' });
     for (const id of uklidPoukazy) await adminFetch(`/admin/poukazy/${id}`, { method: 'DELETE' });
-    if (uklidRezervace.length || uklidPoukazy.length) {
-      console.log(`(uklizeno: ${uklidRezervace.length} testovacích rezervací, ${uklidPoukazy.length} testovacích poukazů)`);
+    // Klientky se mažou AŽ TEĎ, po smazání rezervací/poukazů — DELETE
+    // /api/admin/klientky/:id sám odmítne smazání, dokud klientka má
+    // jakoukoli vazbu, takže tohle nikdy nesmaže nic, co ještě patří jiné
+    // (třeba reálné) rezervaci/poukazu.
+    let klientkySmazano = 0;
+    for (const id of uklidKlientky) {
+      const r = await adminFetch(`/admin/klientky/${id}`, { method: 'DELETE' }).catch(() => null);
+      if (r && r.ok) klientkySmazano++;
+    }
+    if (uklidRezervace.length || uklidPoukazy.length || uklidKlientky.size) {
+      console.log(`(uklizeno: ${uklidRezervace.length} testovacích rezervací, ${uklidPoukazy.length} testovacích poukazů, ${klientkySmazano}/${uklidKlientky.size} testovacích klientek)`);
     }
   }
 }

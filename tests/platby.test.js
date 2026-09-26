@@ -45,11 +45,16 @@ async function vytvorRezervaci(cenikId, telefonSuffix, extra = {}) {
   });
   const data = await res.json();
   assert.equal(res.status, 200, 'Vytvoření testovací rezervace selhalo: ' + JSON.stringify(data));
+  // Od Fáze 6D vytvoření rezervace s telefonem vždy najde/založí klientku —
+  // sledujeme klientka_id, ať ji "finally" po testu uklidí stejně jako
+  // samotnou rezervaci (viz uklidKlientky níž).
+  if (data.rezervace.klientka_id) uklidKlientky.add(data.rezervace.klientka_id);
   return data.rezervace;
 }
 
 const uklidRezervace = [];
 const uklidPoukazy = [];
+const uklidKlientky = new Set();
 
 async function main() {
   try {
@@ -220,8 +225,16 @@ async function main() {
     for (const id of uklidPoukazy) {
       await adminFetch(`/admin/poukazy/${id}`, { method: 'DELETE' });
     }
-    if (uklidRezervace.length || uklidPoukazy.length) {
-      console.log(`(uklizeno: ${uklidRezervace.length} testovacích rezervací, ${uklidPoukazy.length} testovacích poukazů)`);
+    // Klientky se mažou AŽ TEĎ, po smazání rezervací/poukazů — DELETE
+    // /api/admin/klientky/:id sám odmítne smazání, dokud klientka má
+    // jakoukoli vazbu, takže tohle nikdy nesmaže nic cizího.
+    let klientkySmazano = 0;
+    for (const id of uklidKlientky) {
+      const r = await adminFetch(`/admin/klientky/${id}`, { method: 'DELETE' }).catch(() => null);
+      if (r && r.ok) klientkySmazano++;
+    }
+    if (uklidRezervace.length || uklidPoukazy.length || uklidKlientky.size) {
+      console.log(`(uklizeno: ${uklidRezervace.length} testovacích rezervací, ${uklidPoukazy.length} testovacích poukazů, ${klientkySmazano}/${uklidKlientky.size} testovacích klientek)`);
     }
   }
 }

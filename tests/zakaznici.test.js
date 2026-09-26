@@ -48,6 +48,10 @@ async function vytvorRezervaci(cenikId, telefon, odpocetDni, jmeno) {
   });
   const data = await res.json();
   assert.equal(res.status, 200, 'Vytvoření testovací rezervace selhalo: ' + JSON.stringify(data));
+  // Od Fáze 6D vytvoření rezervace s telefonem vždy najde/založí klientku
+  // (najitNeboVytvoritKlientku) — sledujeme klientka_id, ať ji "finally" po
+  // testu uklidí stejně jako samotnou rezervaci (viz uklidKlientky níž).
+  if (data.rezervace.klientka_id) uklidKlientky.add(data.rezervace.klientka_id);
   return data.rezervace;
 }
 // Kolik dní od dneška je zadané datum (celé dny, zaokrouhleno nahoru) — used
@@ -95,6 +99,7 @@ function odpovidaFiltru(z, hledatRaw) {
 const uklidRezervace = [];
 const uklidPoukazy = [];
 const uklidZakaznice = [];
+const uklidKlientky = new Set();
 
 async function main() {
   try {
@@ -325,6 +330,7 @@ async function main() {
     const verejnaData = await verejnaRes.json();
     assert.equal(verejnaRes.status, 200, 'Veřejná rezervace selhala: ' + JSON.stringify(verejnaData));
     uklidRezervace.push(verejnaData.rezervace.id);
+    if (verejnaData.rezervace.klientka_id) uklidKlientky.add(verejnaData.rezervace.klientka_id);
     console.log('OK (28) — veřejná rezervace stále funguje beze změny');
 
     console.log('\n✅ VŠECHNY TESTY ZÁKAZNIC/CRM (Fáze 6B) PROŠLY');
@@ -332,7 +338,15 @@ async function main() {
     for (const id of uklidRezervace) await adminFetch(`/admin/rezervace/${id}`, { method: 'DELETE' }).catch(() => {});
     for (const id of uklidPoukazy) await adminFetch(`/admin/poukazy/${id}`, { method: 'DELETE' }).catch(() => {});
     for (const tel of uklidZakaznice) await adminFetch(`/admin/zakaznici/${encodeURIComponent(tel)}`, { method: 'DELETE' }).catch(() => {});
-    console.log(`(uklizeno: ${uklidRezervace.length} testovacích rezervací, ${uklidPoukazy.length} testovacích poukazů)`);
+    // Klientky (Fáze 6D) se mažou AŽ TEĎ, po smazání rezervací/poukazů, které
+    // na ně ukazovaly — DELETE /api/admin/klientky/:id sám odmítne smazání,
+    // dokud klientka má jakoukoli vazbu, takže tohle nikdy nesmaže nic cizího.
+    let klientkySmazano = 0;
+    for (const id of uklidKlientky) {
+      const r = await adminFetch(`/admin/klientky/${id}`, { method: 'DELETE' }).catch(() => null);
+      if (r && r.ok) klientkySmazano++;
+    }
+    console.log(`(uklizeno: ${uklidRezervace.length} testovacích rezervací, ${uklidPoukazy.length} testovacích poukazů, ${klientkySmazano}/${uklidKlientky.size} testovacích klientek)`);
   }
 }
 

@@ -42,6 +42,10 @@ async function vytvorRezervaci(cenikId, telefonSuffix, odpocetDni) {
   });
   const data = await res.json();
   assert.equal(res.status, 200, 'Vytvoření testovací rezervace selhalo: ' + JSON.stringify(data));
+  // Od Fáze 6D vytvoření rezervace s telefonem vždy najde/založí klientku
+  // (najitNeboVytvoritKlientku) — sledujeme klientka_id, ať ji "finally" po
+  // testu uklidí stejně jako samotnou rezervaci (viz uklidKlientky níž).
+  if (data.rezervace.klientka_id) uklidKlientky.add(data.rezervace.klientka_id);
   return data.rezervace;
 }
 async function platba(id, castka, zpusob_platby, typ) {
@@ -55,6 +59,7 @@ async function historiePlateb(id) {
 
 const uklidRezervace = [];
 const uklidPoukazy = [];
+const uklidKlientky = new Set();
 
 async function main() {
   try {
@@ -306,8 +311,17 @@ async function main() {
   } finally {
     for (const id of uklidRezervace) await adminFetch(`/admin/rezervace/${id}`, { method: 'DELETE' });
     for (const id of uklidPoukazy) await adminFetch(`/admin/poukazy/${id}`, { method: 'DELETE' });
-    if (uklidRezervace.length || uklidPoukazy.length) {
-      console.log(`(uklizeno: ${uklidRezervace.length} testovacích rezervací, ${uklidPoukazy.length} testovacích poukazů)`);
+    // Klientky se mažou AŽ TEĎ, po smazání rezervací/poukazů, které na ně
+    // ukazovaly — DELETE /api/admin/klientky/:id sám odmítne smazání, pokud
+    // klientka pořád má nějakou vazbu (viz server), takže tohle nikdy nesmaže
+    // nic, co ještě patří jiné (třeba reálné) rezervaci/poukazu.
+    let klientkySmazano = 0;
+    for (const id of uklidKlientky) {
+      const r = await adminFetch(`/admin/klientky/${id}`, { method: 'DELETE' }).catch(() => null);
+      if (r && r.ok) klientkySmazano++;
+    }
+    if (uklidRezervace.length || uklidPoukazy.length || uklidKlientky.size) {
+      console.log(`(uklizeno: ${uklidRezervace.length} testovacích rezervací, ${uklidPoukazy.length} testovacích poukazů, ${klientkySmazano}/${uklidKlientky.size} testovacích klientek)`);
     }
   }
 }

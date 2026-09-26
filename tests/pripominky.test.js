@@ -74,6 +74,7 @@ function vyhodnotNastaveni(mapa) {
 
 async function main() {
   let rezervaceId = null;
+  let klientkaId = null;
   const puvodniNastaveni = {};
 
   try {
@@ -157,6 +158,9 @@ async function main() {
     const vytvor = await vytvorRes.json();
     assert.equal(vytvorRes.status, 200, 'Vytvoření testovací rezervace selhalo: ' + JSON.stringify(vytvor));
     rezervaceId = vytvor.rezervace.id;
+    // Od Fáze 6D vytvoření rezervace s telefonem vždy najde/založí klientku —
+    // sledujeme klientka_id, ať ji "finally" uklidí stejně jako rezervaci.
+    klientkaId = vytvor.rezervace.klientka_id;
     assert.equal(vytvor.rezervace.pripomenuto, false, 'nová rezervace musí mít pripomenuto=false');
     console.log('OK — testovací rezervace vytvořena, pripomenuto=false');
 
@@ -191,6 +195,12 @@ async function main() {
     if (rezervaceId) {
       await adminFetch(`/admin/rezervace/${rezervaceId}`, { method: 'DELETE' });
       console.log('(testovací rezervace smazána)');
+    }
+    // Klientka se maže AŽ TEĎ, po smazání rezervace — DELETE
+    // /api/admin/klientky/:id sám odmítne smazání, dokud má jakoukoli vazbu.
+    if (klientkaId) {
+      const r = await adminFetch(`/admin/klientky/${klientkaId}`, { method: 'DELETE' }).catch(() => null);
+      console.log(r && r.ok ? '(testovací klientka smazána)' : '(testovací klientku se nepodařilo smazat — možná má ještě jinou vazbu)');
     }
   }
 }
