@@ -206,11 +206,6 @@ async function main() {
     assert.equal(Number(historiePlateb[0].castka), cena);
     console.log('OK — deník plateb (Fáze 3B) beze změny i po zavedení klientka_id');
 
-    // ================= 11) REGRESE: KATEGORIE ZAKAZNICI (stará kompatibilní vrstva) BEZE ZMĚNY =================
-    const staryZakazniciSeznam = await adminFetch('/admin/zakaznici').then(res => res.json());
-    assert.ok(Array.isArray(staryZakazniciSeznam), 'Starý endpoint /api/admin/zakaznici musí dál fungovat (kompatibilní vrstva)');
-    console.log('OK — starý endpoint /api/admin/zakaznici dál funguje beze změny (dočasná kompatibilní vrstva)');
-
     // ================= 12) BEZPEČNOST: klientky jsou jen za admin heslem =================
     const bezHesla = await fetch(API + '/admin/klientky');
     assert.equal(bezHesla.status, 401, '/api/admin/klientky bez hesla musí vrátit 401');

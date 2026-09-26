@@ -1688,10 +1688,12 @@ function vykreslitNahledPoukazu() {
   `;
 }
 
-// ── ZÁKAZNÍCI / KLIENTKY ── Od Fáze 6D čte a zapisuje primárně
-// /api/admin/klientky (skutečná entita s vlastním id, viz Fáze 6C/6D) —
-// dřívější /api/admin/zakaznici (podle telefonu) zůstává v serveru jen jako
-// dočasná kompatibilní vrstva, admin.html už ji nepoužívá.
+// ── ZÁKAZNÍCI / KLIENTKY ── Od Fáze 6D čte a zapisuje výhradně
+// /api/admin/klientky (skutečná entita s vlastním id, viz Fáze 6C/6D).
+// Starší model /api/admin/zakaznici (podle telefonu) byl po ověřeném
+// přechodu odstraněn ve Fázi 7B.2. Názvy proměnných/ID prvků v týhle
+// sekci ("zakaznici...") jsou jen pozůstatek pojmenování z doby před
+// přechodem — funkčně na starém modelu nezávisí.
 let posledniZakaznici = [];
 async function loadZakaznici() {
   try {

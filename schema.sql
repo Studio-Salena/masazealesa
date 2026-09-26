@@ -166,24 +166,12 @@ create table if not exists poukazy (
     -- zůstává klientka_id NULL (nelze bezpečně určit), kupujici_* pole ZŮSTÁVAJÍ jako snímek
 );
 
--- Zákaznice zadané ručně v adminu (bez rezervace) + poznámky, klíčované podle
--- telefonu. Seznam zákaznic v adminu je sloučením téhle tabulky s tím, co lze
--- odvodit z rezervací a poukazů (podle telefonu).
-create table if not exists zakaznici (
-  telefon text primary key,
-  jmeno text,
-  email text,
-  poznamka text,
-  alergie text, -- např. alergie na konkrétní oleje
-  preference text, -- např. preference síly tlaku
-  upraveno timestamptz not null default now()
-);
-
 -- Fáze 6D: skutečná klientská entita s vlastním id — nahrazuje telefon jako
--- identitu (viz audit/návrh Fáze 6C). Tabulka "zakaznici" výš ZŮSTÁVÁ (dočasně,
--- pro zpětnou kompatibilitu) — "klientky" je od Fáze 6D nový zdroj pravdy pro
--- CRM (jméno/kontakt/alergie/preference/poznámka) a napojuje se na rezervace a
--- poukazy přes klientka_id (viz FK níž).
+-- identitu (viz audit/návrh Fáze 6C). Starší tabulka "zakaznici" (klíčovaná
+-- přímo telefonem, s odvozeným sloučením podle rezervací/poukazů) byla po
+-- ověřeném přechodu odstraněna ve Fázi 7B.2 — "klientky" je jediný zdroj
+-- pravdy pro CRM (jméno/kontakt/alergie/preference/poznámka) a napojuje se
+-- na rezervace a poukazy přes klientka_id (viz FK níž).
 create table if not exists klientky (
   id serial primary key,
   jmeno text,
