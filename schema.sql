@@ -98,7 +98,10 @@ create table if not exists rezervace (
   zpusob_platby text, -- hotove | kartou | online | poukaz — vždy způsob POSLEDNÍ transakce v "platby"
   uhrazeno numeric not null default 0, -- vždy = SUM(platby.castka) pro tuhle rezervaci, viz níž
   uhrazeno_kdy timestamptz, -- nastaveno, jen když je stav_platby právě teď "zaplaceno" (jinak null)
-  vytvoreno timestamptz not null default now()
+  vytvoreno timestamptz not null default now(),
+  klientka_id integer -- Fáze 6D: vazba na klientky(id), FK přidaná až níž (tabulka klientky
+    -- v souboru vzniká později) — nullable, jmeno/telefon/email tu ZŮSTÁVAJÍ jako
+    -- snímek z okamžiku rezervace, klientka_id je jen navíc pro CRM
 );
 
 -- Deník jednotlivých plateb a vratek k rezervaci (Fáze 3B). rezervace.uhrazeno/
@@ -158,7 +161,9 @@ create table if not exists poukazy (
   stav text not null default 'aktivni', -- aktivni | castecne_vyuzity | pouzity | zruseny
   -- "prošlý" se nikde neukládá jako stav — dopočítává se za běhu z platnost_do,
   -- ať je vždy aktuální bez nutnosti plánované úlohy, která by stav přepínala.
-  vytvoreno timestamptz not null default now()
+  vytvoreno timestamptz not null default now(),
+  klientka_id integer -- Fáze 6D: vazba na klientky(id), nullable — poukaz bez kupujici_telefon
+    -- zůstává klientka_id NULL (nelze bezpečně určit), kupujici_* pole ZŮSTÁVAJÍ jako snímek
 );
 
 -- Zákaznice zadané ručně v adminu (bez rezervace) + poznámky, klíčované podle
@@ -173,6 +178,40 @@ create table if not exists zakaznici (
   preference text, -- např. preference síly tlaku
   upraveno timestamptz not null default now()
 );
+
+-- Fáze 6D: skutečná klientská entita s vlastním id — nahrazuje telefon jako
+-- identitu (viz audit/návrh Fáze 6C). Tabulka "zakaznici" výš ZŮSTÁVÁ (dočasně,
+-- pro zpětnou kompatibilitu) — "klientky" je od Fáze 6D nový zdroj pravdy pro
+-- CRM (jméno/kontakt/alergie/preference/poznámka) a napojuje se na rezervace a
+-- poukazy přes klientka_id (viz FK níž).
+create table if not exists klientky (
+  id serial primary key,
+  jmeno text,
+  telefon text, -- RAW hodnota přesně tak, jak ji klientka/admin zadali — jen pro zobrazení
+  telefon_normalizovany text, -- jen číslice, tuzemská předvolba (420/00420) oříznutá — skutečný identifikační klíč
+  email text,
+  email_normalizovany text, -- lowercase + trim, pro case-insensitive hledání/shodu — NENÍ unique (víc klientek smí sdílet e-mail)
+  poznamka text,
+  alergie text,
+  preference text,
+  aktivni boolean not null default true, -- příprava na budoucí "deaktivaci" bez mazání (GDPR, řeší až pozdější fáze)
+  anonymizovano_kdy timestamptz, -- NULL dokud neproběhla anonymizace (GDPR, řeší až pozdější fáze)
+  vytvoreno timestamptz not null default now(),
+  upraveno timestamptz not null default now()
+);
+create unique index if not exists klientky_telefon_normalizovany_key
+  on klientky (telefon_normalizovany) where telefon_normalizovany is not null;
+
+-- FK z rezervace/poukazy na klientky — ON DELETE SET NULL: i budoucí smazání
+-- klientky nesmí smazat/poškodit historickou rezervaci, poukaz ani účetní
+-- záznam, jen ztratí vazbu na (už neexistující) klientku.
+-- Poznámka: "ADD CONSTRAINT IF NOT EXISTS" v PostgreSQL neexistuje (na rozdíl
+-- od "ADD COLUMN IF NOT EXISTS" výš) — tenhle soubor se ale spouští jen jednou
+-- na čerstvou databázi (viz hlavička souboru), takže prosté ADD CONSTRAINT stačí.
+alter table rezervace add constraint rezervace_klientka_id_fkey
+  foreign key (klientka_id) references klientky(id) on delete set null;
+alter table poukazy add constraint poukazy_klientka_id_fkey
+  foreign key (klientka_id) references klientky(id) on delete set null;
 
 -- Žádosti o poukaz z veřejného webového formuláře
 create table if not exists poukazy_zadosti (

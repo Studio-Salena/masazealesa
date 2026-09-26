@@ -76,6 +76,69 @@ async function ziskatNastaveniPripominek() {
   } catch { return { zapnuto: true, predstihHodin: 24 }; }
 }
 
+// ── Klientky (Fáze 6D) ──────────────────────────────────────────────────────
+// Telefon jako identita klientky se dřív porovnával jako holý text (viz stará
+// tabulka "zakaznici", klíčovaná přímo telefonem) — "606123456", "606 123 456"
+// a "+420606123456" byly tři různé profily. Normalizace (jen číslice, tuzemská
+// předvolba oříznutá) z nich udělá jednu shodnou hodnotu, ale RAW telefon se
+// nikdy nepřepisuje ani neztrácí — ukládá se vedle normalizované verze čistě
+// pro zobrazení (viz audit/návrh Fáze 6C).
+function normalizovatTelefon(raw) {
+  if (!raw) return null;
+  let cislice = String(raw).replace(/\D/g, '');
+  if (!cislice) return null;
+  if (cislice.startsWith('00420') && cislice.length === 14) cislice = cislice.slice(5);
+  else if (cislice.startsWith('420') && cislice.length === 12) cislice = cislice.slice(3);
+  // Jiný (zahraniční) tvar se nechává beze změny (jen bez mezer/pomlček) —
+  // nikdy neuhadovat/neořezávat cizí předvolbu naslepo (viz Fáze 6C, sekce 6).
+  return cislice;
+}
+function normalizovatEmail(raw) {
+  if (!raw) return null;
+  const t = String(raw).trim().toLowerCase();
+  return t || null;
+}
+
+// Najde klientku podle normalizovaného telefonu, nebo ji založí, pokud
+// neexistuje. Nikdy neslučuje podle jména/e-mailu (jen podle telefonu) a nikdy
+// nepřepisuje už vyplněné údaje existující klientky — jen COALESCE doplní to,
+// co ještě chybí (stejný princip jako dřívější upsert do "zakaznici").
+// Bez telefonu (poukaz bez kupujici_telefon) vrací null — nelze bezpečně určit
+// klientku jen podle jména/e-mailu, viz Fáze 6C/6D.
+// MUSÍ běžet uvnitř transakce (client), aby INSERT rezervace/poukazu a
+// napojení na klientku buď proběhly obě, nebo ani jedna. Advisory zámek na
+// (namespace + normalizovaný telefon) chrání proti tomu, aby dvě souběžné
+// rezervace úplně nové klientky obě zkusily založit stejný telefon_normalizovany
+// (což by jinak spadlo na UNIQUE indexu) — stejný princip jako zámek na datum
+// u rezervací, jen jiný "klíč".
+async function najitNeboVytvoritKlientku(client, { jmeno, telefon, email, alergie, preference }) {
+  const tn = normalizovatTelefon(telefon);
+  if (!tn) return null;
+  await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['klientka:' + tn]);
+
+  const { rows: [existujici] } = await client.query('SELECT id FROM klientky WHERE telefon_normalizovany = $1', [tn]);
+  if (existujici) {
+    await client.query(
+      `UPDATE klientky SET
+         jmeno = COALESCE(jmeno, $2),
+         email = COALESCE(email, $3),
+         email_normalizovany = COALESCE(email_normalizovany, $4),
+         alergie = COALESCE($5, alergie),
+         preference = COALESCE($6, preference),
+         upraveno = now()
+       WHERE id = $1`,
+      [existujici.id, jmeno || null, email || null, normalizovatEmail(email), alergie || null, preference || null]
+    );
+    return existujici.id;
+  }
+  const { rows: [nova] } = await client.query(
+    `INSERT INTO klientky (jmeno, telefon, telefon_normalizovany, email, email_normalizovany, alergie, preference)
+     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+    [jmeno || null, telefon || null, tn, email || null, normalizovatEmail(email), alergie || null, preference || null]
+  );
+  return nova.id;
+}
+
 // Přepočte rezervace.uhrazeno/stav_platby/zpusob_platby/uhrazeno_kdy jako souhrn
 // deníku "platby" pro danou rezervaci — VŽDY nově spočtený součet, ne postupné
 // přičítání, takže se nikdy nemůže rozejít s deníkem (jediný zdroj pravdy).
@@ -1182,6 +1245,188 @@ app.delete('/api/admin/poukazy/zadosti/:id', async (req, res) => {
     await db.query('DELETE FROM poukazy_zadosti WHERE id = $1', [req.params.id]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
+// DOČASNÝ migrační endpoint (Fáze 6D) — vytvoří tabulku "klientky" a napojí ji
+// na existující rezervace/poukazy podle normalizovaného telefonu. Tenhle
+// endpoint NIC neodstraňuje ani nepřepisuje existující data (zakaznici,
+// rezervace.jmeno/telefon/email, poukazy.kupujici_*) — jen přidává novou
+// tabulku a dva nové nullable sloupce. Celé běží v JEDNÉ transakci: pokud
+// backfill po sobě nechá byť jedinou rezervaci s telefonem a bez klientka_id,
+// celá migrace se vrátí zpět (ROLLBACK) a nic se nezapíše. FK se přidává
+// úplně naposled, až po ověření backfillu.
+// Po jednorázovém spuštění a ověření se tento endpoint v dalším commitu
+// odstraní (stejný vzor jako u předchozích fází).
+app.post('/api/admin/migrace-2026-09-klientky', async (req, res) => {
+  const client = await db.connect();
+  const zprava = { kroky: [], konflikty: [], moznaShoda: [] };
+  try {
+    await client.query('BEGIN');
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS klientky (
+        id serial primary key,
+        jmeno text,
+        telefon text,
+        telefon_normalizovany text,
+        email text,
+        email_normalizovany text,
+        poznamka text,
+        alergie text,
+        preference text,
+        aktivni boolean not null default true,
+        anonymizovano_kdy timestamptz,
+        vytvoreno timestamptz not null default now(),
+        upraveno timestamptz not null default now()
+      )
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS klientky_telefon_normalizovany_key
+      ON klientky (telefon_normalizovany) WHERE telefon_normalizovany IS NOT NULL
+    `);
+
+    const { rows: [{ pocet: pocetPred }] } = await client.query('SELECT count(*)::int AS pocet FROM klientky');
+    zprava.kroky.push({ krok: 'CREATE TABLE klientky (+ unique index)', klientekPredNaplnenim: pocetPred });
+
+    if (pocetPred > 0) {
+      // Bezpečnostní pojistka proti nechtěnému druhému spuštění — migrace dat
+      // (na rozdíl od CREATE TABLE) NENÍ idempotentní a nesmí se spustit dvakrát.
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        chyba: `Tabulka klientky už obsahuje ${pocetPred} řádků — migrace dat už zřejmě proběhla, nic jsem znovu nedělala.`,
+        zprava
+      });
+    }
+
+    // 1) Načtení všech tří zdrojů osobních údajů (nic se tu nemaže ani nemění).
+    const zak = (await client.query('SELECT telefon, jmeno, email, poznamka, alergie, preference FROM zakaznici')).rows;
+    const rez = (await client.query('SELECT id, jmeno, telefon, email, vytvoreno FROM rezervace ORDER BY vytvoreno ASC')).rows;
+    const pouk = (await client.query('SELECT id, kupujici_jmeno, kupujici_telefon, kupujici_email, vytvoreno FROM poukazy ORDER BY vytvoreno ASC')).rows;
+
+    // 2) Seskupení podle telefon_normalizovany — bezpečné automatické spojení
+    // JEN podle telefonu (nikdy podle jména/e-mailu, viz Fáze 6C/6D).
+    const skupiny = new Map();
+    function ziskejSkupinu(tn) {
+      if (!skupiny.has(tn)) skupiny.set(tn, { jmena: [], emaily: [], zakaznik: null, telefonyRaw: new Set() });
+      return skupiny.get(tn);
+    }
+    zak.forEach(z => {
+      const tn = normalizovatTelefon(z.telefon);
+      if (!tn) return;
+      const s = ziskejSkupinu(tn);
+      s.zakaznik = z;
+      s.telefonyRaw.add(z.telefon);
+      if (z.jmeno) s.jmena.push({ hodnota: z.jmeno, zdroj: 'zakaznici' });
+      if (z.email) s.emaily.push({ hodnota: z.email, zdroj: 'zakaznici' });
+    });
+    rez.forEach(r => {
+      const tn = normalizovatTelefon(r.telefon);
+      if (!tn) return;
+      const s = ziskejSkupinu(tn);
+      s.telefonyRaw.add(r.telefon);
+      if (r.jmeno) s.jmena.push({ hodnota: r.jmeno, zdroj: `rezervace #${r.id}` });
+      if (r.email) s.emaily.push({ hodnota: r.email, zdroj: `rezervace #${r.id}` });
+    });
+    pouk.forEach(p => {
+      const tn = normalizovatTelefon(p.kupujici_telefon);
+      if (!tn) return; // poukaz bez telefonu se do žádné skupiny nezapojuje — zůstane bez klientka_id, to není chyba
+      const s = ziskejSkupinu(tn);
+      s.telefonyRaw.add(p.kupujici_telefon);
+      if (p.kupujici_jmeno) s.jmena.push({ hodnota: p.kupujici_jmeno, zdroj: `poukaz #${p.id}` });
+      if (p.kupujici_email) s.emaily.push({ hodnota: p.kupujici_email, zdroj: `poukaz #${p.id}` });
+    });
+
+    // 3) Vytvoření jedné klientky na skupinu + zaznamenání konfliktů (jméno/e-mail
+    // se v rámci JEDNÉ skupiny — tedy jednoho telefonu — liší). Konflikt se
+    // NEPŘEPISUJE tiše: zvolí se jedna hodnota (zakaznici > nejstarší rezervace >
+    // poukaz), ale VŠECHNY nalezené varianty jdou do zprava.konflikty.
+    const idPodleTelefonu = new Map();
+    for (const [tn, s] of skupiny) {
+      const distinctJmena = [...new Set(s.jmena.map(x => x.hodnota))];
+      const distinctEmailyNorm = [...new Set(s.emaily.map(x => normalizovatEmail(x.hodnota)).filter(Boolean))];
+      if (distinctJmena.length > 1) {
+        zprava.konflikty.push({ typ: 'jmeno', telefon_normalizovany: tn, hodnoty: s.jmena });
+      }
+      if (distinctEmailyNorm.length > 1) {
+        zprava.konflikty.push({ typ: 'email', telefon_normalizovany: tn, hodnoty: s.emaily });
+      }
+      const jmeno = s.zakaznik?.jmeno || s.jmena[0]?.hodnota || null;
+      const email = s.zakaznik?.email || s.emaily[0]?.hodnota || null;
+      const telefonRaw = s.zakaznik?.telefon || [...s.telefonyRaw][0] || null;
+
+      const { rows: [nova] } = await client.query(
+        `INSERT INTO klientky (jmeno, telefon, telefon_normalizovany, email, email_normalizovany, poznamka, alergie, preference)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+        [jmeno, telefonRaw, tn, email, normalizovatEmail(email), s.zakaznik?.poznamka || null, s.zakaznik?.alergie || null, s.zakaznik?.preference || null]
+      );
+      idPodleTelefonu.set(tn, nova.id);
+    }
+    zprava.kroky.push({ krok: 'INSERT klientky', vytvoreno: idPodleTelefonu.size });
+
+    // 3b) "Možná shoda" napříč RŮZNÝMI telefony (stejné jméno nebo e-mail, jiný
+    // telefon) — jen informativní hlášení, NIKDY automatické sloučení.
+    const seznamSkupin = [...skupiny.entries()];
+    for (let i = 0; i < seznamSkupin.length; i++) {
+      for (let j = i + 1; j < seznamSkupin.length; j++) {
+        const [tnA, a] = seznamSkupin[i], [tnB, b] = seznamSkupin[j];
+        const jmenaA = new Set(a.jmena.map(x => x.hodnota.toLowerCase()));
+        const jmenaB = new Set(b.jmena.map(x => x.hodnota.toLowerCase()));
+        const shodneJmeno = [...jmenaA].some(x => jmenaB.has(x));
+        const emailyA = new Set(a.emaily.map(x => normalizovatEmail(x.hodnota)));
+        const emailyB = new Set(b.emaily.map(x => normalizovatEmail(x.hodnota)));
+        const shodnyEmail = [...emailyA].some(x => x && emailyB.has(x));
+        if (shodneJmeno || shodnyEmail) {
+          zprava.moznaShoda.push({ telefon_a: tnA, telefon_b: tnB, shodneJmeno, shodnyEmail });
+        }
+      }
+    }
+
+    // 4) rezervace.klientka_id — přidat sloupec a backfill podle stejné normalizace.
+    await client.query('ALTER TABLE rezervace ADD COLUMN IF NOT EXISTS klientka_id integer');
+    let rezervaceNapojeno = 0;
+    for (const r of rez) {
+      const tn = normalizovatTelefon(r.telefon);
+      const kid = tn ? idPodleTelefonu.get(tn) : null;
+      if (kid) { await client.query('UPDATE rezervace SET klientka_id = $1 WHERE id = $2', [kid, r.id]); rezervaceNapojeno++; }
+    }
+    const { rows: [{ pocet: rezervaceBezKlientky }] } = await client.query(
+      "SELECT count(*)::int AS pocet FROM rezervace WHERE telefon IS NOT NULL AND telefon <> '' AND klientka_id IS NULL"
+    );
+    zprava.kroky.push({ krok: 'backfill rezervace.klientka_id', napojeno: rezervaceNapojeno, bezKlientkyPresTelefon: rezervaceBezKlientky });
+
+    if (rezervaceBezKlientky > 0) {
+      await client.query('ROLLBACK');
+      return res.status(500).json({
+        chyba: `${rezervaceBezKlientky} rezervací s vyplněným telefonem zůstalo bez klientka_id — migrace zastavena, nic se nezapsalo (celá transakce byla vrácena zpět).`,
+        zprava
+      });
+    }
+
+    // 5) poukazy.klientka_id — přidat sloupec a backfill. NULL u poukazu bez
+    // kupujici_telefon je OČEKÁVANÝ výsledek, ne chyba (viz Fáze 6D, sekce 8).
+    await client.query('ALTER TABLE poukazy ADD COLUMN IF NOT EXISTS klientka_id integer');
+    let poukazyNapojeno = 0, poukazyBezTelefonu = 0;
+    for (const p of pouk) {
+      const tn = normalizovatTelefon(p.kupujici_telefon);
+      const kid = tn ? idPodleTelefonu.get(tn) : null;
+      if (kid) { await client.query('UPDATE poukazy SET klientka_id = $1 WHERE id = $2', [kid, p.id]); poukazyNapojeno++; }
+      else poukazyBezTelefonu++;
+    }
+    zprava.kroky.push({ krok: 'backfill poukazy.klientka_id', napojeno: poukazyNapojeno, bezTelefonu: poukazyBezTelefonu });
+
+    // 6) FK — až teď, po ověřeném a kompletním backfillu rezervací.
+    await client.query('ALTER TABLE rezervace ADD CONSTRAINT rezervace_klientka_id_fkey FOREIGN KEY (klientka_id) REFERENCES klientky(id) ON DELETE SET NULL');
+    await client.query('ALTER TABLE poukazy ADD CONSTRAINT poukazy_klientka_id_fkey FOREIGN KEY (klientka_id) REFERENCES klientky(id) ON DELETE SET NULL');
+    zprava.kroky.push({ krok: 'FK constraints (ON DELETE SET NULL)', ok: true });
+
+    await client.query('COMMIT');
+    res.json({ ok: true, zprava });
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    res.status(500).json({ chyba: e.message, zprava });
+  } finally {
+    client.release();
+  }
 });
 
 // -- Zákazníci (ručně přidané + odvozené z rezervací a poukazů, seskupeno podle
