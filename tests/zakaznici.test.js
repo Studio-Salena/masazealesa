@@ -50,6 +50,26 @@ async function vytvorRezervaci(cenikId, telefon, odpocetDni, jmeno) {
   assert.equal(res.status, 200, 'Vytvoření testovací rezervace selhalo: ' + JSON.stringify(data));
   return data.rezervace;
 }
+// Kolik dní od dneška je zadané datum (celé dny, zaokrouhleno nahoru) — used
+// k ŘETĚZENÍ hledání volných termínů (viz níž), aby pořadí vytvořených
+// rezervací bylo ZARUČENÉ skutečnými daty v databázi, ne předpokladem, že
+// vyhledávání volných termínů vrací data monotónně rostoucí s offsetem.
+// /api/rezervace/volne-terminy totiž přeskakuje obsazené/zavřené dny
+// nerovnoměrně, takže např. "+65 dní" může vyjít na dřívější datum než
+// "+60 dní" (přesně tohle způsobilo nedeterministické selhání testu 12).
+function dnuOdDneska(datumIso) {
+  const dnes = new Date(); dnes.setHours(0, 0, 0, 0);
+  const cil = new Date(datumIso + 'T00:00:00');
+  return Math.round((cil - dnes) / 86400000);
+}
+// Vytvoří rezervaci s termínem PROKAZATELNĚ pozdějším než "predchozi" (o
+// alespoň "rezervaMezeraDni" dní) — vrací i nový "kurzor" (offset od dneška),
+// od kterého má pokračovat hledání DALŠÍ navazující rezervace v řetězu.
+async function vytvorRezervaciZaOdstupem(cenikId, telefon, kurzorOffset, jmeno) {
+  const r = await vytvorRezervaci(cenikId, telefon, kurzorOffset, jmeno);
+  const novyKurzor = dnuOdDneska(r.datum) + 5; // +5 dní rezerva, ať další hledání nemůže náhodou trefit stejný den
+  return { rezervace: r, dalsiKurzor: novyKurzor };
+}
 async function nastavStav(id, stav) {
   const res = await adminFetch(`/admin/rezervace/${id}/stav`, { method: 'PATCH', body: JSON.stringify({ stav }) });
   assert.equal(res.status, 200, `Nastavení stavu ${stav} selhalo`);
@@ -86,39 +106,54 @@ async function main() {
     const TEL = '00099010'; // dedikovaný telefon jen pro tenhle test, nekoliduje s reálnými rezervacemi
 
     console.log('--- Příprava: 9 rezervací + 2 poukazy na jednom testovacím telefonu ---');
+    console.log('    (řetězeno tak, že KAŽDÁ další rezervace má prokazatelně pozdější datum');
+    console.log('     než ta předchozí — hledání volného termínu totiž nemusí vracet data');
+    console.log('     monotónně rostoucí s offsetem, viz komentář u dnuOdDneska)');
 
-    // Nejbližší budoucí termín (offset 60) zůstává 'potvrzena' → očekávaná "další rezervace"
-    const rDalsi = await vytvorRezervaci(polozka.id, TEL, 60);
+    let kurzor = 60;
+
+    // Nejbližší budoucí termín zůstává 'potvrzena' → jediný kandidát na "další
+    // rezervaci", který má zároveň PROKAZATELNĚ nejdřívější datum ze všech níž.
+    let krok = await vytvorRezervaciZaOdstupem(polozka.id, TEL, kurzor);
+    const rDalsi = krok.rezervace; kurzor = krok.dalsiKurzor;
     uklidRezervace.push(rDalsi.id);
 
-    // offset 65: dokončená, plná platba
-    const r1 = await vytvorRezervaci(polozka.id, TEL, 65);
+    // dokončená, plná platba — prokazatelně POZDĚJŠÍ než rDalsi (viz kurzor výš)
+    krok = await vytvorRezervaciZaOdstupem(polozka.id, TEL, kurzor);
+    const r1 = krok.rezervace; kurzor = krok.dalsiKurzor;
     uklidRezervace.push(r1.id);
+    assert.ok(dnuOdDneska(r1.datum) > dnuOdDneska(rDalsi.datum), 'r1 musí mít prokazatelně pozdější datum než rDalsi');
     await nastavStav(r1.id, 'dokoncena');
     await platba(r1.id, cena, 'hotove');
 
-    // offset 70: dokončená, nezaplaceno
-    const r2 = await vytvorRezervaci(polozka.id, TEL, 70);
+    // dokončená, nezaplaceno
+    krok = await vytvorRezervaciZaOdstupem(polozka.id, TEL, kurzor);
+    const r2 = krok.rezervace; kurzor = krok.dalsiKurzor;
     uklidRezervace.push(r2.id);
     await nastavStav(r2.id, 'dokoncena');
 
-    // offset 75: dokončená, částečná platba
+    // dokončená, částečná platba
     const c1 = Math.max(1, Math.floor(cena * 0.4));
-    const r3 = await vytvorRezervaci(polozka.id, TEL, 75);
+    krok = await vytvorRezervaciZaOdstupem(polozka.id, TEL, kurzor);
+    const r3 = krok.rezervace; kurzor = krok.dalsiKurzor;
     uklidRezervace.push(r3.id);
     await nastavStav(r3.id, 'dokoncena');
     await platba(r3.id, c1, 'kartou');
 
-    // offset 80: dokončená, plná platba + plná vratka (netto 0)
-    const r4 = await vytvorRezervaci(polozka.id, TEL, 80);
+    // dokončená, plná platba + plná vratka (netto 0)
+    krok = await vytvorRezervaciZaOdstupem(polozka.id, TEL, kurzor);
+    const r4 = krok.rezervace; kurzor = krok.dalsiKurzor;
     uklidRezervace.push(r4.id);
     await nastavStav(r4.id, 'dokoncena');
     await platba(r4.id, cena, 'hotove');
     await platba(r4.id, cena, 'hotove', 'vratka');
 
-    // offset 85: dokončená, plně uhrazená poukazem (nejnovější dokončená → poslední návštěva)
-    const r5 = await vytvorRezervaci(polozka.id, TEL, 85);
+    // dokončená, plně uhrazená poukazem — díky řetězení PROKAZATELNĚ nejnovější
+    // dokončená ze všech (r1..r5) → očekávaná "poslední návštěva"
+    krok = await vytvorRezervaciZaOdstupem(polozka.id, TEL, kurzor);
+    const r5 = krok.rezervace; kurzor = krok.dalsiKurzor;
     uklidRezervace.push(r5.id);
+    assert.ok(dnuOdDneska(r5.datum) > dnuOdDneska(r4.datum), 'r5 musí mít prokazatelně nejpozdější datum ze všech dokončených');
     await nastavStav(r5.id, 'dokoncena');
     const poukazRedeem = await adminFetch('/admin/poukazy', {
       method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-ZAKAZNICI-POUKAZ (smazat)', kupujici_telefon: TEL })
@@ -129,17 +164,20 @@ async function main() {
     }).then(res => res.json());
     assert.equal(Number(uplatneno.rezervace.uhrazeno), cena, 'Uplatnění poukazu na r5 selhalo');
 
-    // offset 90: čekající (nesmí se počítat do statistik)
-    const r6 = await vytvorRezervaci(polozka.id, TEL, 90);
+    // čekající (nesmí se počítat do statistik)
+    krok = await vytvorRezervaciZaOdstupem(polozka.id, TEL, kurzor);
+    const r6 = krok.rezervace; kurzor = krok.dalsiKurzor;
     uklidRezervace.push(r6.id);
 
-    // offset 95: zrušená (musí zůstat v historii, ne ve statistikách)
-    const r7 = await vytvorRezervaci(polozka.id, TEL, 95);
+    // zrušená (musí zůstat v historii, ne ve statistikách, ani jako "další rezervace")
+    krok = await vytvorRezervaciZaOdstupem(polozka.id, TEL, kurzor);
+    const r7 = krok.rezervace; kurzor = krok.dalsiKurzor;
     uklidRezervace.push(r7.id);
     await nastavStav(r7.id, 'zrusena');
 
-    // offset 100: nedostavila se (musí zůstat v historii, ne ve statistikách)
-    const r8 = await vytvorRezervaci(polozka.id, TEL, 100);
+    // nedostavila se (musí zůstat v historii, ne ve statistikách, ani jako "další rezervace")
+    krok = await vytvorRezervaciZaOdstupem(polozka.id, TEL, kurzor);
+    const r8 = krok.rezervace; kurzor = krok.dalsiKurzor;
     uklidRezervace.push(r8.id);
     await nastavStav(r8.id, 'nedostavila_se');
 
