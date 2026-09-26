@@ -84,10 +84,12 @@ async function main() {
     const cena = Number(polozka.cena);
 
     // ================= 1) ČISTÁ LOGIKA NORMALIZACE TELEFONU (bez sítě) =================
-    assert.equal(normalizovatTelefon('737 336 123'), '737336123', 'mezery se musí odstranit');
-    assert.equal(normalizovatTelefon('+420737336123'), '737336123', '+420 se musí oříznout');
-    assert.equal(normalizovatTelefon('00420737336123'), '737336123', '00420 se musí oříznout');
-    assert.equal(normalizovatTelefon('737-336-123'), '737336123', 'pomlčky se musí odstranit');
+    // Syntetické testovací číslo (777 123 456) — nesmí jít o skutečné telefonní
+    // číslo žádné reálné klientky (viz Fáze 7A.1/7A.2 audit).
+    assert.equal(normalizovatTelefon('777 123 456'), '777123456', 'mezery se musí odstranit');
+    assert.equal(normalizovatTelefon('+420777123456'), '777123456', '+420 se musí oříznout');
+    assert.equal(normalizovatTelefon('00420777123456'), '777123456', '00420 se musí oříznout');
+    assert.equal(normalizovatTelefon('777-123-456'), '777123456', 'pomlčky se musí odstranit');
     assert.equal(normalizovatTelefon(null), null, 'chybějící telefon → null');
     assert.equal(normalizovatTelefon(''), null, 'prázdný telefon → null');
     assert.equal(normalizovatTelefon('+15551234567'), '15551234567', 'zahraniční číslo (ne +420) se nechává beze změny (jen bez mezer/pomlček)');
