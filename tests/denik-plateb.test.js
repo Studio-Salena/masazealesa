@@ -5,7 +5,8 @@
 
 const assert = require('node:assert/strict');
 
-const API = process.env.TEST_API_BASE || 'https://masazealesa.onrender.com/api';
+const { ziskatTestApiBase } = require('./env-guard');
+const API = ziskatTestApiBase(); // Fáze 7C.6 — fail-closed, žádný produkční fallback
 const HESLO = process.env.ADMIN_HESLO;
 
 if (!HESLO) {

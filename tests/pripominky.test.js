@@ -26,7 +26,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const API = process.env.TEST_API_BASE || 'https://masazealesa.onrender.com/api';
+const { ziskatTestApiBase } = require('./env-guard');
+const API = ziskatTestApiBase(); // Fáze 7C.6 — fail-closed, žádný produkční fallback
 const HESLO = process.env.ADMIN_HESLO;
 
 if (!HESLO) {
@@ -76,6 +77,7 @@ async function main() {
   let rezervaceId = null;
   let klientkaId = null;
   const puvodniNastaveni = {};
+  let nastaveniZmenena = false; // teprve od chvíle, kdy test skutečně změní nastavení, finally je musí vrátit zpět
 
   try {
     // ================= 1) ČISTÁ LOGIKA OKNA (bez sítě) =================
@@ -120,6 +122,7 @@ async function main() {
     puvodniNastaveni.predstih = predNastaveni.find(n => n.klic === 'pripominka_predstih_hodin');
 
     let odp = await adminFetch('/admin/nastaveni/pripominky_zapnuto', { method: 'PUT', body: JSON.stringify({ hodnota: 'false' }) });
+    nastaveniZmenena = true; // od tohohle okamžiku test už něco skutečně mění — finally to musí vrátit zpět
     assert.equal(odp.status, 200, 'uložení pripominky_zapnuto=false selhalo');
     let ctecte = await adminFetch('/admin/nastaveni').then(r => r.json());
     assert.equal(ctecte.find(n => n.klic === 'pripominky_zapnuto').hodnota, 'false', 'hodnota se po uložení nenačetla zpět jako false');
@@ -129,11 +132,10 @@ async function main() {
     ctecte = await adminFetch('/admin/nastaveni').then(r => r.json());
     assert.equal(ctecte.find(n => n.klic === 'pripominka_predstih_hodin').hodnota, '48', 'předstih se po uložení nenačetl zpět jako 48');
     console.log('OK — ON/OFF a předstih se ukládají a čtou přes /api/admin/nastaveni');
-
-    // Vrátit na výchozí ON / 24h, ať test nenechá produkci ve vypnutém stavu
-    await adminFetch('/admin/nastaveni/pripominky_zapnuto', { method: 'PUT', body: JSON.stringify({ hodnota: puvodniNastaveni.zapnuto ? puvodniNastaveni.zapnuto.hodnota : 'true' }) });
-    await adminFetch('/admin/nastaveni/pripominka_predstih_hodin', { method: 'PUT', body: JSON.stringify({ hodnota: puvodniNastaveni.predstih ? puvodniNastaveni.predstih.hodnota : '24' }) });
-    console.log('OK — nastavení vráceno na původní hodnotu');
+    // Vrácení na PŮVODNÍ stav (ne jen na "výchozí ON/24h") teď dělá finally
+    // níž, podle toho, jestli řádek před testem existoval nebo ne (Fáze 7C.6) —
+    // aby test na čisté DB nezanechal nové řádky s hodnotou 'true'/'24', které
+    // tam předtím vůbec nebyly.
 
     // ================= 5) CRON ENDPOINT — ZABEZPEČENÍ (bezpečné, 401 dřív než cokoliv jiného) =================
     let cronOdp = await fetch(API + '/cron/denni');
@@ -192,6 +194,25 @@ async function main() {
     console.log('    souběžné volání→jen jedno odešle) NENÍ ověřeno voláním produkčního cron endpointu se');
     console.log('    správným klíčem — viz komentář v hlavičce souboru a finální report.');
   } finally {
+    // Nastavení vrátit PŘESNĚ do stavu před testem (Fáze 7C.6):
+    // A) řádek předtím existoval → obnovit jeho původní hodnotu (PUT),
+    // B) řádek předtím neexistoval → smazat ho zas (DELETE), ne ho nechat
+    //    nově založený s výchozí hodnotou 'true'/'24'.
+    // Běží jen když test nastavení skutečně změnil (nastaveniZmenena) — jinak
+    // by finally mohlo omylem smazat/přepsat něco, čeho se test vůbec nedotkl.
+    if (nastaveniZmenena) {
+      if (puvodniNastaveni.zapnuto) {
+        await adminFetch('/admin/nastaveni/pripominky_zapnuto', { method: 'PUT', body: JSON.stringify({ hodnota: puvodniNastaveni.zapnuto.hodnota }) }).catch(() => {});
+      } else {
+        await adminFetch('/admin/nastaveni/pripominky_zapnuto', { method: 'DELETE' }).catch(() => {});
+      }
+      if (puvodniNastaveni.predstih) {
+        await adminFetch('/admin/nastaveni/pripominka_predstih_hodin', { method: 'PUT', body: JSON.stringify({ hodnota: puvodniNastaveni.predstih.hodnota }) }).catch(() => {});
+      } else {
+        await adminFetch('/admin/nastaveni/pripominka_predstih_hodin', { method: 'DELETE' }).catch(() => {});
+      }
+      console.log('(nastavení připomínek vráceno přesně do stavu před testem)');
+    }
     if (rezervaceId) {
       await adminFetch(`/admin/rezervace/${rezervaceId}`, { method: 'DELETE' });
       console.log('(testovací rezervace smazána)');

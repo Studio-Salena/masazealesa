@@ -114,7 +114,9 @@ create table if not exists platby (
   castka numeric not null, -- kladná = platba, záporná = vratka (viz typ níž)
   typ text not null, -- platba | vratka
   zpusob_platby text not null, -- hotove | kartou | online | poukaz
-  poukaz_id integer references poukazy(id) on delete set null, -- vyplněno jen když zpusob_platby = 'poukaz'
+  poukaz_id integer, -- vyplněno jen když zpusob_platby = 'poukaz'; FK na poukazy(id) přidána
+    -- až níž přes ALTER TABLE (tabulka "poukazy" v souboru vzniká až POZDĚJI —
+    -- stejný důvod a stejný princip jako u klientka_id, viz komentář u FK bloku níž)
   vytvoreno timestamptz not null default now(),
   check ((typ = 'platba' and castka > 0) or (typ = 'vratka' and castka < 0))
 );
@@ -190,9 +192,14 @@ create table if not exists klientky (
 create unique index if not exists klientky_telefon_normalizovany_key
   on klientky (telefon_normalizovany) where telefon_normalizovany is not null;
 
--- FK z rezervace/poukazy na klientky — ON DELETE SET NULL: i budoucí smazání
--- klientky nesmí smazat/poškodit historickou rezervaci, poukaz ani účetní
--- záznam, jen ztratí vazbu na (už neexistující) klientku.
+-- FK přidané až tady přes ALTER TABLE — buď proto, že cílová tabulka v souboru
+-- vzniká POZDĚJI než tabulka, která na ni odkazuje (platby → poukazy, viz
+-- komentář u sloupce poukaz_id výš), nebo je to stejný princip použitý
+-- konzistentně i tam, kde by inline FK teoreticky šlo (rezervace/poukazy →
+-- klientky) — ať jsou všechny "dodatečné" FK vazby pohromadě na jednom místě.
+-- ON DELETE SET NULL: i budoucí smazání klientky/poukazu nesmí smazat/poškodit
+-- historickou rezervaci ani účetní záznam, jen ztratí vazbu na (už neexistující)
+-- klientku/poukaz.
 -- Poznámka: "ADD CONSTRAINT IF NOT EXISTS" v PostgreSQL neexistuje (na rozdíl
 -- od "ADD COLUMN IF NOT EXISTS" výš) — tenhle soubor se ale spouští jen jednou
 -- na čerstvou databázi (viz hlavička souboru), takže prosté ADD CONSTRAINT stačí.
@@ -200,6 +207,8 @@ alter table rezervace add constraint rezervace_klientka_id_fkey
   foreign key (klientka_id) references klientky(id) on delete set null;
 alter table poukazy add constraint poukazy_klientka_id_fkey
   foreign key (klientka_id) references klientky(id) on delete set null;
+alter table platby add constraint platby_poukaz_id_fkey
+  foreign key (poukaz_id) references poukazy(id) on delete set null;
 
 -- Žádosti o poukaz z veřejného webového formuláře
 create table if not exists poukazy_zadosti (

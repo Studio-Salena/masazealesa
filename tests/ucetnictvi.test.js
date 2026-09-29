@@ -7,7 +7,8 @@
 
 const assert = require('node:assert/strict');
 
-const API = process.env.TEST_API_BASE || 'https://masazealesa.onrender.com/api';
+const { ziskatTestApiBase } = require('./env-guard');
+const API = ziskatTestApiBase(); // Fáze 7C.6 — fail-closed, žádný produkční fallback
 const HESLO = process.env.ADMIN_HESLO;
 
 if (!HESLO) {
@@ -36,9 +37,14 @@ async function main() {
     const polozka = cenik.find(c => c.rezervovatelna);
     assert.ok(polozka, 'V ceníku není rezervovatelná položka pro test');
 
-    // Termín daleko v budoucnu (mimo dnešek), ať je jistě volný a jasně odlišný od "dnes"
+    // Termín daleko v budoucnu (mimo dnešek), ať je jistě volný a jasně odlišný od "dnes".
+    // Fáze 7C.6: prochází DEN PO DNI (ne po týdnech) — krok po 7 dnech vždy
+    // trefí stejný den v týdnu, a pokud ten den zrovna vyjde na zavřený den
+    // (např. neděli), test nikdy nic nenajde bez ohledu na velikost rozsahu.
+    // Den-po-dni respektuje skutečnou pracovní dobu/výjimky přes existující
+    // API a je deterministický vůči dni v týdnu, na kterém "dnes" zrovna je.
     let datumIso = null, cas = null;
-    for (let i = 90; i < 150 && !cas; i += 7) {
+    for (let i = 90; i < 150 && !cas; i += 1) {
       const d = new Date(); d.setDate(d.getDate() + i);
       const iso = d.toISOString().slice(0, 10);
       const nalezenyCas = await najitVolnyTermin(iso, polozka.id);
