@@ -140,6 +140,91 @@ async function najitNeboVytvoritKlientku(client, { jmeno, telefon, email, alergi
   return nova.id;
 }
 
+// Fáze 7D.2B — GDPR anonymizace jedné klientky (návrh viz audit Fáze 7D.1/7D.2A).
+// Trvale odstraní osobní údaje z profilu klientky I z jejích UZAVŘENÝCH
+// historických rezervací/poukazů (dokoncena/zrusena/nedostavila_se, resp.
+// pouzity/zruseny). Aktivní budoucí rezervace nebo nevyčerpaný poukaz operaci
+// CELOU odmítnou (viz kontroly níž) — nikdy se neanonymizuje kontakt, který
+// provoz ještě potřebuje (např. kvůli připomínce nebo uplatnění poukazu).
+// BEZE ZMĚNY zůstává: id/datum/cas/cena/uhrazeno/stav/stav_platby/klientka_id
+// u rezervací (a obdobně u poukazů) — anonymizuje se jen OSOBNÍ OBSAH snímku,
+// nikdy účetní data.
+// Řídí celou transakci (BEGIN/COMMIT/ROLLBACK) sama — volající (endpoint) jen
+// otevře/uzavře DB spojení a mapuje návratovou hodnotu na HTTP odpověď.
+// Vrací { ok:true, klientka } nebo { ok:false, kod, chyba }.
+async function anonymizovatKlientku(client, klientkaId) {
+  await client.query('BEGIN');
+  try {
+    const { rows: [klientka] } = await client.query('SELECT * FROM klientky WHERE id = $1 FOR UPDATE', [klientkaId]);
+    if (!klientka) {
+      await client.query('ROLLBACK');
+      return { ok: false, kod: 404, chyba: 'Klientka nebyla nalezena.' };
+    }
+    if (klientka.anonymizovano_kdy) {
+      await client.query('ROLLBACK');
+      return { ok: false, kod: 400, chyba: 'Klientka je už anonymizovaná.' };
+    }
+
+    // Aktivní budoucí rezervace blokuje celou anonymizaci — stejná definice
+    // "termín je v budoucnu", jakou už server používá jinde (viz dalsiRezervace
+    // v nacistKlientkyReal a okno připomínek v /api/cron/denni výš): datum+cas_od
+    // jsou uložené jako "místní" hodnoty bez časové zóny, porovnává se přímo
+    // s new Date() bez dalšího přepočtu časové zóny.
+    const ted = new Date();
+    const { rows: mozneBudouci } = await client.query(
+      `SELECT datum, cas_od FROM rezervace WHERE klientka_id = $1 AND stav IN ('cekajici','potvrzena')`,
+      [klientkaId]
+    );
+    const maBudouciRezervaci = mozneBudouci.some(r => {
+      const terminCas = new Date(r.datum + 'T' + String(r.cas_od).slice(0, 5) + ':00');
+      return terminCas > ted;
+    });
+    if (maBudouciRezervaci) {
+      await client.query('ROLLBACK');
+      return { ok: false, kod: 400, chyba: 'Klientka má aktivní budoucí rezervaci — nejdřív ji vyřešte.' };
+    }
+
+    const { rows: [pocty] } = await client.query(
+      `SELECT count(*) AS pocet FROM poukazy WHERE klientka_id = $1 AND stav IN ('aktivni','castecne_vyuzity')`,
+      [klientkaId]
+    );
+    if (Number(pocty.pocet) > 0) {
+      await client.query('ROLLBACK');
+      return { ok: false, kod: 400, chyba: 'Klientka má aktivní nebo částečně využitý poukaz — nejdřív ho vyřešte.' };
+    }
+
+    const { rows: [anonymizovana] } = await client.query(
+      `UPDATE klientky SET
+         jmeno = NULL, telefon = NULL, telefon_normalizovany = NULL,
+         email = NULL, email_normalizovany = NULL,
+         poznamka = NULL, alergie = NULL, preference = NULL,
+         aktivni = false, anonymizovano_kdy = now(), upraveno = now()
+       WHERE id = $1 RETURNING id, aktivni, anonymizovano_kdy`,
+      [klientkaId]
+    );
+
+    await client.query(
+      `UPDATE rezervace SET jmeno = '(anonymizováno)', telefon = '', email = NULL, poznamka = NULL
+       WHERE klientka_id = $1 AND stav IN ('dokoncena','zrusena','nedostavila_se')`,
+      [klientkaId]
+    );
+
+    await client.query(
+      `UPDATE poukazy SET kupujici_jmeno = NULL, kupujici_email = NULL, kupujici_telefon = NULL, pro_koho = NULL
+       WHERE klientka_id = $1 AND stav IN ('pouzity','zruseny')`,
+      [klientkaId]
+    );
+
+    await client.query(`INSERT INTO klientky_udalosti (klientka_id, udalost) VALUES ($1, 'anonymizovano')`, [klientkaId]);
+
+    await client.query('COMMIT');
+    return { ok: true, klientka: anonymizovana };
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch {}
+    throw e;
+  }
+}
+
 // Přepočte rezervace.uhrazeno/stav_platby/zpusob_platby/uhrazeno_kdy jako souhrn
 // deníku "platby" pro danou rezervaci — VŽDY nově spočtený součet, ne postupné
 // přičítání, takže se nikdy nemůže rozejít s deníkem (jediný zdroj pravdy).
@@ -589,7 +674,7 @@ app.post('/api/rezervace', async (req, res) => {
       db.query(
         `INSERT INTO newsletter_odberatele (email, jmeno, odhlasovaci_token)
          VALUES ($1, $2, $3)
-         ON CONFLICT (email) DO UPDATE SET aktivni = true, jmeno = COALESCE($2, newsletter_odberatele.jmeno)`,
+         ON CONFLICT (email) DO UPDATE SET aktivni = true, odhlaseno_kdy = NULL, jmeno = COALESCE($2, newsletter_odberatele.jmeno)`,
         [email.trim().toLowerCase(), jmeno || null, token]
       ).catch(() => {});
     }
@@ -635,7 +720,7 @@ app.post('/api/newsletter', async (req, res) => {
     await db.query(
       `INSERT INTO newsletter_odberatele (email, jmeno, odhlasovaci_token)
        VALUES ($1, $2, $3)
-       ON CONFLICT (email) DO UPDATE SET aktivni = true, jmeno = COALESCE($2, newsletter_odberatele.jmeno)`,
+       ON CONFLICT (email) DO UPDATE SET aktivni = true, odhlaseno_kdy = NULL, jmeno = COALESCE($2, newsletter_odberatele.jmeno)`,
       [email.trim().toLowerCase(), jmeno || null, token]
     );
     res.json({ ok: true });
@@ -648,7 +733,7 @@ app.get('/api/newsletter/odhlasit', async (req, res) => {
   if (!token) return res.status(400).send('Chybí odhlašovací odkaz.');
   try {
     const { rowCount } = await db.query(
-      'UPDATE newsletter_odberatele SET aktivni = false WHERE odhlasovaci_token = $1', [token]
+      'UPDATE newsletter_odberatele SET aktivni = false, odhlaseno_kdy = now() WHERE odhlasovaci_token = $1', [token]
     );
     res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:60px">
       <h2>${rowCount ? 'Byli jste odhlášeni z newsletteru.' : 'Odkaz nenalezen (možná už jste odhlášeni).'}</h2>
@@ -1423,10 +1508,34 @@ app.delete('/api/admin/klientky/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
+// Fáze 7D.2B — GDPR anonymizace klientky (viz anonymizovatKlientku výš). Ne
+// veřejný endpoint (za vyzadovatAdmina jako celé /api/admin), navíc vyžaduje
+// explicitní { potvrzeno: true } v těle jako pojistku proti omylu navíc
+// k potvrzovacímu dialogu v adminu — akce je nevratná.
+app.post('/api/admin/klientky/:id/anonymizovat', async (req, res) => {
+  if (!(req.body && req.body.potvrzeno === true)) {
+    return res.status(400).json({ chyba: 'Chybí potvrzení akce.' });
+  }
+  const klientkaId = Number(req.params.id);
+  if (!Number.isInteger(klientkaId)) {
+    return res.status(404).json({ chyba: 'Klientka nebyla nalezena.' });
+  }
+  const client = await db.connect();
+  try {
+    const vysledek = await anonymizovatKlientku(client, klientkaId);
+    if (!vysledek.ok) return res.status(vysledek.kod).json({ chyba: vysledek.chyba });
+    res.json({ ok: true, klientka: vysledek.klientka });
+  } catch (e) {
+    res.status(500).json({ chyba: e.message });
+  } finally {
+    client.release();
+  }
+});
+
 // -- Newsletter --
 app.get('/api/admin/newsletter', async (req, res) => {
   try {
-    const { rows } = await db.query('SELECT id, email, jmeno, aktivni, vytvoreno FROM newsletter_odberatele ORDER BY vytvoreno DESC');
+    const { rows } = await db.query('SELECT id, email, jmeno, aktivni, odhlaseno_kdy, vytvoreno FROM newsletter_odberatele ORDER BY vytvoreno DESC');
     res.json(rows);
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });

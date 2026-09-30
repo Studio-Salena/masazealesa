@@ -1786,9 +1786,35 @@ async function otevritDetailZakaznice(id) {
           <td>${platbaLabel[r.stav_platby] || r.stav_platby}<br><small>${Number(r.uhrazeno).toLocaleString('cs-CZ')} Kč</small></td>
           <td><small>${escapeHtml(r.poznamka) || '—'}</small></td>
         </tr>`).join('') : '<tr><td colspan="6" style="text-align:center;color:var(--text-light)">Žádné rezervace</td></tr>'}</tbody></table>
+      </div>
+      <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--tan-light)">
+        <button class="btn btn-red btn-sm" onclick="anonymizovatZakaznici(${z.id})">🔒 Anonymizovat klientku</button>
+        <div style="font-size:0.78rem;color:var(--text-light);margin-top:6px">Trvale odstraní osobní údaje z profilu i z uzavřené historie (dokončené/zrušené/nedostavené rezervace, využité/zrušené poukazy). Nelze vrátit zpět. Nejde provést, dokud má klientka aktivní budoucí rezervaci nebo nevyčerpaný poukaz — o důvodu odmítnutí informuje server.</div>
       </div>`;
   } catch (e) {
     obsah.innerHTML = '<div class="error-msg">Chyba načítání detailu.</div>';
+  }
+}
+// Fáze 7D.2B — GDPR anonymizace klientky. Backend (POST /admin/klientky/:id/
+// anonymizovat) je autoritativní a kontroly provádí znovu sám — tlačítko tu
+// není skryté ani podmíněné, jen se na potvrzený požadavek buď odpoví ok:true,
+// nebo 400 s konkrétním důvodem, který se zobrazí místo detailu.
+async function anonymizovatZakaznici(id) {
+  if (!confirm('Tato akce trvale odstraní osobní údaje klientky z aktivního systému a historických uzavřených rezervací/poukazů. Akci nelze vrátit zpět. Opravdu pokračovat?')) return;
+  const obsah = document.getElementById('detailZakazniceObsah');
+  try {
+    const res = await adminFetch(API + '/admin/klientky/' + encodeURIComponent(id) + '/anonymizovat', {
+      method: 'POST', body: JSON.stringify({ potvrzeno: true })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      obsah.innerHTML = '<div class="success-msg">✅ Klientka byla anonymizována.</div>';
+      loadZakaznici();
+    } else {
+      obsah.innerHTML = '<div class="error-msg">' + (data.chyba || 'Anonymizaci se nepodařilo provést.') + '</div>' + obsah.innerHTML;
+    }
+  } catch (e) {
+    obsah.innerHTML = '<div class="error-msg">Nejde se připojit k serveru.</div>' + obsah.innerHTML;
   }
 }
 async function ulozitZakaznici(btn, id) {

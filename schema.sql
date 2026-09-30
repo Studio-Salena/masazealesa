@@ -232,6 +232,8 @@ create table if not exists newsletter_odberatele (
   jmeno text,
   odhlasovaci_token text not null unique,
   aktivni boolean not null default true,
+  odhlaseno_kdy timestamptz, -- Fáze 7D.2B: kdy došlo k poslednímu odhlášení (NULL, pokud se
+    -- odběratelka nikdy neodhlásila, nebo se od odhlášení znovu přihlásila — viz server.js)
   vytvoreno timestamptz not null default now()
 );
 
@@ -243,6 +245,31 @@ create table if not exists newsletter_zpravy (
   pocet_prijemcu integer not null default 0,
   odeslano timestamptz not null default now()
 );
+
+-- Fáze 7D.2B: auditní stopa pro anonymizaci klientek (GDPR) — append-only,
+-- zaznamenává jen METADATA události (kdy, jaký typ), nikdy osobní údaje.
+-- Záměrně BEZ FOREIGN KEY na klientky(id) — záznam musí přežít i případné
+-- budoucí fyzické smazání klientky, ne se s ním ztratit (viz audit Fáze 7D.1).
+-- Sloupec "kdo" akci provedl záměrně chybí — aplikace má jediné sdílené
+-- ADMIN_HESLO (ne účty jednotlivých osob), takže by šlo jen o pevný řetězec
+-- bez informační hodnoty navíc.
+create table if not exists klientky_udalosti (
+  id serial primary key,
+  klientka_id integer not null,
+  udalost text not null, -- zatím jediná hodnota: 'anonymizovano'
+  kdy timestamptz not null default now()
+);
+
+-- Fáze 7D.2B: rezervovaná (zatím NEPOUŽÍVANÁ) místa pro budoucí retenční
+-- lhůty anonymizace — záměrně se sem NEVKLÁDÁ žádný řádek/výchozí hodnota,
+-- dokud nejsou lhůty právně/účetně ověřené (viz audit Fáze 7D.1/7D.2A).
+-- Chybějící klíč se NESMÍ nikde v aplikaci vykládat jako "0 dní" nebo jako
+-- implicitní souhlas s automatickou anonymizací — dokud klíč neexistuje,
+-- žádná automatická anonymizace podle stáří záznamu se nesmí spouštět.
+--   retence_rezervace_dny    (hodnota musí být stanovena po právním/účetním ověření)
+--   retence_poukazy_dny      (hodnota musí být stanovena po právním/účetním ověření)
+--   retence_zadosti_dny      (hodnota musí být stanovena po právním/účetním ověření)
+--   retence_newsletter_dny   (hodnota musí být stanovena po právním/účetním ověření)
 
 -- Počáteční ceník podle skutečného obsahu webu
 insert into cenik (skupina, emoji, varianta, delka_min, cena, rezervovatelna, poradi_skupiny, poradi_varianty) values
