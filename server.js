@@ -143,9 +143,11 @@ async function najitNeboVytvoritKlientku(client, { jmeno, telefon, email, alergi
 // Fáze 7D.2B — GDPR anonymizace jedné klientky (návrh viz audit Fáze 7D.1/7D.2A).
 // Trvale odstraní osobní údaje z profilu klientky I z jejích UZAVŘENÝCH
 // historických rezervací/poukazů (dokoncena/zrusena/nedostavila_se, resp.
-// pouzity/zruseny). Aktivní budoucí rezervace nebo nevyčerpaný poukaz operaci
-// CELOU odmítnou (viz kontroly níž) — nikdy se neanonymizuje kontakt, který
-// provoz ještě potřebuje (např. kvůli připomínce nebo uplatnění poukazu).
+// pouzity/zruseny — od Fáze 7F.4 i aktivni/castecne_vyuzity, jejichž platnost
+// už prošla, viz kontroly níž). Aktivní budoucí rezervace nebo SKUTEČNĚ ještě
+// použitelný poukaz (platnost_do >= dnes) operaci CELOU odmítnou — nikdy se
+// neanonymizuje kontakt, který provoz ještě potřebuje (např. kvůli připomínce
+// nebo uplatnění poukazu).
 // BEZE ZMĚNY zůstává: id/datum/cas/cena/uhrazeno/stav/stav_platby/klientka_id
 // u rezervací (a obdobně u poukazů) — anonymizuje se jen OSOBNÍ OBSAH snímku,
 // nikdy účetní data.
@@ -184,13 +186,21 @@ async function anonymizovatKlientku(client, klientkaId) {
       return { ok: false, kod: 400, chyba: 'Klientka má aktivní budoucí rezervaci — nejdřív ji vyřešte.' };
     }
 
+    // Fáze 7F.4 — lidské rozhodnutí (Varianta B, návrh viz audit 7F.3): expirovaný
+    // poukaz (platnost_do < dnes) je z hlediska anonymizace operačně uzavřený a
+    // NEBLOKUJE ji, i když DB sloupec "stav" zůstává "aktivni"/"castecne_vyuzity"
+    // — žádný nový DB stav, žádná migrace, žádný cron, "stav"/"platnost_do" se
+    // tímto dotazem ani touto fází nikde nemění (jen se čtou). Stejná hranice
+    // ">= CURRENT_DATE" jako u jePoukazSkutecneAktivni()/POST .../uplatnit výš —
+    // "dnes" se pořád počítá jako ještě platné.
     const { rows: [pocty] } = await client.query(
-      `SELECT count(*) AS pocet FROM poukazy WHERE klientka_id = $1 AND stav IN ('aktivni','castecne_vyuzity')`,
+      `SELECT count(*) AS pocet FROM poukazy
+       WHERE klientka_id = $1 AND stav IN ('aktivni','castecne_vyuzity') AND platnost_do >= CURRENT_DATE`,
       [klientkaId]
     );
     if (Number(pocty.pocet) > 0) {
       await client.query('ROLLBACK');
-      return { ok: false, kod: 400, chyba: 'Klientka má aktivní nebo částečně využitý poukaz — nejdřív ho vyřešte.' };
+      return { ok: false, kod: 400, chyba: 'Klientka má aktivní nebo částečně využitý poukaz, jehož platnost ještě neprošla — nejdřív ho vyřešte.' };
     }
 
     const { rows: [anonymizovana] } = await client.query(
@@ -209,9 +219,17 @@ async function anonymizovatKlientku(client, klientkaId) {
       [klientkaId]
     );
 
+    // Fáze 7F.4B — "uzavřený poukaz" pro účely anonymizace je teď stejná
+    // množina, kterou (v negaci) používá blokující kontrola výš: pouzity/
+    // zruseny (beze změny od 7D.2B) NEBO aktivni/castecne_vyuzity, jejichž
+    // platnost už prošla (Varianta B, 7F.3/7F.4) — pokud blokace klientku
+    // pustila dál právě díky expiraci, musí se PII téhož poukazu tady i
+    // reálně odstranit, jinak by zůstal nekonzistentní stav (klientka
+    // anonymizovaná, ale její expirovaný poukaz s PII pořád visí).
     await client.query(
       `UPDATE poukazy SET kupujici_jmeno = NULL, kupujici_email = NULL, kupujici_telefon = NULL, pro_koho = NULL
-       WHERE klientka_id = $1 AND stav IN ('pouzity','zruseny')`,
+       WHERE klientka_id = $1
+         AND (stav IN ('pouzity','zruseny') OR (stav IN ('aktivni','castecne_vyuzity') AND platnost_do < CURRENT_DATE))`,
       [klientkaId]
     );
 

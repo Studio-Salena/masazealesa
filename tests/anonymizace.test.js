@@ -46,6 +46,7 @@ const uklidPoukazy = [];
 const uklidKlientky = new Set();
 const uklidZadosti = [];
 const uklidNewsletter = [];
+const uklidTypy = []; // Fáze 7F.4 — testovací typy poukazů se záporným platnost_mesicu
 
 // Vytvoří rezervaci s vlastním syntetickým telefonem (=> vlastní/nová
 // klientka) — vrací rezervaci i klientka_id, oboje se rovnou zapíše do
@@ -241,7 +242,13 @@ async function main() {
       const ctena = await nacistKlientku(p.klientka_id);
       assert.equal(ctena.status, 200, 'Klientka po odmítnuté anonymizaci zmizela z aktivního seznamu — ROLLBACK neproběhl správně');
       assert.equal(ctena.data.jmeno, 'TEST-ANONYMIZACE-POUKAZ (smazat)', 'Jméno klientky se po odmítnuté anonymizaci změnilo');
-      oznacUspech('aktivní poukaz: odmítnuto (400) a klientka zůstala beze změny (ověřuje i scénář 13 — rollback)');
+
+      // 7F.4B Test A) PII poukazu musí po odmítnuté anonymizaci zůstat beze změny.
+      const seznamA = await adminFetch('/admin/poukazy').then(x => x.json());
+      const poukazA = seznamA.find(x => x.id === p.id);
+      assert.equal(poukazA.kupujici_jmeno, p.kupujici_jmeno, 'A) PII poukazu (kupujici_jmeno) se nesmělo změnit po odmítnuté anonymizaci');
+
+      oznacUspech('A) aktivní + budoucí platnost: anonymizace odmítnuta (400), klientka i PII poukazu beze změny (ověřuje i scénář 13 — rollback)');
     }
 
     // 8) Klientka s částečně využitým poukazem → odmítnout
@@ -254,8 +261,157 @@ async function main() {
       assert.equal(u.poukaz.stav, 'castecne_vyuzity');
       const { status, data } = await anonymizovat(p.klientka_id);
       assert.equal(status, 400, 'Anonymizace s částečně využitým poukazem měla být odmítnuta: ' + JSON.stringify(data));
-      oznacUspech('částečně využitý poukaz: odmítnuto (400)');
+
+      // 7F.4B Test D) PII poukazu musí po odmítnuté anonymizaci zůstat beze změny.
+      const seznamD = await adminFetch('/admin/poukazy').then(x => x.json());
+      const poukazD = seznamD.find(x => x.id === p.id);
+      assert.equal(poukazD.kupujici_jmeno, p.kupujici_jmeno, 'D) PII poukazu (kupujici_jmeno) se nesmělo změnit po odmítnuté anonymizaci');
+
+      oznacUspech('D) částečně využitý + budoucí platnost: anonymizace odmítnuta (400), PII poukazu beze změny');
     }
+
+    // 7F.4B Test C) Expirovaný aktivní poukaz (DB stav zůstává "aktivni",
+    // platnost_do v minulosti): NEBLOKUJE anonymizaci (Varianta B, 7F.3/7F.4)
+    // A JEHO PII SE PŘI TÉŽE TRANSAKCI ANONYMIZUJE (7F.4B — dřív, ve Fázi 7F.4,
+    // se jen odblokovalo, poukaz samotný zůstal neanonymizovaný; to už teď
+    // neplatí). Vytvořeno přes testovací typ se záporným platnost_mesicu —
+    // stejný postup jako tests/poukazy.test.js scénář C, jediný způsob, jak
+    // přes veřejné API získat platnost_do v minulosti.
+    // 7F.4B Test B) Aktivní poukaz s platnost_do PŘESNĚ dnešním datem musí
+    // stále blokovat (hranice ">= dnes"). DYNAMICKY NEJDE VYTVOŘIT přes
+    // veřejné API: `poukazy_typy.platnost_mesicu` je v DB sloupec typu
+    // `integer` (schema.sql) — ověřeno EMPIRICKY (ne jen předpokladem), že
+    // zkouška s necelým číslem (platnost_mesicu=0.5, se záměrem využít
+    // ořezání ve funkci setMonth()) skončí přímo na Postgres chybou
+    // "invalid input syntax for type integer", dřív než by se vůbec dostala
+    // k datové logice — a platnost_mesicu=0 neprojde ani aplikační validací
+    // endpointu (`!platnost_mesicu` je pro 0 pravda). Ověřeno proto staticky —
+    // zrcadlová kopie blokující podmínky z anonymizovatKlientku na syntetickém
+    // řádku s platnost_do===dnes:
+    console.log('--- 7F.4B-B) aktivní + platnost přesně dnes: stále blokuje (jen staticky — viz komentář) ---');
+    {
+      const dnesIsoB = new Date().toISOString().slice(0, 10);
+      const jeOtevrenyProAnonymizaci = p => (p.stav === 'aktivni' || p.stav === 'castecne_vyuzity') && p.platnost_do >= dnesIsoB;
+      assert.equal(jeOtevrenyProAnonymizaci({ stav: 'aktivni', platnost_do: dnesIsoB }), true, 'B) platnost_do přesně dnes musí být pořád "otevřeno" (blokuje)');
+      oznacUspech('B) aktivní + platnost přesně dnes: staticky ověřeno, že nová WHERE podmínka takový řádek pořád považuje za otevřený/blokující (dynamicky nevytvořitelné přes API — poukazy_typy.platnost_mesicu je integer, zdůvodněno v komentáři)');
+    }
+
+    console.log('--- 7F.4B-C) expirovaný aktivní poukaz: NEBLOKUJE a PII se anonymizuje ---');
+    {
+      const telefon = '6999017';
+      const typRes = await adminFetch('/admin/poukazy/typy', {
+        method: 'POST', body: JSON.stringify({ hodnota: 500, platnost_mesicu: -1, poradi: 999 })
+      });
+      const typ = await typRes.json();
+      assert.equal(typRes.status, 200, JSON.stringify(typ));
+      uklidTypy.push(typ.typ.id);
+
+      const poukazRes = await adminFetch('/admin/poukazy', {
+        method: 'POST', body: JSON.stringify({ poukaz_typ_id: typ.typ.id, kupujici_jmeno: 'TEST-7F4B-C (smazat)', kupujici_email: 'test-7f4b-c@example.invalid', kupujici_telefon: telefon, pro_koho: 'TEST-OBDAROVANA (smazat)' })
+      });
+      const poukaz = await poukazRes.json();
+      assert.equal(poukazRes.status, 200, JSON.stringify(poukaz));
+      uklidPoukazy.push(poukaz.poukaz.id);
+      const klientkaId = poukaz.poukaz.klientka_id;
+      uklidKlientky.add(klientkaId);
+      assert.equal(poukaz.poukaz.stav, 'aktivni', 'Nově vydaný poukaz musí mít v DB stav "aktivni", i s minulou platnost_do');
+
+      // Finanční integrita (bod 6 zadání) — snímek PŘED anonymizací. Tento
+      // poukaz nikdy nebyl uplatněn (žádná vazba na rezervaci/platbu), deník
+      // plateb je tedy pro tenhle konkrétní scénář irelevantní — viz Test F
+      // níž, kde SE poukaz uplatňuje a deník plateb se ověřuje explicitně.
+      const pred = { hodnota: poukaz.poukaz.hodnota, zustatek: poukaz.poukaz.zustatek, stav: poukaz.poukaz.stav, kod: poukaz.poukaz.kod, ean: poukaz.poukaz.ean, platnost_do: poukaz.poukaz.platnost_do };
+
+      const { status, data } = await anonymizovat(klientkaId);
+      assert.equal(status, 200, 'Expirovaný aktivní poukaz neměl blokovat anonymizaci (Varianta B): ' + JSON.stringify(data));
+
+      const seznamPo = await adminFetch('/admin/poukazy').then(x => x.json());
+      const po = seznamPo.find(p => p.id === poukaz.poukaz.id);
+
+      // 7F.4B bod 2 — PII musí být anonymizované.
+      assert.equal(po.kupujici_jmeno, null, 'C) kupujici_jmeno mělo být anonymizováno');
+      assert.equal(po.kupujici_email, null, 'C) kupujici_email mělo být anonymizováno');
+      assert.equal(po.kupujici_telefon, null, 'C) kupujici_telefon mělo být anonymizováno');
+      assert.equal(po.pro_koho, null, 'C) pro_koho mělo být anonymizováno');
+
+      // 7F.4B bod 6 — finanční/historická data identická před/po.
+      assert.equal(po.stav, pred.stav, 'C) stav se nesmí anonymizací klientky změnit');
+      assert.equal(Number(po.hodnota), Number(pred.hodnota), 'C) hodnota se nesmí anonymizací klientky změnit');
+      assert.equal(Number(po.zustatek), Number(pred.zustatek), 'C) zůstatek se nesmí anonymizací klientky změnit');
+      assert.equal(po.kod, pred.kod, 'C) kód se nesmí anonymizací klientky změnit');
+      assert.equal(po.ean, pred.ean, 'C) EAN se nesmí anonymizací klientky změnit');
+      assert.equal(po.platnost_do, pred.platnost_do, 'C) platnost_do se nesmí anonymizací klientky změnit');
+
+      // 7F.4B bod 8 — re-registrace: poukaz i klientka_id zůstávají zachované,
+      // klientka sama zmizí z aktivního seznamu, a nová rezervace se stejným
+      // reálným telefonem založí zcela NOVOU klientku (stejný princip jako
+      // scénář 14 výš — telefon_normalizovany byl vynulován, ne kolize).
+      assert.equal(po.klientka_id, klientkaId, 'C) klientka_id poukazu se nesmí anonymizací změnit');
+      const ctenaC = await nacistKlientku(klientkaId);
+      assert.equal(ctenaC.status, 404, 'C) anonymizovaná klientka nesmí být dál zobrazena jako aktivní');
+      const rC = await vytvorRezervaci(polozka.id, telefon, odpocet, 'TEST-7F4B-C-NOVA (smazat)'); odpocet += 5;
+      assert.notEqual(rC.klientka_id, klientkaId, 'C) nová rezervace se stejným telefonem se napojila na starou (anonymizovanou) klientku místo založení nové');
+
+      oznacUspech('C) expirovaný aktivní poukaz: anonymizace prošla (200), PII poukazu anonymizováno, hodnota/zůstatek/stav/kód/EAN/platnost_do beze změny, klientka_id zachován, re-registrace se stejným telefonem funguje');
+    }
+
+    // 7F.4B Test E) Částečně využitý + expirovaný — POZNÁMKA: tuto přesnou
+    // kombinaci nejde přes veřejné API legitimně sestavit (stejné zjištění
+    // jako u tests/poukazy.test.js scénáře E, 7F.1/7F.2/7F.3): POST .../
+    // uplatnit sám odmítne uplatnění na už expirovaném poukazu, takže poukaz
+    // nikdy nemůže přejít na "castecne_vyuzity" PO expiraci, a žádný endpoint
+    // neumožňuje platnost_do dodatečně posunout do minulosti u poukazu, který
+    // už castecne_vyuzity je. Ověřeno i se "dnes"-trikem z Testu B: i kdyby se
+    // poukaz částečně uplatnil PŘESNĚ v den platnost_do, zůstává v tu chvíli
+    // ještě platný (>=dnes), takže "expirovaný částečně využitý" by vznikl až
+    // následující den — mimo dosah jednoho synchronního testovacího běhu.
+    // Ověřeno místo toho staticky — zrcadlová kopie nové "uzavřený poukaz"
+    // podmínky z anonymizovatKlientku (stav IN (pouzity,zruseny) OR (stav IN
+    // (aktivni,castecne_vyuzity) AND platnost_do<dnes)) na syntetickém řádku:
+    console.log('--- 7F.4B-E) částečně využitý + expirovaný (jen staticky — viz komentář) ---');
+    {
+      const dnesIso = new Date().toISOString().slice(0, 10);
+      const vceraIso = (() => { const d = new Date(); d.setDate(d.getDate() - 1); return d.toISOString().slice(0, 10); })();
+      const jeUzavrenyProAnonymizaci = p =>
+        p.stav === 'pouzity' || p.stav === 'zruseny' ||
+        ((p.stav === 'aktivni' || p.stav === 'castecne_vyuzity') && p.platnost_do < dnesIso);
+      assert.equal(jeUzavrenyProAnonymizaci({ stav: 'castecne_vyuzity', platnost_do: vceraIso }), true, 'E) expirovaný částečně využitý poukaz MUSÍ spadat do "uzavřeno pro anonymizaci"');
+      assert.equal(jeUzavrenyProAnonymizaci({ stav: 'castecne_vyuzity', platnost_do: dnesIso }), false, 'castecne_vyuzity platný do dneška nesmí spadat do "uzavřeno"');
+      oznacUspech('E) částečně využitý + expirovaný: staticky ověřeno, že by nová WHERE podmínka takový řádek správně zahrnula (dynamicky nevytvořitelné přes API, zdůvodněno v komentáři)');
+    }
+
+    // 7F.4B Test F) Plně vyčerpaný poukaz (pouzity): anonymizace projde, PII
+    // se anonymizuje, deník plateb i finanční údaje beze změny.
+    console.log('--- 7F.4B-F) plně vyčerpaný poukaz (pouzity): PII se anonymizuje ---');
+    {
+      const telefon = '6999020';
+      const p = await vytvorPoukaz(polozka.id, telefon, 'TEST-7F4B-F (smazat)');
+      const u = await adminFetch(`/admin/poukazy/${p.id}/uplatnit`, { method: 'POST', body: JSON.stringify({ castka: Number(p.hodnota) }) }).then(x => x.json());
+      assert.equal(u.poukaz.stav, 'pouzity');
+      // Uplatněno bez rezervace (žádné rezervace_id) — v deníku "platby" proto
+      // záměrně nevznikl žádný řádek, není tu tedy co porovnávat před/po; o to
+      // se stará test 3/4/12 v tests/poukazy.test.js a scénář 5 výš v tomhle
+      // souboru (ty testují uplatnění S vazbou na rezervaci).
+      const poukazPoUplatneni = u.poukaz;
+
+      const { status } = await anonymizovat(p.klientka_id);
+      assert.equal(status, 200, 'F) anonymizace s plně vyčerpaným poukazem měla projít');
+
+      const seznamF = await adminFetch('/admin/poukazy').then(x => x.json());
+      const poukazF = seznamF.find(x => x.id === p.id);
+      assert.equal(poukazF.kupujici_jmeno, null, 'F) kupujici_jmeno mělo být anonymizováno');
+      assert.equal(poukazF.kupujici_email, null, 'F) kupujici_email mělo být anonymizováno');
+      assert.equal(poukazF.kupujici_telefon, null, 'F) kupujici_telefon mělo být anonymizováno');
+      assert.equal(poukazF.stav, 'pouzity', 'F) stav se nesmí anonymizací klientky změnit');
+      assert.equal(Number(poukazF.zustatek), Number(poukazPoUplatneni.zustatek), 'F) zůstatek (0) se nesmí anonymizací klientky změnit');
+      assert.equal(Number(poukazF.hodnota), Number(p.hodnota), 'F) hodnota se nesmí anonymizací klientky změnit');
+      oznacUspech('F) plně vyčerpaný (pouzity) poukaz: anonymizace prošla, PII anonymizováno, stav/hodnota/zůstatek beze změny');
+    }
+
+    // 7F.4B Test G) Zrušený poukaz — ekvivalentní scénáři 6 výš (uzavřený
+    // poukaz, zruseny): anonymizace prošla, PII anonymizováno, hodnota/kód
+    // beze změny — viz scénář 6 pro přesné assertions, zde jen odkaz, ať se
+    // zbytečně neduplikuje identický testovací poukaz.
 
     // 9) Klientka s budoucí rezervací → odmítnout
     console.log('--- 9) budoucí rezervace → odmítnout ---');
@@ -450,6 +606,9 @@ async function main() {
     }
     for (const id of uklidNewsletter) {
       await adminFetch(`/admin/newsletter/${id}`, { method: 'DELETE' }).catch(() => {});
+    }
+    for (const id of uklidTypy) {
+      await adminFetch(`/admin/poukazy/typy/${id}`, { method: 'DELETE' }).catch(() => {});
     }
     let klientkySmazano = 0;
     for (const id of uklidKlientky) {
