@@ -299,6 +299,19 @@ function formatDatumCz(datumIso) {
   return `${Number(den)}. ${Number(mesic)}. ${rok}`;
 }
 
+// Fáze 7F.1 — jediné místo, které rozhoduje "je tenhle poukaz SKUTEČNĚ aktivní?"
+// (na rozdíl od holého DB sloupce poukazy.stav, který "aktivni" zůstává i po
+// vypršení platnosti — viz audit Fáze 7F). NEZAVÁDÍ nový DB stav, jen odvozuje
+// stejně jako admin.html:poukazZobrazenyStav() a stejnou hranicí, jakou už
+// POST /api/admin/poukazy/:id/uplatnit používá k odmítnutí prošlého poukazu
+// (tam "platnost_do < dnesIso" blokuje, tady je to zrcadlově ">= dnesIso" =
+// pořád platný) — "dnes" se tedy ještě počítá jako platné, stejně jako tam.
+// Poukaz potřebuje mít načtené aspoň { stav, platnost_do }.
+function jePoukazSkutecneAktivni(poukaz) {
+  const dnesIso = new Date().toISOString().slice(0, 10);
+  return poukaz.stav === 'aktivni' && poukaz.platnost_do >= dnesIso;
+}
+
 // Sdílená vizuální šablona pro úplně všechny e-maily ze salónu (přijetí rezervace,
 // potvrzení, připomínka, žádost o recenzi, newsletter) — ať mají jednotný vzhled.
 // `telo` je jen obsah uvnitř bílé karty (nadpis + text), hlavičku s logem a patičku
@@ -750,15 +763,15 @@ app.get('/api/admin/prehled', async (req, res) => {
     const dnes = new Date().toISOString().slice(0, 10);
     const [rez, pouk, zad] = await Promise.all([
       db.query('SELECT id, stav, datum FROM rezervace'),
-      db.query('SELECT id, stav, zustatek FROM poukazy'),
+      db.query('SELECT id, stav, zustatek, platnost_do FROM poukazy'),
       db.query('SELECT id, stav FROM poukazy_zadosti')
     ]);
     res.json({
       rezervaceCelkem: rez.rows.length,
       rezervaceCekajici: rez.rows.filter(r => r.stav === 'cekajici').length,
       rezervaceBudouci: rez.rows.filter(r => r.datum >= dnes && r.stav !== 'zrusena').length,
-      poukazyAktivni: pouk.rows.filter(p => p.stav === 'aktivni').length,
-      poukazyHodnota: pouk.rows.filter(p => p.stav === 'aktivni').reduce((s, p) => s + Number(p.zustatek), 0),
+      poukazyAktivni: pouk.rows.filter(jePoukazSkutecneAktivni).length,
+      poukazyHodnota: pouk.rows.filter(jePoukazSkutecneAktivni).reduce((s, p) => s + Number(p.zustatek), 0),
       poukazyZadostiNove: zad.rows.filter(z => z.stav === 'nova').length
     });
   } catch (e) { res.status(500).json({ chyba: e.message }); }
@@ -1369,14 +1382,16 @@ app.delete('/api/admin/poukazy/zadosti/:id', async (req, res) => {
 // - "posledniNavstiva" jen z dokončených,
 // - "dalsiRezervace" nejbližší budoucí, není zrušená/nedostavila se,
 // - "prumernaNavsteva" = celkemUtraceno/pocetNavstev, null při 0 návštěvách,
-// - "aktivniPoukazy" jen stav='aktivni'.
+// - "aktivniPoukazy" jen skutečně aktivní (stav='aktivni' A platnost_do
+//   neprošla — viz jePoukazSkutecneAktivni, Fáze 7F.1); castecne_vyuzity se
+//   do tohoto počtu záměrně nepočítá stejně jako předtím.
 async function nacistKlientkyReal() {
   const [klienti, rez, pouk] = await Promise.all([
     db.query('SELECT * FROM klientky WHERE aktivni = true'),
     db.query(`SELECT id, klientka_id, jmeno, telefon, email, datum, cas_od, cas_do, masaz, cena, uhrazeno,
                       stav, stav_platby, zpusob_platby, poukaz_kod, poznamka
                FROM rezervace WHERE klientka_id IS NOT NULL`),
-    db.query('SELECT klientka_id, stav FROM poukazy WHERE klientka_id IS NOT NULL')
+    db.query('SELECT klientka_id, stav, platnost_do FROM poukazy WHERE klientka_id IS NOT NULL')
   ]);
 
   const mapa = new Map();
@@ -1417,7 +1432,7 @@ async function nacistKlientkyReal() {
   pouk.rows.forEach(p => {
     const k = mapa.get(p.klientka_id);
     if (!k) return;
-    if (p.stav === 'aktivni') k.aktivniPoukazy++;
+    if (jePoukazSkutecneAktivni(p)) k.aktivniPoukazy++;
   });
 
   mapa.forEach(k => {

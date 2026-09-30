@@ -1384,7 +1384,10 @@ async function loadPoukazy() {
   try {
     const seznam = await adminFetch(API + '/admin/poukazy').then(r => r.json());
     posledniPoukazy = seznam;
-    const aktivni = seznam.filter(p => p.stav === 'aktivni' || p.stav === 'castecne_vyuzity');
+    // Fáze 7F.1 — "nevyužitá hodnota" nesmí počítat prošlé poukazy jako
+    // aktivní (poukazZobrazenyStav níž stejně dopočítává "prosly" podle
+    // platnost_do, i když DB sloupec stav zůstává aktivni/castecne_vyuzity).
+    const aktivni = seznam.filter(p => (p.stav === 'aktivni' || p.stav === 'castecne_vyuzity') && poukazZobrazenyStav(p).klic !== 'prosly');
     const vyuzite = seznam.filter(p => p.stav === 'pouzity');
     document.getElementById('poukazyAktivniHodnota').textContent = aktivni.reduce((s, p) => s + Number(p.zustatek), 0).toLocaleString('cs-CZ') + ' Kč';
     document.getElementById('poukazyPocet').textContent = seznam.length;
