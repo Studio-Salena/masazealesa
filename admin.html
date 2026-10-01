@@ -217,6 +217,8 @@ tr:hover td{background:#fffaf5}
     <div class="nav-label">Prodejna</div>
     <div class="nav-item" onclick="showPage('masaze',this)"><span class="icon">🧖</span> Masáže</div>
     <div class="nav-item" onclick="showPage('ucetnictvi',this)"><span class="icon">📈</span> Účetnictví</div>
+    <div class="nav-label">GDPR</div>
+    <div class="nav-item" onclick="showPage('retence',this)"><span class="icon">🗂️</span> Retence</div>
     <div class="sidebar-footer">
       <button class="logout-btn" onclick="logout()">Odhlásit se</button>
     </div>
@@ -519,6 +521,35 @@ tr:hover td{background:#fffaf5}
       </div>
     </div>
 
+    <!-- RETENCE (GDPR, Fáze 7G.3) -->
+    <div class="page" id="page-retence">
+      <div class="page-header">
+        <div class="page-title">🗂️ Retence a anonymizace (GDPR)</div>
+        <div class="table-actions">
+          <button class="refresh-btn" onclick="loadRetenceNastaveni()">↻ Obnovit</button>
+        </div>
+      </div>
+      <p style="padding:0 4px;font-size:0.78rem;color:var(--text-light)">Retenční lhůty se zatím nastavují jen přímo v databázi (tahle stránka je read-only). Chybějící lhůta znamená, že se daná kategorie vůbec nezpracovává — nikdy ne „ihned“.</p>
+      <div class="table-wrap">
+        <div class="table-header"><h3>⚙️ Nastavené retenční lhůty</h3></div>
+        <div id="retenceNastaveniTable"><div class="loading">Načítám...</div></div>
+      </div>
+      <div class="table-wrap">
+        <div class="table-header">
+          <h3>🔍 Dry-run (jen náhled, nic nemění)</h3>
+          <button class="btn btn-outline btn-sm" onclick="spustitRetenceDryRun()">Spustit dry-run</button>
+        </div>
+        <div id="retenceDryRunVysledek"><div class="empty">Zatím nespuštěno</div></div>
+      </div>
+      <div class="table-wrap">
+        <div class="table-header">
+          <h3>⚠️ Apply (skutečně anonymizuje — nevratné)</h3>
+          <button class="btn btn-red btn-sm" onclick="spustitRetenceApply()">Spustit apply</button>
+        </div>
+        <div id="retenceApplyVysledek"><div class="empty">Zatím nespuštěno</div></div>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -805,6 +836,7 @@ function showPage(name, el) {
   if (name === 'cenik') loadCenik();
   if (name === 'masaze') loadProdejna();
   if (name === 'ucetnictvi') loadUcetnictvi();
+  if (name === 'retence') loadRetenceNastaveni();
   document.getElementById('sidebar').classList.remove('open');
 }
 
@@ -2119,6 +2151,69 @@ function exportCsvUcetnictvi() {
   a.href = URL.createObjectURL(blob);
   a.download = 'prijate-platby-masaze-alesa.csv';
   a.click();
+}
+
+// ── RETENCE (GDPR, Fáze 7G.3) — pouze čtení/spuštění, žádná editace hodnot ──
+const RETENCE_KLICE_POPIS = {
+  retence_rezervace_dokoncena_dny: 'Dokončené rezervace',
+  retence_rezervace_zrusena_dny: 'Zrušené rezervace',
+  retence_rezervace_nedostavila_dny: 'Rezervace „nedostavila se“',
+  retence_poukazy_uzavrene_dny: 'Uzavřené poukazy (použité/zrušené)',
+  retence_poukazy_expirovane_dny: 'Expirované poukazy',
+  retence_zadosti_dny: 'Vyřízené/zamítnuté žádosti o poukaz',
+  retence_newsletter_dny: 'Odhlášení z newsletteru'
+};
+async function loadRetenceNastaveni() {
+  const el = document.getElementById('retenceNastaveniTable');
+  try {
+    const d = await adminFetch(API + '/admin/retence/dry-run').then(r => r.json());
+    el.innerHTML = `<table><thead><tr><th>Kategorie</th><th>Klíč</th><th>Lhůta (dny)</th></tr></thead><tbody>
+      ${Object.entries(RETENCE_KLICE_POPIS).map(([klic, popis]) => {
+        const hodnota = d.nastaveni ? d.nastaveni[klic] : null;
+        return `<tr><td>${popis}</td><td><code>${klic}</code></td><td>${hodnota === null || hodnota === undefined ? '<span class="badge badge-zruseno">NENASTAVENO</span>' : hodnota + ' dní'}</td></tr>`;
+      }).join('')}
+    </tbody></table>`;
+  } catch (e) { el.innerHTML = '<div class="error-msg">Nejde se připojit k serveru.</div>'; }
+}
+function retenceKategorieRadek(nazev, kat) {
+  if (!kat) return '';
+  const stav = kat.stav_nastaveni === 'NENASTAVENO' ? '<span class="badge badge-zruseno">NENASTAVENO</span>' : `${kat.pocet_kandidatu} kandidátů`;
+  return `<tr><td>${nazev}</td><td>${stav}</td><td>${(kat.kandidati || []).join(', ') || '—'}</td></tr>`;
+}
+async function spustitRetenceDryRun() {
+  const el = document.getElementById('retenceDryRunVysledek');
+  el.innerHTML = '<div class="loading">Spouštím dry-run...</div>';
+  try {
+    const d = await adminFetch(API + '/admin/retence/dry-run').then(r => r.json());
+    el.innerHTML = `
+      <p style="font-size:0.82rem;color:var(--text-light);padding:0 4px">Report z ${new Date(d.cas_reportu).toLocaleString('cs-CZ')} — celkem ${d.pocet_kandidatu_celkem} kandidátů (limit na jedno apply: ${d.limit}). Apply by ${d.apply_by_bylo_mozne ? 'mělo' : 'NEmělo'} co zpracovat.</p>
+      <table><thead><tr><th>Kategorie</th><th>Stav</th><th>ID kandidátů</th></tr></thead><tbody>
+        ${retenceKategorieRadek('Rezervace — dokončené', d.kategorie.rezervace_dokoncena)}
+        ${retenceKategorieRadek('Rezervace — zrušené', d.kategorie.rezervace_zrusena)}
+        ${retenceKategorieRadek('Rezervace — nedostavila se', d.kategorie.rezervace_nedostavila_se)}
+        ${retenceKategorieRadek('Poukazy — uzavřené', d.kategorie.poukazy_uzavrene)}
+        ${retenceKategorieRadek('Poukazy — expirované', d.kategorie.poukazy_expirovane)}
+        ${retenceKategorieRadek('Žádosti o poukaz', d.kategorie.zadosti)}
+        ${retenceKategorieRadek('Newsletter', d.kategorie.newsletter)}
+        ${retenceKategorieRadek('Klientky', d.kategorie.klientky)}
+      </tbody></table>
+      <p style="font-size:0.82rem;padding:8px 4px">Poukazy bez známého data uzavření (přeskakují se vždy): ${d.kategorie.poukazy_bez_uzavreni_kdy.pocet} ${d.kategorie.poukazy_bez_uzavreni_kdy.id.length ? '(' + d.kategorie.poukazy_bez_uzavreni_kdy.id.join(', ') + ')' : ''}</p>
+      <p style="font-size:0.82rem;padding:0 4px">Klientky blokované (nelze anonymizovat): ${d.blokovano_klientky.length ? d.blokovano_klientky.map(b => `#${b.id} (${b.duvod})`).join(', ') : '—'}</p>
+    `;
+  } catch (e) { el.innerHTML = '<div class="error-msg">Nejde se připojit k serveru.</div>'; }
+}
+async function spustitRetenceApply() {
+  if (!confirm('Tato akce TRVALE a NEVRATNĚ anonymizuje osobní údaje u všech aktuálních retenčních kandidátů (do limitu). Opravdu pokračovat?')) return;
+  const el = document.getElementById('retenceApplyVysledek');
+  el.innerHTML = '<div class="loading">Spouštím apply...</div>';
+  try {
+    const res = await adminFetch(API + '/admin/retence/apply', { method: 'POST', body: JSON.stringify({ dry_run: false, potvrzeno: true }) });
+    const d = await res.json();
+    if (!res.ok) { el.innerHTML = '<div class="error-msg">' + (d.chyba || 'Apply selhalo.') + '</div>'; return; }
+    el.innerHTML = `<div class="success-msg">Zpracováno: ${d.zpracovano}, úspěšně anonymizováno: ${d.uspesnych}${d.limit_dosazen ? ' — ⚠️ dosažen limit (' + d.limit + '), zbytek nezpracován, spusťte apply znovu' : ''}</div>
+      ${d.preskoceno.length ? '<p style="font-size:0.82rem;padding:4px">Přeskočeno: ' + d.preskoceno.map(p => `#${p.id} (${p.duvod})`).join(', ') + '</p>' : ''}`;
+    loadRetenceNastaveni();
+  } catch (e) { el.innerHTML = '<div class="error-msg">Nejde se připojit k serveru.</div>'; }
 }
 </script>
 </body>

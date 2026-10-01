@@ -31,7 +31,18 @@ const db = new Pool({
 db.on('error', (err) => console.error('Neočekávaná chyba databázového spojení:', err.message));
 
 const ADMIN_HESLO = process.env.ADMIN_HESLO;
-const CRON_KLIC = process.env.CRON_KLIC; // sdílené heslo pro denní úlohu (připomínky, žádosti o recenzi)
+const CRON_KLIC = process.env.CRON_KLIC; // sdílené heslo pro denní úlohu (připomínky, žádosti o recenzi) i pro retenční cron (Fáze 7G.3)
+
+// Fáze 7G.3 — bezpečnostní limit na jedno spuštění POST /api/admin/retence/apply,
+// počítáno jako SOUČET všech skutečně anonymizovaných objektů (klientky +
+// rezervace + poukazy + žádosti + newsletter dohromady v jednom volání), ne
+// zvlášť na kategorii — nejjednodušší konzervativní pravidlo, které nejde
+// obejít tím, že by jedna kategorie "vyčerpala" limit na úkor ostatních jen
+// zdánlivě (limit je stejně společný). Hodnota je úmyslně nízká a pevná
+// konstanta (ne konfigurovatelná přes "nastaveni") — bezpečnostní limit proti
+// chybě v logice nebo omylem spuštěnému hromadnému apply, ne provozní
+// nastavení, které by admin měl měnit (viz audit 7G.2/7G.2A, otevřený bod #7).
+const RETENCE_MAX_APPLY = 25;
 
 async function ziskatBufferMinut() {
   try {
@@ -74,6 +85,35 @@ async function ziskatNastaveniPripominek() {
     const predstihHodin = Number.isFinite(predstihRaw) && predstihRaw >= 1 && predstihRaw <= 168 ? predstihRaw : 24;
     return { zapnuto, predstihHodin };
   } catch { return { zapnuto: true, predstihHodin: 24 }; }
+}
+
+// Fáze 7G.3 — retenční engine (GDPR lifecycle, audit 7E/7F/7G.1/7G.2/7G.2A).
+// NA ROZDÍL od ziskatBufferMinut()/ziskatNastaveniPripominek() výš ZÁMĚRNĚ
+// NEMÁ žádný fallback na pevné číslo — chybějící, nečíselný, nebo <=0 klíč
+// znamená "tahle kategorie se vůbec nezpracovává" (hodnota null v návratové
+// mapě), nikdy "použij výchozí lhůtu". Žádná kategorie navíc nesmí zablokovat
+// ostatní — každý klíč se vyhodnocuje nezávisle.
+const RETENCE_KLICE = [
+  'retence_rezervace_dokoncena_dny',
+  'retence_rezervace_zrusena_dny',
+  'retence_rezervace_nedostavila_dny',
+  'retence_poukazy_uzavrene_dny',
+  'retence_poukazy_expirovane_dny',
+  'retence_zadosti_dny',
+  'retence_newsletter_dny'
+];
+async function ziskatRetenciNastaveni(client = db) {
+  const { rows } = await client.query(
+    'SELECT klic, hodnota FROM nastaveni WHERE klic = ANY($1)', [RETENCE_KLICE]
+  );
+  const mapa = {};
+  rows.forEach(r => { mapa[r.klic] = r.hodnota; });
+  const vysledek = {};
+  for (const klic of RETENCE_KLICE) {
+    const cislo = mapa[klic] === undefined ? NaN : parseInt(mapa[klic], 10);
+    vysledek[klic] = Number.isFinite(cislo) && cislo > 0 ? cislo : null;
+  }
+  return vysledek;
 }
 
 // ── Klientky (Fáze 6D) ──────────────────────────────────────────────────────
@@ -240,6 +280,379 @@ async function anonymizovatKlientku(client, klientkaId) {
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch {}
     throw e;
+  }
+}
+
+// ── Retenční engine (Fáze 7G.3, návrh 7G.1/7G.2/7G.2A) ──────────────────────
+// NEZÁVISLÁ retence (Varianta A, schváleno 7G.2A): historické rezervace,
+// poukazy, žádosti o poukaz a newsletter odběratelé se mohou anonymizovat
+// SAMOSTATNĚ, bez ohledu na to, jestli samotná klientka je ještě blokovaná
+// něčím úplně jiným. Audit jde do SAMOSTATNÉ tabulky "retence_udalosti"
+// (Varianta B) — "klientky_udalosti" zůstává beze změny, dál jen pro ruční
+// POST /api/admin/klientky/:id/anonymizovat (ten tímhle blokem není nijak
+// dotčen, viz beze změny ponechaná anonymizovatKlientku výš).
+//
+// Společný princip pro DRY-RUN i APPLY: stejné "najitKandidaty*" funkce
+// používá jak sestavitRetenciReport() (dry-run/cron), tak smyčka v
+// provestRetenciApply() — nikdy dvě nezávislé kopie té samé podmínky.
+// APPLY navíc u KAŽDÉHO kandidáta znovu ověří úplně všechno uvnitř vlastní
+// krátké transakce (SELECT...FOR UPDATE) těsně před zápisem — ID z dry-run
+// reportu jsou jen "co zkusit", nikdy slepý seznam k přepsání.
+
+const REZERVACE_KATEGORIE = [
+  { stav: 'dokoncena', klic: 'retence_rezervace_dokoncena_dny' },
+  { stav: 'zrusena', klic: 'retence_rezervace_zrusena_dny' },
+  { stav: 'nedostavila_se', klic: 'retence_rezervace_nedostavila_dny' }
+];
+
+function dnyZpetDnesIso(pocetDni) {
+  const d = new Date();
+  d.setDate(d.getDate() - pocetDni);
+  return d.toISOString().slice(0, 10);
+}
+
+// -- Rezervace --
+async function najitKandidatyRezervace(client, stav, pocetDni) {
+  const { rows } = await client.query(
+    `SELECT id, klientka_id, datum FROM rezervace
+     WHERE stav = $1 AND datum < $2 AND jmeno IS DISTINCT FROM '(anonymizováno)'`,
+    [stav, dnyZpetDnesIso(pocetDni)]
+  );
+  return rows;
+}
+// Znovu ověří VŠE uvnitř vlastní transakce (viz princip výš) — ID ze seznamu
+// kandidátů je jen "co zkusit", nikdy jistota, že se to má skutečně stát.
+async function anonymizovatRezervaciRetenci(client, rezervaceId, ocekavanyStav, pocetDni, duvod, spousteno) {
+  await client.query('BEGIN');
+  try {
+    const { rows: [r] } = await client.query('SELECT * FROM rezervace WHERE id = $1 FOR UPDATE', [rezervaceId]);
+    if (!r) { await client.query('ROLLBACK'); return { ok: false, duvod: 'nenalezeno' }; }
+    if (r.jmeno === '(anonymizováno)') { await client.query('ROLLBACK'); return { ok: false, duvod: 'jiz_anonymizovano' }; }
+    if (r.stav !== ocekavanyStav) { await client.query('ROLLBACK'); return { ok: false, duvod: 'stav_se_zmenil' }; }
+    if (!(r.datum < dnyZpetDnesIso(pocetDni))) { await client.query('ROLLBACK'); return { ok: false, duvod: 'jiz_nesplnuje_lhutu' }; }
+    await client.query(
+      `UPDATE rezervace SET jmeno = '(anonymizováno)', telefon = '', email = NULL, poznamka = NULL WHERE id = $1`,
+      [rezervaceId]
+    );
+    await client.query(
+      `INSERT INTO retence_udalosti (objekt_typ, objekt_id, klientka_id, udalost, spousteno, dry_run, duvod)
+       VALUES ('rezervace', $1, $2, 'anonymizovano', $3, false, $4)`,
+      [rezervaceId, r.klientka_id, spousteno, duvod]
+    );
+    await client.query('COMMIT');
+    return { ok: true };
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch {}
+    return { ok: false, duvod: 'chyba: ' + e.message };
+  }
+}
+
+// -- Poukazy --
+async function najitKandidatyPoukazyUzavrene(client, pocetDni) {
+  const { rows } = await client.query(
+    `SELECT id, klientka_id FROM poukazy
+     WHERE stav IN ('pouzity','zruseny') AND uzavreno_kdy IS NOT NULL AND uzavreno_kdy < $1
+       AND kupujici_jmeno IS NOT NULL`,
+    [dnyZpetDnesIso(pocetDni)]
+  );
+  return rows;
+}
+// Jen pro DRY-RUN report (bod 11 zadání) — poukazy, které jsou uzavřené, ale
+// nemají známý okamžik uzavření (historické řádky bez uzavreno_kdy). Nezávisí
+// na retenčním nastavení, je to vlastní samostatný "důvod přeskočení".
+async function najitPoukazyBezUzavreniKdy(client) {
+  const { rows } = await client.query(
+    `SELECT id, klientka_id FROM poukazy
+     WHERE stav IN ('pouzity','zruseny') AND uzavreno_kdy IS NULL AND kupujici_jmeno IS NOT NULL`
+  );
+  return rows;
+}
+async function najitKandidatyPoukazyExpirovane(client, pocetDni) {
+  const { rows } = await client.query(
+    `SELECT id, klientka_id FROM poukazy
+     WHERE stav IN ('aktivni','castecne_vyuzity') AND platnost_do < CURRENT_DATE AND platnost_do <= $1
+       AND kupujici_jmeno IS NOT NULL`,
+    [dnyZpetDnesIso(pocetDni)]
+  );
+  return rows;
+}
+// Poukaz mohl být kandidátem přes "uzavřené" NEBO "expirované" pravidlo —
+// znovu se určí, které (pokud vůbec některé) platí PRÁVĚ TEĎ.
+async function anonymizovatPoukazRetenci(client, poukazId, dnyUzavrene, dnyExpirovane, spousteno) {
+  await client.query('BEGIN');
+  try {
+    const { rows: [p] } = await client.query('SELECT * FROM poukazy WHERE id = $1 FOR UPDATE', [poukazId]);
+    if (!p) { await client.query('ROLLBACK'); return { ok: false, duvod: 'nenalezeno' }; }
+    if (p.kupujici_jmeno === null && p.kupujici_email === null && p.kupujici_telefon === null && p.pro_koho === null) {
+      await client.query('ROLLBACK'); return { ok: false, duvod: 'jiz_anonymizovano' };
+    }
+    let duvod = null;
+    if ((p.stav === 'pouzity' || p.stav === 'zruseny') && dnyUzavrene !== null && p.uzavreno_kdy
+        && new Date(p.uzavreno_kdy) < new Date(dnyZpetDnesIso(dnyUzavrene))) {
+      duvod = 'retence_poukazy_uzavrene_dny';
+    } else if ((p.stav === 'aktivni' || p.stav === 'castecne_vyuzity') && dnyExpirovane !== null
+        && p.platnost_do < new Date().toISOString().slice(0, 10) && p.platnost_do <= dnyZpetDnesIso(dnyExpirovane)) {
+      duvod = 'retence_poukazy_expirovane_dny';
+    }
+    if (!duvod) { await client.query('ROLLBACK'); return { ok: false, duvod: 'nesplnuje_podminku' }; }
+    await client.query(
+      `UPDATE poukazy SET kupujici_jmeno = NULL, kupujici_email = NULL, kupujici_telefon = NULL, pro_koho = NULL WHERE id = $1`,
+      [poukazId]
+    );
+    await client.query(
+      `INSERT INTO retence_udalosti (objekt_typ, objekt_id, klientka_id, udalost, spousteno, dry_run, duvod)
+       VALUES ('poukaz', $1, $2, 'anonymizovano', $3, false, $4)`,
+      [poukazId, p.klientka_id, spousteno, duvod]
+    );
+    await client.query('COMMIT');
+    return { ok: true };
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch {}
+    return { ok: false, duvod: 'chyba: ' + e.message };
+  }
+}
+
+// -- Žádosti o poukaz (bez klientka_id, vždy samostatná kategorie) --
+async function najitKandidatyZadosti(client, pocetDni) {
+  const { rows } = await client.query(
+    `SELECT id FROM poukazy_zadosti
+     WHERE stav IN ('vyrizena','zamitnuta') AND vytvoreno < $1 AND kupujici_jmeno IS DISTINCT FROM '(anonymizováno)'`,
+    [dnyZpetDnesIso(pocetDni)]
+  );
+  return rows;
+}
+async function anonymizovatZadostRetenci(client, zadostId, pocetDni, spousteno) {
+  await client.query('BEGIN');
+  try {
+    const { rows: [z] } = await client.query('SELECT * FROM poukazy_zadosti WHERE id = $1 FOR UPDATE', [zadostId]);
+    if (!z) { await client.query('ROLLBACK'); return { ok: false, duvod: 'nenalezeno' }; }
+    if (z.kupujici_jmeno === '(anonymizováno)') { await client.query('ROLLBACK'); return { ok: false, duvod: 'jiz_anonymizovano' }; }
+    if (!['vyrizena', 'zamitnuta'].includes(z.stav)) { await client.query('ROLLBACK'); return { ok: false, duvod: 'stav_se_zmenil' }; }
+    if (!(new Date(z.vytvoreno).toISOString().slice(0, 10) < dnyZpetDnesIso(pocetDni))) {
+      await client.query('ROLLBACK'); return { ok: false, duvod: 'jiz_nesplnuje_lhutu' };
+    }
+    await client.query(
+      `UPDATE poukazy_zadosti SET kupujici_jmeno = '(anonymizováno)', kupujici_email = 'anonymizovano@invalid.local',
+         kupujici_telefon = NULL, pro_koho = NULL, vzkaz = NULL WHERE id = $1`,
+      [zadostId]
+    );
+    await client.query(
+      `INSERT INTO retence_udalosti (objekt_typ, objekt_id, klientka_id, udalost, spousteno, dry_run, duvod)
+       VALUES ('zadost', $1, NULL, 'anonymizovano', $2, false, 'retence_zadosti_dny')`,
+      [zadostId, spousteno]
+    );
+    await client.query('COMMIT');
+    return { ok: true };
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch {}
+    return { ok: false, duvod: 'chyba: ' + e.message };
+  }
+}
+
+// -- Newsletter (bez vazby na klientky, aktivní odběr se nikdy nezpracovává) --
+async function najitKandidatyNewsletter(client, pocetDni) {
+  const { rows } = await client.query(
+    `SELECT id FROM newsletter_odberatele
+     WHERE aktivni = false AND odhlaseno_kdy IS NOT NULL AND odhlaseno_kdy < $1
+       AND email NOT LIKE 'anonym+%@invalid.local'`,
+    [dnyZpetDnesIso(pocetDni)]
+  );
+  return rows;
+}
+async function anonymizovatNewsletterRetenci(client, odberatelId, pocetDni, spousteno) {
+  await client.query('BEGIN');
+  try {
+    const { rows: [n] } = await client.query('SELECT * FROM newsletter_odberatele WHERE id = $1 FOR UPDATE', [odberatelId]);
+    if (!n) { await client.query('ROLLBACK'); return { ok: false, duvod: 'nenalezeno' }; }
+    if (/^anonym\+\d+@invalid\.local$/.test(n.email)) { await client.query('ROLLBACK'); return { ok: false, duvod: 'jiz_anonymizovano' }; }
+    if (n.aktivni) { await client.query('ROLLBACK'); return { ok: false, duvod: 'stav_se_zmenil' }; }
+    if (!n.odhlaseno_kdy || !(new Date(n.odhlaseno_kdy) < new Date(dnyZpetDnesIso(pocetDni)))) {
+      await client.query('ROLLBACK'); return { ok: false, duvod: 'jiz_nesplnuje_lhutu' };
+    }
+    await client.query(
+      `UPDATE newsletter_odberatele SET email = 'anonym+' || id || '@invalid.local', jmeno = NULL WHERE id = $1`,
+      [odberatelId]
+    );
+    await client.query(
+      `INSERT INTO retence_udalosti (objekt_typ, objekt_id, klientka_id, udalost, spousteno, dry_run, duvod)
+       VALUES ('newsletter', $1, NULL, 'anonymizovano', $2, false, 'retence_newsletter_dny')`,
+      [odberatelId, spousteno]
+    );
+    await client.query('COMMIT');
+    return { ok: true };
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch {}
+    return { ok: false, duvod: 'chyba: ' + e.message };
+  }
+}
+
+// -- Klientka (vlastní, nezávislý proces — NEDOTÝKÁ se jejích rezervací/
+// poukazů, ty mají od Varianty A vlastní nezávislé cesty výš) --
+async function vyhodnotitKlientky(client) {
+  const { rows: klienti } = await client.query('SELECT id FROM klientky WHERE anonymizovano_kdy IS NULL');
+  const kandidati = [];
+  const blokovano = [];
+  const ted = new Date();
+  for (const k of klienti) {
+    const { rows: rez } = await client.query(
+      `SELECT datum, cas_od FROM rezervace WHERE klientka_id = $1 AND stav IN ('cekajici','potvrzena')`,
+      [k.id]
+    );
+    const maBudouciRezervaci = rez.some(r => new Date(r.datum + 'T' + String(r.cas_od).slice(0, 5) + ':00') > ted);
+    if (maBudouciRezervaci) { blokovano.push({ id: k.id, duvod: 'budouci_rezervace' }); continue; }
+    const { rows: [pocty] } = await client.query(
+      `SELECT count(*) AS pocet FROM poukazy WHERE klientka_id = $1 AND stav IN ('aktivni','castecne_vyuzity') AND platnost_do >= CURRENT_DATE`,
+      [k.id]
+    );
+    if (Number(pocty.pocet) > 0) { blokovano.push({ id: k.id, duvod: 'platny_poukaz' }); continue; }
+    kandidati.push({ id: k.id });
+  }
+  return { kandidati, blokovano };
+}
+async function anonymizovatKlientkuRetenci(client, klientkaId, spousteno) {
+  await client.query('BEGIN');
+  try {
+    const { rows: [k] } = await client.query('SELECT * FROM klientky WHERE id = $1 FOR UPDATE', [klientkaId]);
+    if (!k) { await client.query('ROLLBACK'); return { ok: false, duvod: 'nenalezeno' }; }
+    if (k.anonymizovano_kdy) { await client.query('ROLLBACK'); return { ok: false, duvod: 'jiz_anonymizovano' }; }
+    const ted = new Date();
+    const { rows: rez } = await client.query(
+      `SELECT datum, cas_od FROM rezervace WHERE klientka_id = $1 AND stav IN ('cekajici','potvrzena')`,
+      [klientkaId]
+    );
+    if (rez.some(r => new Date(r.datum + 'T' + String(r.cas_od).slice(0, 5) + ':00') > ted)) {
+      await client.query('ROLLBACK'); return { ok: false, duvod: 'budouci_rezervace' };
+    }
+    const { rows: [pocty] } = await client.query(
+      `SELECT count(*) AS pocet FROM poukazy WHERE klientka_id = $1 AND stav IN ('aktivni','castecne_vyuzity') AND platnost_do >= CURRENT_DATE`,
+      [klientkaId]
+    );
+    if (Number(pocty.pocet) > 0) { await client.query('ROLLBACK'); return { ok: false, duvod: 'platny_poukaz' }; }
+    await client.query(
+      `UPDATE klientky SET jmeno=NULL, telefon=NULL, telefon_normalizovany=NULL, email=NULL, email_normalizovany=NULL,
+         poznamka=NULL, alergie=NULL, preference=NULL, aktivni=false, anonymizovano_kdy=now(), upraveno=now() WHERE id = $1`,
+      [klientkaId]
+    );
+    await client.query(
+      `INSERT INTO retence_udalosti (objekt_typ, objekt_id, klientka_id, udalost, spousteno, dry_run, duvod)
+       VALUES ('klientka', $1, $1, 'anonymizovano', $2, false, 'bez_blokatoru')`,
+      [klientkaId, spousteno]
+    );
+    await client.query('COMMIT');
+    return { ok: true };
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch {}
+    return { ok: false, duvod: 'chyba: ' + e.message };
+  }
+}
+
+// -- Společný DRY-RUN report (používá ho GET dry-run endpoint i cron) --
+async function sestavitRetenciReport(client) {
+  const nastaveni = await ziskatRetenciNastaveni(client);
+  const kategorie = {};
+
+  for (const { stav, klic } of REZERVACE_KATEGORIE) {
+    const dny = nastaveni[klic];
+    if (dny === null) { kategorie['rezervace_' + stav] = { stav_nastaveni: 'NENASTAVENO', pocet_kandidatu: 0, kandidati: [] }; continue; }
+    const k = await najitKandidatyRezervace(client, stav, dny);
+    kategorie['rezervace_' + stav] = { stav_nastaveni: 'OK', pocet_kandidatu: k.length, kandidati: k.map(r => r.id) };
+  }
+
+  const dnyUzavrene = nastaveni.retence_poukazy_uzavrene_dny;
+  if (dnyUzavrene === null) kategorie.poukazy_uzavrene = { stav_nastaveni: 'NENASTAVENO', pocet_kandidatu: 0, kandidati: [] };
+  else { const k = await najitKandidatyPoukazyUzavrene(client, dnyUzavrene); kategorie.poukazy_uzavrene = { stav_nastaveni: 'OK', pocet_kandidatu: k.length, kandidati: k.map(p => p.id) }; }
+  const bezUzavreniKdy = await najitPoukazyBezUzavreniKdy(client);
+  kategorie.poukazy_bez_uzavreni_kdy = { duvod: 'chybí datum uzavření (historický řádek)', pocet: bezUzavreniKdy.length, id: bezUzavreniKdy.map(p => p.id) };
+
+  const dnyExpirovane = nastaveni.retence_poukazy_expirovane_dny;
+  if (dnyExpirovane === null) kategorie.poukazy_expirovane = { stav_nastaveni: 'NENASTAVENO', pocet_kandidatu: 0, kandidati: [] };
+  else { const k = await najitKandidatyPoukazyExpirovane(client, dnyExpirovane); kategorie.poukazy_expirovane = { stav_nastaveni: 'OK', pocet_kandidatu: k.length, kandidati: k.map(p => p.id) }; }
+
+  const dnyZadosti = nastaveni.retence_zadosti_dny;
+  if (dnyZadosti === null) kategorie.zadosti = { stav_nastaveni: 'NENASTAVENO', pocet_kandidatu: 0, kandidati: [] };
+  else { const k = await najitKandidatyZadosti(client, dnyZadosti); kategorie.zadosti = { stav_nastaveni: 'OK', pocet_kandidatu: k.length, kandidati: k.map(z => z.id) }; }
+
+  const dnyNewsletter = nastaveni.retence_newsletter_dny;
+  if (dnyNewsletter === null) kategorie.newsletter = { stav_nastaveni: 'NENASTAVENO', pocet_kandidatu: 0, kandidati: [] };
+  else { const k = await najitKandidatyNewsletter(client, dnyNewsletter); kategorie.newsletter = { stav_nastaveni: 'OK', pocet_kandidatu: k.length, kandidati: k.map(n => n.id) }; }
+
+  const { kandidati: klientkyKandidati, blokovano: klientkyBlokovano } = await vyhodnotitKlientky(client);
+  kategorie.klientky = { stav_nastaveni: 'OK', pocet_kandidatu: klientkyKandidati.length, kandidati: klientkyKandidati.map(k => k.id) };
+
+  const pocetKandidatuCelkem = Object.values(kategorie).reduce((s, k) => s + (k.pocet_kandidatu || 0), 0);
+  return {
+    cas_reportu: new Date().toISOString(),
+    nastaveni,
+    kategorie,
+    blokovano_klientky: klientkyBlokovano,
+    pocet_kandidatu_celkem: pocetKandidatuCelkem,
+    limit: RETENCE_MAX_APPLY,
+    apply_by_bylo_mozne: pocetKandidatuCelkem > 0
+  };
+}
+
+// -- APPLY — zpracuje kandidáty do limitu RETENCE_MAX_APPLY, v pořadí
+// rezervace → poukazy → žádosti → newsletter → klientky (viz 7G.2 sekce 5).
+// Každá entita vlastní krátká transakce (Varianta B, 7G.2 sekce 7) — chyba
+// jedné entity neruší zbytek běhu.
+async function provestRetenciApply(spousteno) {
+  const client = await db.connect();
+  try {
+    const nastaveni = await ziskatRetenciNastaveni(client);
+    let zbyva = RETENCE_MAX_APPLY;
+    let limitDosazen = false;
+    const vysledky = { zpracovano: 0, uspesnych: 0, preskoceno: [] };
+
+    const zpracujKategorii = async (kandidati, anonymizujFn) => {
+      for (const kandidat of kandidati) {
+        if (zbyva <= 0) { limitDosazen = true; return; }
+        const vysledek = await anonymizujFn(kandidat);
+        vysledky.zpracovano++; zbyva--;
+        if (vysledek.ok) vysledky.uspesnych++;
+        else vysledky.preskoceno.push({ id: kandidat.id, duvod: vysledek.duvod });
+      }
+    };
+
+    for (const { stav, klic } of REZERVACE_KATEGORIE) {
+      if (limitDosazen) break;
+      const dny = nastaveni[klic];
+      if (dny === null) continue;
+      const kandidati = await najitKandidatyRezervace(client, stav, dny);
+      await zpracujKategorii(kandidati, k => anonymizovatRezervaciRetenci(client, k.id, stav, dny, klic, spousteno));
+    }
+
+    if (!limitDosazen) {
+      const dnyUzavrene = nastaveni.retence_poukazy_uzavrene_dny;
+      const dnyExpirovane = nastaveni.retence_poukazy_expirovane_dny;
+      const kandidatiPoukazu = [
+        ...(dnyUzavrene !== null ? await najitKandidatyPoukazyUzavrene(client, dnyUzavrene) : []),
+        ...(dnyExpirovane !== null ? await najitKandidatyPoukazyExpirovane(client, dnyExpirovane) : [])
+      ];
+      await zpracujKategorii(kandidatiPoukazu, k => anonymizovatPoukazRetenci(client, k.id, dnyUzavrene, dnyExpirovane, spousteno));
+    }
+
+    if (!limitDosazen && nastaveni.retence_zadosti_dny !== null) {
+      const dny = nastaveni.retence_zadosti_dny;
+      const kandidati = await najitKandidatyZadosti(client, dny);
+      await zpracujKategorii(kandidati, k => anonymizovatZadostRetenci(client, k.id, dny, spousteno));
+    }
+
+    if (!limitDosazen && nastaveni.retence_newsletter_dny !== null) {
+      const dny = nastaveni.retence_newsletter_dny;
+      const kandidati = await najitKandidatyNewsletter(client, dny);
+      await zpracujKategorii(kandidati, k => anonymizovatNewsletterRetenci(client, k.id, dny, spousteno));
+    }
+
+    if (!limitDosazen) {
+      const { kandidati } = await vyhodnotitKlientky(client);
+      await zpracujKategorii(kandidati, k => anonymizovatKlientkuRetenci(client, k.id, spousteno));
+    }
+
+    vysledky.limit_dosazen = limitDosazen;
+    vysledky.limit = RETENCE_MAX_APPLY;
+    return vysledky;
+  } finally {
+    client.release();
   }
 }
 
@@ -1255,11 +1668,17 @@ app.post('/api/admin/poukazy', async (req, res) => {
   }
 });
 
+// Fáze 7G.3 — uzavreno_kdy se udržuje tady atomicky ve stejném UPDATE jako
+// stav: přechod na pouzity/zruseny nastaví now(), přechod zpět na
+// aktivni/castecne_vyuzity ho vynuluje (viz schema.sql komentář u sloupce).
 app.patch('/api/admin/poukazy/:id/stav', async (req, res) => {
   const { stav } = req.body || {};
   if (!['aktivni', 'castecne_vyuzity', 'pouzity', 'zruseny'].includes(stav)) return res.status(400).json({ chyba: 'Neplatný stav.' });
   try {
-    await db.query('UPDATE poukazy SET stav = $1 WHERE id = $2', [stav, req.params.id]);
+    await db.query(
+      `UPDATE poukazy SET stav = $1, uzavreno_kdy = CASE WHEN $1 IN ('pouzity','zruseny') THEN now() ELSE NULL END WHERE id = $2`,
+      [stav, req.params.id]
+    );
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
@@ -1321,8 +1740,10 @@ app.post('/api/admin/poukazy/:id/uplatnit', async (req, res) => {
 
     const novyZustatek = Number(poukaz.zustatek) - castka;
     const novyStav = novyZustatek <= 0 ? 'pouzity' : 'castecne_vyuzity';
+    // Fáze 7G.3 — plné vyčerpání (pouzity) nastaví uzavreno_kdy; částečné
+    // uplatnění (castecne_vyuzity) ho nechává NULL (poukaz je pořád otevřený).
     const { rows: [aktualizovany] } = await client.query(
-      'UPDATE poukazy SET zustatek = $1, stav = $2 WHERE id = $3 RETURNING *',
+      `UPDATE poukazy SET zustatek = $1, stav = $2, uzavreno_kdy = CASE WHEN $2 = 'pouzity' THEN now() ELSE NULL END WHERE id = $3 RETURNING *`,
       [novyZustatek, novyStav, req.params.id]
     );
     await client.query('COMMIT');
@@ -1563,6 +1984,29 @@ app.post('/api/admin/klientky/:id/anonymizovat', async (req, res) => {
   } finally {
     client.release();
   }
+});
+
+// Fáze 7G.3 — retenční engine, dry-run (READ-ONLY, nic nemění, nic nezapisuje
+// ani do retence_udalosti). Admin-only (/api/admin middleware výš).
+app.get('/api/admin/retence/dry-run', async (req, res) => {
+  try {
+    const report = await sestavitRetenciReport(db);
+    res.json(report);
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
+// Fáze 7G.3 — retenční engine, skutečné provedení. Vyžaduje explicitní
+// { dry_run: false, potvrzeno: true } — žádná jiná kombinace těla požadavku
+// neprojde, apply je vždy jen na vědomé ruční vyžádání (spousteno='rucne'),
+// nikdy automaticky (viz POST /api/cron/retence níž, ten jen reportuje).
+app.post('/api/admin/retence/apply', async (req, res) => {
+  const telo = req.body || {};
+  if (telo.dry_run !== false) return res.status(400).json({ chyba: 'Chybí nebo neplatné dry_run (musí být přesně false).' });
+  if (telo.potvrzeno !== true) return res.status(400).json({ chyba: 'Chybí potvrzení akce (potvrzeno musí být přesně true).' });
+  try {
+    const vysledek = await provestRetenciApply('rucne');
+    res.json({ ok: true, ...vysledek });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
 // -- Newsletter --
@@ -1875,6 +2319,20 @@ app.get('/api/cron/denni', async (req, res) => {
     }
 
     res.json({ ok: true, pripominky, recenze });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
+// Fáze 7G.3 — retenční cron. Fail-closed stejným mechanismem jako /api/cron/
+// denni výš (sdílený CRON_KLIC). ZÁSADNÍ: smí jen DRY-RUN/report, NIKDY
+// neprovádí APPLY — automatický scheduler nesmí sám anonymizovat data, ani
+// když jsou retenční lhůty nastavené (viz 7G.2 sekce 11/18, bod 10).
+app.post('/api/cron/retence', async (req, res) => {
+  if (!CRON_KLIC || req.query.klic !== CRON_KLIC) {
+    return res.status(401).json({ chyba: 'Neplatný klíč.' });
+  }
+  try {
+    const report = await sestavitRetenciReport(db);
+    res.json({ ok: true, ...report });
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 

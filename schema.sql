@@ -164,8 +164,15 @@ create table if not exists poukazy (
   -- "prošlý" se nikde neukládá jako stav — dopočítává se za běhu z platnost_do,
   -- ať je vždy aktuální bez nutnosti plánované úlohy, která by stav přepínala.
   vytvoreno timestamptz not null default now(),
-  klientka_id integer -- Fáze 6D: vazba na klientky(id), nullable — poukaz bez kupujici_telefon
+  klientka_id integer, -- Fáze 6D: vazba na klientky(id), nullable — poukaz bez kupujici_telefon
     -- zůstává klientka_id NULL (nelze bezpečně určit), kupujici_* pole ZŮSTÁVAJÍ jako snímek
+  uzavreno_kdy timestamptz -- Fáze 7G.3: kdy poukaz naposledy přešel do 'pouzity'/'zruseny'
+    -- (nastaveno ve stejném UPDATE jako změna stavu) — NULL, dokud poukaz nebyl nikdy
+    -- uzavřen, nebo po návratu zpět do 'aktivni'/'castecne_vyuzity'. Retenční engine
+    -- (viz retence_udalosti) počítá stáří uzavřeného poukazu VÝHRADNĚ z tohoto sloupce,
+    -- nikdy z "vytvoreno" (to je okamžik vydání, ne uzavření — viz audit Fáze 7G.2A).
+    -- Poukaz s uzavreno_kdy IS NULL a stav IN ('pouzity','zruseny') je historický
+    -- řádek bez známého okamžiku uzavření — retenční engine ho vždy přeskočí.
 );
 
 -- Fáze 6D: skutečná klientská entita s vlastním id — nahrazuje telefon jako
@@ -260,16 +267,42 @@ create table if not exists klientky_udalosti (
   kdy timestamptz not null default now()
 );
 
--- Fáze 7D.2B: rezervovaná (zatím NEPOUŽÍVANÁ) místa pro budoucí retenční
--- lhůty anonymizace — záměrně se sem NEVKLÁDÁ žádný řádek/výchozí hodnota,
--- dokud nejsou lhůty právně/účetně ověřené (viz audit Fáze 7D.1/7D.2A).
--- Chybějící klíč se NESMÍ nikde v aplikaci vykládat jako "0 dní" nebo jako
--- implicitní souhlas s automatickou anonymizací — dokud klíč neexistuje,
--- žádná automatická anonymizace podle stáří záznamu se nesmí spouštět.
---   retence_rezervace_dny    (hodnota musí být stanovena po právním/účetním ověření)
---   retence_poukazy_dny      (hodnota musí být stanovena po právním/účetním ověření)
---   retence_zadosti_dny      (hodnota musí být stanovena po právním/účetním ověření)
---   retence_newsletter_dny   (hodnota musí být stanovena po právním/účetním ověření)
+-- Fáze 7D.2B/7G.3: klíče v "nastaveni" pro retenční engine (viz
+-- ziskatRetenciNastaveni v server.js a tabulka retence_udalosti níž) —
+-- záměrně se sem NEVKLÁDÁ žádný řádek/výchozí hodnota, dokud nejsou lhůty
+-- právně/účetně ověřené (viz audit Fáze 7D.1/7D.2A/7E/7G.1/7G.2). Chybějící
+-- (nebo neplatný/<=0) klíč se NESMÍ nikde v aplikaci vykládat jako "0 dní"
+-- nebo jako implicitní souhlas s automatickou anonymizací — dokud klíč
+-- neexistuje jako platné kladné celé číslo, daná kategorie se retenčním
+-- enginem vůbec nezpracovává (fail-closed, viz server.js):
+--   retence_rezervace_dokoncena_dny    (hodnota musí být stanovena po právním/účetním ověření)
+--   retence_rezervace_zrusena_dny      (hodnota musí být stanovena po právním/účetním ověření)
+--   retence_rezervace_nedostavila_dny  (hodnota musí být stanovena po právním/účetním ověření)
+--   retence_poukazy_uzavrene_dny       (hodnota musí být stanovena po právním/účetním ověření)
+--   retence_poukazy_expirovane_dny     (hodnota musí být stanovena po právním/účetním ověření)
+--   retence_zadosti_dny                (hodnota musí být stanovena po právním/účetním ověření)
+--   retence_newsletter_dny             (hodnota musí být stanovena po právním/účetním ověření)
+
+-- Fáze 7G.3: auditní stopa retenčního enginu — SAMOSTATNÁ od klientky_udalosti
+-- (ta beze změny zůstává jen pro ruční anonymizaci klientky přes
+-- POST /api/admin/klientky/:id/anonymizovat, viz audit 7G.2A/7G.2). Tahle
+-- tabulka eviduje KAŽDOU skutečně provedenou retenční anonymizaci — klientky,
+-- rezervace, poukazu, žádosti i newsletteru, nezávisle na sobě (Varianta A,
+-- nezávislá retence historických objektů, schváleno 7G.2A). Append-only,
+-- jen metadata, nikdy osobní údaje. Záměrně BEZ FOREIGN KEY na klientky(id)
+-- ani na cílové tabulky — záznam musí přežít i budoucí fyzické smazání
+-- objektu, ne se s ním ztratit (stejný princip jako klientky_udalosti).
+create table if not exists retence_udalosti (
+  id serial primary key,
+  objekt_typ text not null check (objekt_typ in ('klientka','rezervace','poukaz','zadost','newsletter')),
+  objekt_id integer not null,
+  klientka_id integer, -- nullable — u 'zadost'/'newsletter' vazba na klientku neexistuje (viz schema poukazy_zadosti/newsletter_odberatele)
+  udalost text not null, -- zatím jediná hodnota: 'anonymizovano'
+  spousteno text not null check (spousteno in ('rucne','automaticky')),
+  dry_run boolean not null default false, -- vždy false — skutečný (ne dry-run) zápis; sloupec existuje jen pro budoucí rozšiřitelnost, dry-run do této tabulky nikdy nezapisuje
+  duvod text, -- např. 'retence_rezervace_dokoncena_dny'
+  kdy timestamptz not null default now()
+);
 
 -- Počáteční ceník podle skutečného obsahu webu
 insert into cenik (skupina, emoji, varianta, delka_min, cena, rezervovatelna, poradi_skupiny, poradi_varianty) values
