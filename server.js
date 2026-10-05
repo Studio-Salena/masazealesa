@@ -682,12 +682,54 @@ async function prepocitatSouhrnRezervace(client, rezervaceId) {
   return aktualizovana;
 }
 
+// ── Rate limit na admin heslo (Fáze 8A.3) ──────────────────────────────────
+// Jeden sdílený in-memory čítač pro celý proces — společný pro POST /api/login
+// i pro vyzadovatAdmina (/api/admin/*), protože obojí ověřuje stejné tajemství
+// (ADMIN_HESLO) a /api/login lze vynechat a zkoušet heslo přímo na libovolném
+// admin endpointu. Žádná IP, žádný req.ip/X-Forwarded-For/trust proxy (Render
+// proxy chain nebyl ověřen) — viz 8A.2. Správné heslo limiter VŽDY obchází
+// a resetuje (self-lockout legitimního admina je tak prakticky vyloučen).
+const RATE_LIMIT_MAX = 10;
+const RATE_LIMIT_OKNO_MS = 15 * 60 * 1000; // 15 minut
+let rateLimitPocet = 0;
+let rateLimitOknoOd = null; // Date.now() začátku okna, nebo null = žádné okno neběží
+
+// Malá čistá funkce (testovatelná čtením kódu/logiky) — pokud od začátku
+// okna uplynulo víc než RATE_LIMIT_OKNO_MS, okno vypršelo a čítač se vynuluje.
+function rateLimitAktualizovatOkno(ted = Date.now()) {
+  if (rateLimitOknoOd !== null && ted - rateLimitOknoOd >= RATE_LIMIT_OKNO_MS) {
+    rateLimitPocet = 0;
+    rateLimitOknoOd = null;
+  }
+}
+function rateLimitJeBlokovano() {
+  rateLimitAktualizovatOkno();
+  return rateLimitPocet >= RATE_LIMIT_MAX;
+}
+function rateLimitZaznamenatNeuspech() {
+  rateLimitAktualizovatOkno();
+  if (rateLimitOknoOd === null) rateLimitOknoOd = Date.now();
+  rateLimitPocet++;
+  if (rateLimitPocet === RATE_LIMIT_MAX) {
+    console.warn(`Rate limit: dosaženo ${RATE_LIMIT_MAX} neúspěšných pokusů o admin heslo, další pokusy budou odmítnuty (429) po dobu ${RATE_LIMIT_OKNO_MS / 60000} min.`);
+  }
+}
+function rateLimitResetPoUspechu() {
+  rateLimitPocet = 0;
+  rateLimitOknoOd = null;
+}
+
 function vyzadovatAdmina(req, res, next) {
   const heslo = req.headers['x-admin-heslo'] || '';
-  if (!ADMIN_HESLO || heslo !== ADMIN_HESLO) {
-    return res.status(401).json({ chyba: 'Neplatné heslo' });
+  if (ADMIN_HESLO && heslo === ADMIN_HESLO) {
+    rateLimitResetPoUspechu();
+    return next();
   }
-  next();
+  if (rateLimitJeBlokovano()) {
+    return res.status(429).json({ chyba: 'Příliš mnoho neúspěšných pokusů, zkuste to prosím za chvíli znovu.' });
+  }
+  rateLimitZaznamenatNeuspech();
+  return res.status(401).json({ chyba: 'Neplatné heslo' });
 }
 
 function vygenerovatKod() {
@@ -907,7 +949,14 @@ function zruseniEmailHtml(r) {
 // ── LOGIN (admin) ──
 app.post('/api/login', (req, res) => {
   const { heslo } = req.body || {};
-  if (ADMIN_HESLO && heslo === ADMIN_HESLO) return res.json({ ok: true });
+  if (ADMIN_HESLO && heslo === ADMIN_HESLO) {
+    rateLimitResetPoUspechu();
+    return res.json({ ok: true });
+  }
+  if (rateLimitJeBlokovano()) {
+    return res.status(429).json({ ok: false });
+  }
+  rateLimitZaznamenatNeuspech();
   res.status(401).json({ ok: false });
 });
 
