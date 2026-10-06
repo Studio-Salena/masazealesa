@@ -1068,6 +1068,21 @@ app.post('/api/rezervace', async (req, res) => {
   if (!datum || !cas_od || !jmeno || !telefon || !email || !cenik_id) {
     return res.status(400).json({ chyba: 'Vyplňte prosím jméno, telefon, e-mail, masáž, datum a čas.' });
   }
+  if (!email.includes('@')) {
+    return res.status(400).json({ chyba: 'Zadejte prosím platný e-mail.' });
+  }
+  // Minimální délka po normalizaci (ne regex formátu) — 9 číslic odpovídá
+  // nejkratšímu legitimnímu případu (české číslo bez předvolby); zahraniční
+  // čísla se zadanou předvolkou mají po normalizaci vždy víc číslic, takže
+  // hranice nijak neomezuje mezinárodní formáty (viz audit 8C.1/8C.2).
+  const telefonNormalizovany = normalizovatTelefon(telefon);
+  if (!telefonNormalizovany || telefonNormalizovany.length < 9) {
+    return res.status(400).json({ chyba: 'Zadejte prosím platné telefonní číslo.' });
+  }
+  if (jmeno.length > 100 || email.length > 200 || telefon.length > 30
+      || (poznamka && poznamka.length > 500) || (alergie && alergie.length > 500) || (preference && preference.length > 500)) {
+    return res.status(400).json({ chyba: 'Některé z vyplněných polí je příliš dlouhé.' });
+  }
   if (!souhlas_gdpr) {
     return res.status(400).json({ chyba: 'Pro odeslání rezervace je potřeba souhlasit se zpracováním osobních údajů.' });
   }
@@ -1088,6 +1103,12 @@ app.post('/api/rezervace', async (req, res) => {
     if (rezervaceOd && datum < rezervaceOd) {
       await client.query('ROLLBACK');
       return res.status(400).json({ chyba: `Online rezervace spouštíme až od ${formatDatumCz(rezervaceOd)}, vyberte prosím pozdější datum.` });
+    }
+
+    const dnesIso = new Date().toISOString().slice(0, 10);
+    if (datum < dnesIso) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ chyba: 'Rezervovat lze pouze na dnešek nebo pozdější datum.' });
     }
 
     const oteviraciDoba = await ziskatEfektivniOtevrenoDobu(datum);
@@ -1169,11 +1190,14 @@ app.post('/api/rezervace', async (req, res) => {
          VALUES ($1, $2, $3)
          ON CONFLICT (email) DO UPDATE SET aktivni = true, odhlaseno_kdy = NULL, jmeno = COALESCE($2, newsletter_odberatele.jmeno)`,
         [email.trim().toLowerCase(), jmeno || null, token]
-      ).catch(() => {});
+      ).catch(e => console.error('Newsletter upsert po rezervaci selhal:', e.message));
     }
 
     if (email) {
-      odeslatEmail(email, 'Rezervace přijata – Masáže Alesa', prijataEmailHtml(jmeno, nazevMasaze, datum, cas_od, cas_do));
+      odeslatEmail(email, 'Rezervace přijata – Masáže Alesa', prijataEmailHtml(jmeno, nazevMasaze, datum, cas_od, cas_do))
+        .then(uspech => {
+          if (!uspech) console.error('Potvrzovací e-mail k rezervaci ' + rezervace.id + ' se nepodařilo odeslat.');
+        });
     }
 
     res.json({ ok: true, rezervace });

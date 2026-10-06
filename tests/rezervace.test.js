@@ -1,4 +1,4 @@
-// Regresní test: veřejný rezervační flow (Fáze 8B.1/8B.2/8B.3).
+// Regresní test: veřejný rezervační flow (Fáze 8B.1/8B.2/8B.3, opraveno 8C.3).
 // Na rozdíl od ostatních testů v tomto adresáři, které rezervace vytvářejí
 // přes POST /api/admin/rezervace (jiný, jednodušší kód), tento soubor
 // testuje VEŘEJNÝ POST /api/rezervace a oba GET /api/rezervace/* endpointy —
@@ -6,10 +6,10 @@
 // výjimky, rezervace_od, GDPR souhlas, informativní ověření poukazu,
 // advisory zámek proti souběžným požadavkům, newsletter opt-in).
 //
-// P0.10 (rezervace do minulosti) je VEDOME VYNECHANA — audit 8B.1 zjistil,
-// že současný kód nijak nekontroluje datum < dnes, a 8B.2/8B.3 zadání
-// výslovně zakazuje volit, jaké chování je "správné" (STOP/BLOCKED pattern
-// — rozhodnutí patří vlastníkovi projektu, ne tomuto testu).
+// Fáze 8C.3 doplnila: ochranu proti rezervaci do minulosti (P0.10), validaci
+// formátu e-mailu a minimální délky telefonu po normalizaci, maximální délky
+// vstupních polí a logování (ne tiché pohlcení) chyby newsletter/e-mail
+// side-effectu — viz audit 8C.1 a návrh 8C.2.
 //
 // Běží VÝHRADNĚ proti izolovanému testovacímu prostředí (env-guard.js —
 // fail-closed, žádný produkční fallback). Testovací server musí běžet bez
@@ -36,6 +36,7 @@ function adminFetch(cesta, options = {}) {
   });
 }
 function dnyDopredu(n) { const d = new Date(); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); }
+function dnyZpet(n) { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10); }
 function dnVTydnu(datumIso) { return new Date(datumIso + 'T12:00:00').getDay(); }
 
 // ── Úklid ────────────────────────────────────────────────────────────────
@@ -404,7 +405,7 @@ async function main() {
     ok('P1.2) prázdné povinné pole (jmeno:"") → 400 (JS truthy kontrola zachytí i prázdný string)');
   }
 
-  // P1.3 — neplatný e-mail (KNOWN BUG / DOCUMENTED GAP)
+  // P1.3 — neplatný e-mail (OPRAVENO 8C.3 — dřív KNOWN BUG, teď 400)
   {
     const cenik = await vytvoritTestovaciCenik(60, true);
     const datum = dnyDopredu(28);
@@ -412,22 +413,69 @@ async function main() {
     const telefon = novyTelefon();
     const vysledek = await verejnaRezervace({ datum, cas_od: '10:00', jmeno: 'TEST-8B-P13 (smazat)', telefon, email: 'tohle-neni-platny-email', cenik_id: cenik.id, souhlas_gdpr: true });
     zaznamenejVysledekRezervace(vysledek);
-    assert.equal(vysledek.status, 200, 'DOKUMENTUJE SKUTEČNÉ CHOVÁNÍ (8B.1 HIGH/MEDIUM): endpoint dnes NEVALIDUJE formát e-mailu — "tohle-neni-platny-email" je přijato: ' + JSON.stringify(vysledek.data));
-    bug('P1.3) BUG DISCOVERED — SEPARATE FIX REQUIRED: POST /api/rezervace nevaliduje formát e-mailu (jen presence), rezervace s "tohle-neni-platny-email" vznikla s HTTP 200 — test dokumentuje současné chování, NEOPRAVOVÁNO v této fázi');
+    assert.equal(vysledek.status, 400, 'neplatný e-mail (bez "@") musí po opravě 8C.3 vrátit 400: ' + JSON.stringify(vysledek.data));
+    const pocet = await pocetRezervaciNaSlot(datum, '10:00');
+    assert.equal(pocet, 0, 'neplatný e-mail nesmí vytvořit rezervaci');
+    const pocetKl = await pocetKlientekSTelefonem(telefon);
+    assert.equal(pocetKl, 0, 'neplatný e-mail nesmí vytvořit klientku');
+    ok('P1.3) neplatný e-mail (bez "@") → 400, žádná rezervace, žádná klientka');
   }
 
-  // P1.4 — extrémně dlouhé jméno (KNOWN BUG / DOCUMENTED GAP)
+  // P1.4 — extrémně dlouhé jméno (OPRAVENO 8C.3 — dřív KNOWN BUG, teď 400)
   {
     const cenik = await vytvoritTestovaciCenik(60, true);
     const datum = dnyDopredu(29);
     await zajistitSirokouDobu(datum);
-    const dlouheJmeno = 'TEST-8B-DLOUHE-' + 'X'.repeat(9985) + ' (smazat)'; // ~10000 znaků
+    const dlouheJmeno = 'TEST-8B-DLOUHE-' + 'X'.repeat(90) + ' (smazat)'; // > 100 znaků (limit z 8C.2/8C.3)
     const telefon = novyTelefon();
     const vysledek = await verejnaRezervace({ datum, cas_od: '10:00', jmeno: dlouheJmeno, telefon, email: 'test-8b-p14@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true });
     zaznamenejVysledekRezervace(vysledek);
-    assert.equal(vysledek.status, 200, 'DOKUMENTUJE SKUTEČNÉ CHOVÁNÍ: endpoint nemá limit délky jména: ' + JSON.stringify(vysledek.data));
-    assert.equal(vysledek.data.rezervace.jmeno.length, dlouheJmeno.length, 'extrémně dlouhé jméno se uloží celé, beze zkrácení');
-    bug('P1.4) BUG DISCOVERED — SEPARATE FIX REQUIRED: POST /api/rezervace nemá žádný limit délky vstupu (jmeno ~10000 znaků uloženo celé) — test dokumentuje současné chování, NEOPRAVOVÁNO v této fázi');
+    assert.equal(vysledek.status, 400, 'jméno nad limitem 100 znaků musí po opravě 8C.3 vrátit 400: ' + JSON.stringify(vysledek.data));
+    const pocet = await pocetRezervaciNaSlot(datum, '10:00');
+    assert.equal(pocet, 0, 'příliš dlouhé jméno nesmí vytvořit rezervaci');
+    const pocetKl = await pocetKlientekSTelefonem(telefon);
+    assert.equal(pocetKl, 0, 'příliš dlouhé jméno nesmí vytvořit klientku');
+    ok('P1.4) extrémně dlouhé jméno (>100 znaků) → 400, žádná rezervace, žádná klientka');
+  }
+
+  // P0.10 — rezervace do minulosti (OPRAVENO 8C.3 — dřív vědomě vynecháno, teď 400)
+  {
+    const cenik = await vytvoritTestovaciCenik(60, true);
+    const datum = dnyZpet(1); // včera
+    const telefon = novyTelefon();
+    const vysledek = await verejnaRezervace({ datum, cas_od: '10:00', jmeno: 'TEST-8B-P010 (smazat)', telefon, email: 'test-8b-p010@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true });
+    zaznamenejVysledekRezervace(vysledek);
+    assert.equal(vysledek.status, 400, 'rezervace na včerejší datum musí po opravě 8C.3 vrátit 400: ' + JSON.stringify(vysledek.data));
+    const pocet = await pocetRezervaciNaSlot(datum, '10:00');
+    assert.equal(pocet, 0, 'rezervace do minulosti nesmí vzniknout');
+    const pocetKl = await pocetKlientekSTelefonem(telefon);
+    assert.equal(pocetKl, 0, 'rezervace do minulosti nesmí vytvořit klientku');
+    ok('P0.10) rezervace do minulosti (včera) → 400, žádná rezervace, žádná klientka');
+  }
+
+  // C.1 — neplatný telefon (příliš krátký po normalizaci)
+  {
+    const cenik = await vytvoritTestovaciCenik(60, true);
+    const datum = dnyDopredu(36);
+    await zajistitSirokouDobu(datum);
+    const vysledek = await verejnaRezervace({ datum, cas_od: '10:00', jmeno: 'TEST-8B-C1 (smazat)', telefon: '123', email: 'test-8b-c1@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true });
+    zaznamenejVysledekRezervace(vysledek);
+    assert.equal(vysledek.status, 400, 'telefon "123" (míň než 9 číslic po normalizaci) musí vrátit 400: ' + JSON.stringify(vysledek.data));
+    const pocet = await pocetRezervaciNaSlot(datum, '10:00');
+    assert.equal(pocet, 0, 'nevalidní telefon nesmí vytvořit rezervaci');
+    ok('C.1) nevalidní telefon ("123", < 9 číslic) → 400, žádná rezervace');
+  }
+
+  // C.2 — legitimní zahraniční telefon (musí projít, hranice 9 číslic nesmí zablokovat mezinárodní formát)
+  {
+    const cenik = await vytvoritTestovaciCenik(60, true);
+    const datum = dnyDopredu(37);
+    await zajistitSirokouDobu(datum);
+    const vysledek = await verejnaRezervace({ datum, cas_od: '10:00', jmeno: 'TEST-8B-C2 (smazat)', telefon: '+49 170 1234567', email: 'test-8b-c2@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true });
+    zaznamenejVysledekRezervace(vysledek);
+    assert.equal(vysledek.status, 200, 'legitimní zahraniční telefon musí projít: ' + JSON.stringify(vysledek.data));
+    assert.ok(vysledek.data.rezervace.klientka_id, 'zahraniční telefon musí vytvořit klientku jako jakýkoli jiný validní telefon');
+    ok('C.2) legitimní zahraniční telefon (+49 170 1234567) → 200, rezervace i klientka vznikly');
   }
 
   // P1.5 — platný voucher (jen informativní ověření, zůstatek beze změny)
