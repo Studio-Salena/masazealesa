@@ -38,6 +38,7 @@ function adminFetch(cesta, options = {}) {
 function dnyDopredu(n) { const d = new Date(); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); }
 function dnyZpet(n) { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10); }
 function dnVTydnu(datumIso) { return new Date(datumIso + 'T12:00:00').getDay(); }
+function ponedeliTydne(d) { const den = d.getDay(); const posun = den === 0 ? -6 : 1 - den; const p = new Date(d); p.setDate(p.getDate() + posun); return p; }
 
 // ── Úklid ────────────────────────────────────────────────────────────────
 const uklidRezervace = [];
@@ -133,6 +134,14 @@ async function verejnaRezervace(telo) {
   let data = null;
   try { data = await r.json(); } catch {}
   return { status: r.status, data };
+}
+async function volneTerminy(datum, cenikId) {
+  const r = await fetch(API + '/rezervace/volne-terminy?datum=' + encodeURIComponent(datum) + '&cenik_id=' + encodeURIComponent(cenikId));
+  return { status: r.status, data: await r.json() };
+}
+async function kalendar(zacatek, cenikId) {
+  const r = await fetch(API + '/rezervace/kalendar?zacatek=' + encodeURIComponent(zacatek) + '&cenik_id=' + encodeURIComponent(cenikId));
+  return { status: r.status, data: await r.json() };
 }
 function zaznamenejVysledekRezervace(vysledek) {
   if (vysledek.status === 200 && vysledek.data && vysledek.data.rezervace) {
@@ -574,6 +583,104 @@ async function main() {
     zaznamenejVysledekRezervace(po);
     assert.equal(po.status, 200, 'rezervace po rezervace_od cutoffu musí projít: ' + JSON.stringify(po.data));
     ok('P1.11) rezervace po nastaveném rezervace_od cutoffu → 200');
+  }
+
+  // ======================= 8D.3 — GET availability: past-date fix + validace =======================
+  console.log('--- F/G/H/I (8D.3) ---');
+
+  // P1.10/P1.11 výš nastavily rezervace_od na dnyDopredu(30) a obnoví se až
+  // v globálním finally — bez resetu by blokoval i "dnešek" v testech
+  // F2/G2 níž (rezervace_od by byl v budoucnosti vůči testovanému datu).
+  // Tyto testy netestují rezervace_od, proto ho posuneme bezpečně do minulosti.
+  await nastav('rezervace_od', dnyZpet(365));
+
+  // F1 — včerejší datum: GET volne-terminy nesmí vrátit žádný volno:true
+  {
+    const cenik = await vytvoritTestovaciCenik(60, true);
+    const vcera = dnyZpet(1);
+    const vysledek = await volneTerminy(vcera, cenik.id);
+    assert.equal(vysledek.status, 200, JSON.stringify(vysledek.data));
+    assert.deepEqual(vysledek.data, [], 'minulé datum musí vrátit prázdný seznam termínů (žádný rezervovatelný slot)');
+    ok('F1) GET volne-terminy pro včerejší datum → 200, [] (žádný volno:true)');
+  }
+
+  // F2 — minulá část aktuálního týdne: GET kalendar nesmí u dnů před dneškem nabízet volné termíny
+  {
+    const cenik = await vytvoritTestovaciCenik(60, true);
+    for (let den = 0; den < 7; den++) await nastavitPracovniDobu(den, '07:00', '20:00', null, null, true);
+    const zacatekIso = ponedeliTydne(new Date()).toISOString().slice(0, 10);
+    const dnesIso = new Date().toISOString().slice(0, 10);
+    const vysledek = await kalendar(zacatekIso, cenik.id);
+    assert.equal(vysledek.status, 200, JSON.stringify(vysledek.data));
+    assert.equal(vysledek.data.length, 7, 'kalendar musí vrátit přesně 7 dní');
+    vysledek.data.forEach(den => {
+      if (den.datum < dnesIso) {
+        assert.deepEqual(den.terminy, [], 'den ' + den.datum + ' je v minulosti (aktuální týden) — musí mít prázdné terminy, ne nabízet volné sloty: ' + JSON.stringify(den.terminy));
+      } else {
+        assert.ok(den.terminy.some(t => t.volno === true), 'den ' + den.datum + ' (dnešek/budoucí, otevřeno 07:00-20:00) musí nabízet aspoň 1 volný termín');
+      }
+    });
+    ok('F2) GET kalendar pro aktuální týden: dny před dneškem mají prázdné terminy, dnešek a budoucí dny beze změny (test je robustní vůči dni, kdy běží)');
+  }
+
+  // G1 — regrese: budoucí den musí nadále nabízet dostupné termíny
+  {
+    const cenik = await vytvoritTestovaciCenik(60, true);
+    const datum = dnyDopredu(42);
+    await zajistitSirokouDobu(datum);
+    const vysledek = await volneTerminy(datum, cenik.id);
+    assert.equal(vysledek.status, 200, JSON.stringify(vysledek.data));
+    assert.ok(vysledek.data.some(t => t.volno === true), 'budoucí den s otevřenou pracovní dobou musí nabízet aspoň 1 volný termín (regrese past-date fixu)');
+    ok('G1) budoucí den nadále nabízí dostupné termíny (regrese past-date fixu nerozbila budoucnost)');
+  }
+
+  // G2 — dnešek nesmí být omylem zahrnut do past-date filtru (datum < dnesIso, ne <=)
+  {
+    const cenik = await vytvoritTestovaciCenik(60, true);
+    const dnesIso = new Date().toISOString().slice(0, 10);
+    await zajistitSirokouDobu(dnesIso);
+    const vysledek = await volneTerminy(dnesIso, cenik.id);
+    assert.equal(vysledek.status, 200, JSON.stringify(vysledek.data));
+    assert.ok(vysledek.data.some(t => t.volno === true), 'dnešek (datum === dnesIso) nesmí být omylem filtrován jako minulost');
+    ok('G2) dnešek zůstává dostupný — past-date filtr používá striktně "<", ne "<="');
+  }
+
+  // H — GET -> POST invariant: termín oznámený GET jako volno:true musí POST skutečně přijmout
+  {
+    const cenik = await vytvoritTestovaciCenik(60, true);
+    const datum = dnyDopredu(43);
+    await zajistitSirokouDobu(datum);
+    const ziskane = await volneTerminy(datum, cenik.id);
+    assert.equal(ziskane.status, 200, JSON.stringify(ziskane.data));
+    const volnyCas = ziskane.data.find(t => t.volno === true);
+    assert.ok(volnyCas, 'GET musí pro čistý budoucí den nabídnout aspoň jeden volný termín, aby šel invariant ověřit');
+    const telefon = novyTelefon();
+    const vysledek = await verejnaRezervace({ datum, cas_od: volnyCas.cas, jmeno: 'TEST-8B-H (smazat)', telefon, email: 'test-8b-h@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true });
+    zaznamenejVysledekRezervace(vysledek);
+    assert.equal(vysledek.status, 200, 'termín oznámený GET jako volno:true musí POST přijmout (GET<->POST invariant, bez zásahu třetí strany): ' + JSON.stringify(vysledek.data));
+    ok('H) GET↔POST invariant: termín oznámený GET jako volno:true je POSTem skutečně akceptován (200)');
+  }
+
+  // I — P2 validace vstupů obou GET endpointů
+  {
+    const cenik = await vytvoritTestovaciCenik(60, true);
+    const datum = dnyDopredu(44);
+
+    for (const cid of ['abc', '1.5', '-1', '0']) {
+      const r1 = await volneTerminy(datum, cid);
+      assert.equal(r1.status, 400, 'volne-terminy cenik_id="' + cid + '" musí vrátit 400: ' + JSON.stringify(r1.data));
+      const r2 = await kalendar(datum, cid);
+      assert.equal(r2.status, 400, 'kalendar cenik_id="' + cid + '" musí vrátit 400: ' + JSON.stringify(r2.data));
+    }
+    ok('I-cenik_id) neplatné cenik_id (abc/1.5/-1/0) → 400 na obou GET endpointech');
+
+    for (const d of ['abc', '2026-1-1', '2026-13-45']) {
+      const r1 = await volneTerminy(d, cenik.id);
+      assert.equal(r1.status, 400, 'volne-terminy datum="' + d + '" musí vrátit 400: ' + JSON.stringify(r1.data));
+      const r2 = await kalendar(d, cenik.id);
+      assert.equal(r2.status, 400, 'kalendar zacatek="' + d + '" musí vrátit 400: ' + JSON.stringify(r2.data));
+    }
+    ok('I-datum) neplatné datum/zacatek (abc/2026-1-1/2026-13-45) → 400 na obou GET endpointech');
   }
 
   console.log(`\n${vysledky.filter(v => v.stav === 'PASS').length}/${vysledky.length} scénářů (zbytek jsou vědomě dokumentované bugy, ne selhání testu).`);

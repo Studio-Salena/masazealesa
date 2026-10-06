@@ -1002,6 +1002,8 @@ async function ziskatEfektivniOtevrenoDobu(datum) {
 async function spocitatTerminyDne(datum, delka) {
   const rezervaceOd = await ziskatRezervaceOd();
   if (rezervaceOd && datum < rezervaceOd) return [];
+  const dnesIso = new Date().toISOString().slice(0, 10);
+  if (datum < dnesIso) return [];
   const oteviraciDoba = await ziskatEfektivniOtevrenoDobu(datum);
   if (!oteviraciDoba) return [];
   const bufferMin = await ziskatBufferMinut();
@@ -1032,8 +1034,15 @@ async function spocitatTerminyDne(datum, delka) {
 app.get('/api/rezervace/volne-terminy', async (req, res) => {
   const { datum, cenik_id } = req.query;
   if (!datum || !cenik_id) return res.status(400).json({ chyba: 'Zadejte datum a masáž.' });
+  const cenikIdCislo = Number(cenik_id);
+  if (!Number.isInteger(cenikIdCislo) || cenikIdCislo <= 0) {
+    return res.status(400).json({ chyba: 'Neplatné ID masáže.' });
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(datum) || Number.isNaN(new Date(datum + 'T12:00:00').getTime())) {
+    return res.status(400).json({ chyba: 'Neplatné datum.' });
+  }
   try {
-    const { rows: [polozkaCeniku] } = await db.query('SELECT * FROM cenik WHERE id = $1', [cenik_id]);
+    const { rows: [polozkaCeniku] } = await db.query('SELECT * FROM cenik WHERE id = $1', [cenikIdCislo]);
     if (!polozkaCeniku) return res.status(404).json({ chyba: 'Tato masáž nebyla v ceníku nalezena.' });
     if (!polozkaCeniku.rezervovatelna) return res.status(400).json({ chyba: 'Na tuto položku nelze rezervovat online.' });
 
@@ -1045,8 +1054,15 @@ app.get('/api/rezervace/volne-terminy', async (req, res) => {
 app.get('/api/rezervace/kalendar', async (req, res) => {
   const { zacatek, cenik_id } = req.query;
   if (!zacatek || !cenik_id) return res.status(400).json({ chyba: 'Zadejte datum a masáž.' });
+  const cenikIdCislo = Number(cenik_id);
+  if (!Number.isInteger(cenikIdCislo) || cenikIdCislo <= 0) {
+    return res.status(400).json({ chyba: 'Neplatné ID masáže.' });
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(zacatek) || Number.isNaN(new Date(zacatek + 'T12:00:00').getTime())) {
+    return res.status(400).json({ chyba: 'Neplatné datum.' });
+  }
   try {
-    const { rows: [polozkaCeniku] } = await db.query('SELECT * FROM cenik WHERE id = $1', [cenik_id]);
+    const { rows: [polozkaCeniku] } = await db.query('SELECT * FROM cenik WHERE id = $1', [cenikIdCislo]);
     if (!polozkaCeniku) return res.status(404).json({ chyba: 'Tato masáž nebyla v ceníku nalezena.' });
     if (!polozkaCeniku.rezervovatelna) return res.status(400).json({ chyba: 'Na tuto položku nelze rezervovat online.' });
 
