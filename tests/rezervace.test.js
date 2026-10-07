@@ -683,6 +683,57 @@ async function main() {
     ok('I-datum) neplatné datum/zacatek (abc/2026-1-1/2026-13-45) → 400 na obou GET endpointech');
   }
 
+  // ======================= 8E.5 — generické 500 (žádný raw e.message veřejnosti) =======================
+  console.log('--- 8E.5: generická 500 chyba na veřejných endpointech ---');
+
+  // A) GET volne-terminy s kalendářně neplatným (ale formátem validním) datem
+  // v budoucnu (2027-02-30 — JS Date to tolerantně "přetočí", regex i Date.getTime()
+  // validace z 8D.3 to tedy nezachytí, ale PostgreSQL date typ je striktní a
+  // vyhodí runtime chybu — přesně scénář z auditu 8E.1/8E.5).
+  {
+    const cenik = await vytvoritTestovaciCenik(60, true);
+    const r = await volneTerminy('2027-02-30', cenik.id);
+    assert.equal(r.status, 500, 'kalendářně neplatné datum musí za cenik existence spadnout na 500 (DB úroveň): ' + JSON.stringify(r.data));
+    assert.deepEqual(r.data, { chyba: 'Interní chyba serveru.' }, 'response nesmí obsahovat raw PostgreSQL chybu, jen generickou hlášku');
+    const text = JSON.stringify(r.data);
+    assert.ok(!text.includes('date/time field value out of range'), 'response nesmí obsahovat syrový text PostgreSQL chyby');
+    assert.ok(!text.includes('2027-02-30'), 'response nesmí obsahovat opakovanou odmítnutou hodnotu z PostgreSQL chyby');
+    ok('A) GET volne-terminy s kalendářně neplatným datem (2027-02-30) → 500 s generickou hláškou, žádný raw PostgreSQL text');
+  }
+
+  // B) GET kalendar — POUZE STATICKY (kódová kontrola). Na rozdíl od
+  // volne-terminy předává kalendar svůj "zacatek" nejdřív přes
+  // new Date(zacatek + 'T12:00:00') + setDate/toISOString (server.js, uvnitř
+  // for-cyklu), což kalendářně neplatné, ale formátem validní datum (např.
+  // "2027-02-30") tiše "přetočí" na skutečné datum (2027-03-02) DŘÍV, než se
+  // cokoli dostane k SQL dotazu — ověřeno živě (GET .../kalendar?zacatek=
+  // 2027-02-30 vrací 200, ne 500). Stejný vektor jako u volne-terminy tedy
+  // u kalendar katch blok vůbec nezasáhne — nejde o chybu opravy 8E.5, jen o
+  // jiné zpracování vstupu. Oprava (generická 500 hláška) se ověřuje proto
+  // staticky — čtením skutečného zdrojového textu, stejný princip jako
+  // tests/xss.test.js u admin.html.
+  {
+    const zdroj = require('fs').readFileSync(require('path').join(__dirname, '..', 'server.js'), 'utf8');
+    const zacatekKalendar = zdroj.indexOf("app.get('/api/rezervace/kalendar'");
+    const konecKalendar = zdroj.indexOf("app.post('/api/rezervace'", zacatekKalendar);
+    const telo = zdroj.slice(zacatekKalendar, konecKalendar);
+    assert.ok(!/chyba:\s*e\.message/.test(telo), 'GET /api/rezervace/kalendar nesmí nikde vracet raw e.message klientovi');
+    assert.ok(/console\.error\('GET \/api\/rezervace\/kalendar selhalo:', e\)/.test(telo), 'GET /api/rezervace/kalendar musí logovat skutečnou chybu server-side');
+    assert.ok(/chyba:\s*'Interní chyba serveru\.'/.test(telo), 'GET /api/rezervace/kalendar musí klientovi vracet generickou hlášku');
+    ok('B) [POUZE STATICKY] GET kalendar: zdrojový kód potvrzuje generickou 500 hlášku + server-side logování (živá reprodukce pro tento endpoint není proveditelná, protože zacatek se tiše normalizuje před DB dotazem — viz komentář výš)');
+  }
+
+  // C) regrese: normální validní budoucí požadavek musí zůstat beze změny (200)
+  {
+    const cenik = await vytvoritTestovaciCenik(60, true);
+    const datum = dnyDopredu(45);
+    await zajistitSirokouDobu(datum);
+    const r = await volneTerminy(datum, cenik.id);
+    assert.equal(r.status, 200, 'normální validní požadavek nesmí být touto opravou ovlivněn: ' + JSON.stringify(r.data));
+    assert.ok(Array.isArray(r.data) && r.data.some(t => t.volno === true), 'validní budoucí den musí nadále nabízet volné termíny');
+    ok('C) regrese: normální validní GET volne-terminy beze změny → 200, termíny vráceny');
+  }
+
   console.log(`\n${vysledky.filter(v => v.stav === 'PASS').length}/${vysledky.length} scénářů (zbytek jsou vědomě dokumentované bugy, ne selhání testu).`);
 }
 

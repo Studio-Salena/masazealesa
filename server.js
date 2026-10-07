@@ -967,7 +967,7 @@ app.get('/api/cenik', async (req, res) => {
   try {
     const { rows } = await db.query('SELECT * FROM cenik ORDER BY poradi_skupiny, poradi_varianty');
     res.json(rows);
-  } catch (e) { res.status(500).json({ chyba: e.message }); }
+  } catch (e) { console.error('GET /api/cenik selhalo:', e); res.status(500).json({ chyba: 'Interní chyba serveru.' }); }
 });
 
 // Varianty poukazů (částka + platnost) — stejný zdroj dat jako v adminu, ať web nemá vlastní napevno psané hodnoty
@@ -975,7 +975,7 @@ app.get('/api/poukazy/typy', async (req, res) => {
   try {
     const { rows } = await db.query('SELECT id, hodnota, platnost_mesicu FROM poukazy_typy ORDER BY poradi');
     res.json(rows);
-  } catch (e) { res.status(500).json({ chyba: e.message }); }
+  } catch (e) { console.error('GET /api/poukazy/typy selhalo:', e); res.status(500).json({ chyba: 'Interní chyba serveru.' }); }
 });
 
 // Zjistí skutečnou otevírací dobu pro konkrétní datum: buď normální týdenní
@@ -1047,7 +1047,7 @@ app.get('/api/rezervace/volne-terminy', async (req, res) => {
     if (!polozkaCeniku.rezervovatelna) return res.status(400).json({ chyba: 'Na tuto položku nelze rezervovat online.' });
 
     res.json(await spocitatTerminyDne(datum, polozkaCeniku.delka_min));
-  } catch (e) { res.status(500).json({ chyba: e.message }); }
+  } catch (e) { console.error('GET /api/rezervace/volne-terminy selhalo:', e); res.status(500).json({ chyba: 'Interní chyba serveru.' }); }
 });
 
 // Celý týden (7 dní od zadaného data) najednou, pro kalendářové zobrazení rezervace na webu
@@ -1075,7 +1075,7 @@ app.get('/api/rezervace/kalendar', async (req, res) => {
       dny.push({ datum, terminy });
     }
     res.json(dny);
-  } catch (e) { res.status(500).json({ chyba: e.message }); }
+  } catch (e) { console.error('GET /api/rezervace/kalendar selhalo:', e); res.status(500).json({ chyba: 'Interní chyba serveru.' }); }
 });
 
 // Vytvoření rezervace klientkou
@@ -1219,7 +1219,8 @@ app.post('/api/rezervace', async (req, res) => {
     res.json({ ok: true, rezervace });
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch {}
-    res.status(500).json({ chyba: e.message });
+    console.error('POST /api/rezervace selhalo:', e);
+    res.status(500).json({ chyba: 'Interní chyba serveru.' });
   } finally {
     client.release();
   }
@@ -1269,7 +1270,7 @@ app.post('/api/poukazy/zadost', async (req, res) => {
       [hodnotaCislo, kupujici_jmeno, kupujici_email, kupujici_telefon || null, pro_koho || null, vzkaz || null, konkretni_masaz || null, zpusob_platby]
     );
     res.json({ ok: true, zadost });
-  } catch (e) { res.status(500).json({ chyba: e.message }); }
+  } catch (e) { console.error('POST /api/poukazy/zadost selhalo:', e); res.status(500).json({ chyba: 'Interní chyba serveru.' }); }
 });
 
 // Přihlášení k newsletteru z webového formuláře ("Tipy a novinky přímo do e-mailu")
@@ -1285,7 +1286,7 @@ app.post('/api/newsletter', async (req, res) => {
       [email.trim().toLowerCase(), jmeno || null, token]
     );
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ chyba: e.message }); }
+  } catch (e) { console.error('POST /api/newsletter selhalo:', e); res.status(500).json({ chyba: 'Interní chyba serveru.' }); }
 });
 
 // Odhlášení z newsletteru přes odkaz v e-mailu (otevírá se přímo v prohlížeči)
