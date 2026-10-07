@@ -1228,8 +1228,36 @@ app.post('/api/rezervace', async (req, res) => {
 // Žádost o dárkový poukaz z webového formuláře
 app.post('/api/poukazy/zadost', async (req, res) => {
   const { hodnota, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, vzkaz, konkretni_masaz, zpusob_platby } = req.body || {};
-  if (!hodnota || !kupujici_jmeno || !kupujici_email) {
+  if (hodnota === undefined || hodnota === null || hodnota === '' || !kupujici_jmeno || !kupujici_email) {
     return res.status(400).json({ chyba: 'Vyplňte prosím hodnotu poukazu, jméno a e-mail.' });
+  }
+  // hodnota zadosti se při schválení stává i skutečným zůstatkem reálného
+  // poukazu (viz PATCH .../zadosti/:id/stav) — finite/kladné/omezené číslo
+  // je tu přímá ochrana finanční integrity, ne jen vstupní hygiena (8E.1/8E.2).
+  const hodnotaCislo = Number(hodnota);
+  if (!Number.isFinite(hodnotaCislo) || hodnotaCislo <= 0 || hodnotaCislo > 10000) {
+    return res.status(400).json({ chyba: 'Zadejte prosím platnou hodnotu poukazu.' });
+  }
+  if (!kupujici_email.includes('@')) {
+    return res.status(400).json({ chyba: 'Zadejte prosím platný e-mail.' });
+  }
+  // kupujici_telefon je v schema.sql nullable — na rozdíl od POST /api/rezervace
+  // zůstává nepovinný, validace proběhne jen pokud je skutečně vyplněn.
+  if (kupujici_telefon && kupujici_telefon.trim()) {
+    const telefonNormalizovany = normalizovatTelefon(kupujici_telefon);
+    if (!telefonNormalizovany || telefonNormalizovany.length < 9) {
+      return res.status(400).json({ chyba: 'Zadejte prosím platné telefonní číslo, nebo pole nechte prázdné.' });
+    }
+  }
+  if (
+    kupujici_jmeno.length > 100 ||
+    kupujici_email.length > 200 ||
+    (kupujici_telefon && kupujici_telefon.length > 30) ||
+    (pro_koho && pro_koho.length > 500) ||
+    (vzkaz && vzkaz.length > 500) ||
+    (konkretni_masaz && konkretni_masaz.length > 500)
+  ) {
+    return res.status(400).json({ chyba: 'Některé z vyplněných polí je příliš dlouhé.' });
   }
   if (!['qr', 'prevodem', 'pri_prevzeti'].includes(zpusob_platby)) {
     return res.status(400).json({ chyba: 'Vyberte prosím způsob platby.' });
@@ -1238,7 +1266,7 @@ app.post('/api/poukazy/zadost', async (req, res) => {
     const { rows: [zadost] } = await db.query(
       `INSERT INTO poukazy_zadosti (hodnota, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, vzkaz, konkretni_masaz, zpusob_platby, stav)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'nova') RETURNING *`,
-      [hodnota, kupujici_jmeno, kupujici_email, kupujici_telefon || null, pro_koho || null, vzkaz || null, konkretni_masaz || null, zpusob_platby]
+      [hodnotaCislo, kupujici_jmeno, kupujici_email, kupujici_telefon || null, pro_koho || null, vzkaz || null, konkretni_masaz || null, zpusob_platby]
     );
     res.json({ ok: true, zadost });
   } catch (e) { res.status(500).json({ chyba: e.message }); }

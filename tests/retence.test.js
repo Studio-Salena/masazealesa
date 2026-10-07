@@ -109,7 +109,7 @@ async function ziskatPoukaz(id) {
 async function vytvorZadost(stav, jmeno = 'TEST-RETENCE-ZADOST (smazat)') {
   const res = await fetch(API + '/poukazy/zadost', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ hodnota: 500, kupujici_jmeno: jmeno, kupujici_email: 'test-retence-zadost@example.invalid', kupujici_telefon: '6997001', pro_koho: 'TEST-OBDAROVANA (smazat)', vzkaz: 'test vzkaz', zpusob_platby: 'prevodem' })
+    body: JSON.stringify({ hodnota: 500, kupujici_jmeno: jmeno, kupujici_email: 'test-retence-zadost@example.invalid', kupujici_telefon: '699700100', pro_koho: 'TEST-OBDAROVANA (smazat)', vzkaz: 'test vzkaz', zpusob_platby: 'prevodem' })
   });
   const data = await res.json();
   assert.equal(res.status, 200, JSON.stringify(data));

@@ -43,11 +43,25 @@ function posunDnu(pocetDni) {
   return d.toISOString().slice(0, 10);
 }
 
+async function zadost(telo) {
+  const r = await fetch(API + '/poukazy/zadost', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(telo)
+  });
+  let data = null;
+  try { data = await r.json(); } catch {}
+  return { status: r.status, data };
+}
+async function pocetZadostiSEmailem(email) {
+  const vse = await adminFetch('/admin/poukazy/zadosti').then(r => r.json());
+  return vse.filter(z => z.kupujici_email === email).length;
+}
+
 async function main() {
   let poukazId = null;
   const uklidPoukazy = [];
   const uklidTypy = [];
   const uklidKlientky = new Set();
+  const uklidZadosti = [];
   try {
     // --- Scénář A/B/C/E (logika) — hraniční chování bez zásahu do DB ---
     console.log('--- logika: hranice "skutečně aktivní" (stav=aktivni & platnost_do >= dnes) ---');
@@ -221,6 +235,146 @@ async function main() {
     // budoucí, takže na tom nezáleží). Dynamická část (uplatnění zbytku na
     // takovém poukazu) zůstává neotestovaná — zdokumentováno zde, ne obejito.
 
+    // ======================= 8E.3 — validace POST /api/poukazy/zadost =======================
+    console.log('\n--- 8E.3: validace veřejné žádosti o poukaz ---');
+    let citacZadost = 0;
+    function novyEmailZadost() { citacZadost++; return 'test-8e3-zadost-' + citacZadost + '@example.invalid'; }
+
+    // 1) validní žádost → 200
+    {
+      const email = novyEmailZadost();
+      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, zpusob_platby: 'prevodem' });
+      if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
+      assert.equal(v.status, 200, JSON.stringify(v.data));
+      console.log('OK — 1) validní žádost (telefon nevyplněn) → 200');
+    }
+
+    // 2) chybějící email → 400
+    {
+      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-8E3 (smazat)', zpusob_platby: 'prevodem' });
+      if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
+      assert.equal(v.status, 400, JSON.stringify(v.data));
+      console.log('OK — 2) chybějící email → 400');
+    }
+
+    // 3) email bez "@" → 400
+    {
+      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: 'neplatny-email', zpusob_platby: 'prevodem' });
+      if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
+      assert.equal(v.status, 400, JSON.stringify(v.data));
+      console.log('OK — 3) email bez "@" → 400');
+    }
+
+    // 4) telefon chybí → 200 (telefon je u žádosti nepovinný, na rozdíl od rezervace)
+    {
+      const email = novyEmailZadost();
+      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, zpusob_platby: 'prevodem' });
+      if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
+      assert.equal(v.status, 200, 'chybějící telefon musí projít — je nepovinný: ' + JSON.stringify(v.data));
+      console.log('OK — 4) chybějící telefon → 200 (nepovinné pole)');
+    }
+
+    // 5) telefon "123" (vyplněný, ale příliš krátký po normalizaci) → 400
+    {
+      const email = novyEmailZadost();
+      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, kupujici_telefon: '123', zpusob_platby: 'prevodem' });
+      if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
+      assert.equal(v.status, 400, JSON.stringify(v.data));
+      console.log('OK — 5) vyplněný, ale nevalidní telefon ("123") → 400');
+    }
+
+    // 6) jméno > 100 znaků → 400
+    {
+      const email = novyEmailZadost();
+      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'X'.repeat(101), kupujici_email: email, zpusob_platby: 'prevodem' });
+      if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
+      assert.equal(v.status, 400, JSON.stringify(v.data));
+      console.log('OK — 6) kupujici_jmeno > 100 znaků → 400');
+    }
+
+    // 7) vzkaz > 500 znaků → 400
+    {
+      const email = novyEmailZadost();
+      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, vzkaz: 'X'.repeat(501), zpusob_platby: 'prevodem' });
+      if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
+      assert.equal(v.status, 400, JSON.stringify(v.data));
+      console.log('OK — 7) vzkaz > 500 znaků → 400');
+    }
+
+    // 8) pro_koho > 500 znaků → 400
+    {
+      const email = novyEmailZadost();
+      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, pro_koho: 'X'.repeat(501), zpusob_platby: 'prevodem' });
+      if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
+      assert.equal(v.status, 400, JSON.stringify(v.data));
+      console.log('OK — 8) pro_koho > 500 znaků → 400');
+    }
+
+    // 9) konkretni_masaz > 500 znaků → 400
+    {
+      const email = novyEmailZadost();
+      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, konkretni_masaz: 'X'.repeat(501), zpusob_platby: 'prevodem' });
+      if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
+      assert.equal(v.status, 400, JSON.stringify(v.data));
+      console.log('OK — 9) konkretni_masaz > 500 znaků → 400');
+    }
+
+    // 10) chybějící hodnota → 400
+    {
+      const email = novyEmailZadost();
+      const v = await zadost({ kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, zpusob_platby: 'prevodem' });
+      if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
+      assert.equal(v.status, 400, JSON.stringify(v.data));
+      console.log('OK — 10) chybějící hodnota → 400');
+    }
+
+    // 11-15) nevalidní hodnota (abc, 0, -500, "NaN", null) → 400
+    for (const h of ['abc', 0, -500, 'NaN', null]) {
+      const email = novyEmailZadost();
+      const v = await zadost({ hodnota: h, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, zpusob_platby: 'prevodem' });
+      if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
+      assert.equal(v.status, 400, 'hodnota=' + JSON.stringify(h) + ' musí vrátit 400: ' + JSON.stringify(v.data));
+      const pocet = await pocetZadostiSEmailem(email);
+      assert.equal(pocet, 0, 'hodnota=' + JSON.stringify(h) + ' nesmí vytvořit žádnou žádost');
+    }
+    console.log('OK — 11-15) nevalidní hodnota (abc/0/-500/"NaN"/null) → 400, žádná žádost nevznikla');
+
+    // 16) hodnota přesně na horní hranici (10000) → 200
+    {
+      const email = novyEmailZadost();
+      const v = await zadost({ hodnota: 10000, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, zpusob_platby: 'prevodem' });
+      if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
+      assert.equal(v.status, 200, 'hodnota přesně 10000 (horní hranice, včetně) musí projít: ' + JSON.stringify(v.data));
+      console.log('OK — 16) hodnota = 10000 (horní hranice) → 200');
+    }
+
+    // 17) hodnota nad horní hranicí (10000.01) → 400
+    {
+      const email = novyEmailZadost();
+      const v = await zadost({ hodnota: 10000.01, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, zpusob_platby: 'prevodem' });
+      if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
+      assert.equal(v.status, 400, JSON.stringify(v.data));
+      const pocet = await pocetZadostiSEmailem(email);
+      assert.equal(pocet, 0, 'hodnota nad limitem nesmí vytvořit žádost');
+      console.log('OK — 17) hodnota = 10000.01 (nad horní hranicí) → 400');
+    }
+
+    // 18) "Infinity" — JSON nemá nativní literál Infinity/NaN, ekvivalentní
+    // serializovatelná reprezentace je string "Infinity"; Number("Infinity")
+    // v JS vrací Infinity, Number.isFinite(Infinity) je false → musí dát 400,
+    // nikdy 500 (žádný pád na pokusu o aritmetiku/DB zápis nekonečné hodnoty).
+    {
+      const email = novyEmailZadost();
+      const v = await zadost({ hodnota: 'Infinity', kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, zpusob_platby: 'prevodem' });
+      if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
+      assert.equal(v.status, 400, '"Infinity" musí být ošetřeno jako 400, ne spadnout na 500: ' + JSON.stringify(v.data));
+      const pocet = await pocetZadostiSEmailem(email);
+      assert.equal(pocet, 0, '"Infinity" nesmí vytvořit žádost');
+      console.log('OK — 18) hodnota = "Infinity" → 400 (ne 500)');
+    }
+
+    console.log('✅ 8E.3: validace POST /api/poukazy/zadost prošla (18/18 scénářů)');
+
     console.log('\n✅ VŠECHNY TESTY POUKAZŮ PROŠLY');
   } finally {
     if (poukazId) {
@@ -232,6 +386,9 @@ async function main() {
     for (const id of uklidTypy) {
       await adminFetch(`/admin/poukazy/typy/${id}`, { method: 'DELETE' }).catch(() => {});
     }
+    for (const id of uklidZadosti) {
+      await adminFetch(`/admin/poukazy/zadosti/${id}`, { method: 'DELETE' }).catch(() => {});
+    }
     // Klientky se mažou AŽ TEĎ, po smazání poukazů, které na ně ukazovaly —
     // DELETE /api/admin/klientky/:id sám odmítne smazání, dokud klientka má
     // jakoukoli vazbu, takže tohle nikdy nesmaže nic cizího.
@@ -240,7 +397,7 @@ async function main() {
       const r = await adminFetch(`/admin/klientky/${id}`, { method: 'DELETE' }).catch(() => null);
       if (r && r.ok) klientkySmazano++;
     }
-    console.log(`(uklizeno: ${1 + uklidPoukazy.length} testovacích poukazů, ${uklidTypy.length} testovacích typů poukazů, ${klientkySmazano}/${uklidKlientky.size} testovacích klientek)`);
+    console.log(`(uklizeno: ${1 + uklidPoukazy.length} testovacích poukazů, ${uklidTypy.length} testovacích typů poukazů, ${klientkySmazano}/${uklidKlientky.size} testovacích klientek, ${uklidZadosti.length} testovacích žádostí o poukaz)`);
   }
 }
 

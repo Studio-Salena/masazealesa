@@ -569,7 +569,7 @@ async function main() {
     // 19) Poukazová žádost bez klientka_id
     console.log('--- 19) poukazová žádost bez klientka_id ---');
     {
-      const telefon = '6999019';
+      const telefon = '699901900'; // 9 číslic — POST /api/poukazy/zadost od 8E.3 vyžaduje min. 9 číslic po normalizaci
       // Nejdřív klientka se stejným kontaktem, ať je co anonymizovat.
       const res = await adminFetch('/admin/klientky', { method: 'POST', body: JSON.stringify({ telefon, jmeno: 'TEST-ANON-19 (smazat)', email: 'test-anon-19@example.invalid' }) });
       const klientkaId = (await res.json()).klientka.id;
