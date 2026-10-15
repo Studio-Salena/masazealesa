@@ -2084,6 +2084,44 @@ app.post('/api/admin/klientky', async (req, res) => {
   }
 });
 
+// Hromadný import klientek (Fáze 9D) — admin v adminu sám sestaví a odškrtá
+// náhled (viz zpracovatHromadnyImport v admin.html), sem už přijde jen
+// seznam, který admin výslovně potvrdil. Znovu se tu ale ověřuje telefon
+// (nikdy nedůvěřovat jen klientské kontrole) — řádek bez platného telefonu se
+// přeskočí, ne celý import nespadne. Běží v JEDNÉ transakci a používá stejnou
+// najitNeboVytvoritKlientku jako kdekoliv jinde v appce, takže se chová úplně
+// stejně (sloučení podle normalizovaného telefonu, COALESCE doplnění, ne
+// přepsání) — žádná vlastní/duplicitní logika pro import.
+app.post('/api/admin/klientky/hromadny-import', async (req, res) => {
+  const { klientky } = req.body || {};
+  if (!Array.isArray(klientky) || !klientky.length) {
+    return res.status(400).json({ chyba: 'Chybí seznam klientek k importu.' });
+  }
+  if (klientky.length > 300) {
+    return res.status(400).json({ chyba: 'Příliš mnoho záznamů najednou (max. 300).' });
+  }
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    let zpracovano = 0;
+    const preskoceno = [];
+    for (const z of klientky) {
+      const telefon = z && z.telefon;
+      const tn = normalizovatTelefon(telefon);
+      if (!tn || tn.length < 9) { preskoceno.push(z && z.jmeno || '(bez jména)'); continue; }
+      await najitNeboVytvoritKlientku(client, { jmeno: z.jmeno, telefon, email: z.email, alergie: null, preference: null, poznamka: null });
+      zpracovano++;
+    }
+    await client.query('COMMIT');
+    res.json({ ok: true, zpracovano, preskoceno });
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch {}
+    res.status(500).json({ chyba: e.message });
+  } finally {
+    client.release();
+  }
+});
+
 // Úprava poznámky/alergie/preference existující klientky — přímé nastavení
 // (ne COALESCE), stejné chování jako dřívější PUT /api/admin/zakaznici/poznamka:
 // admin tu explicitně zadává hodnotu, prázdné pole hodnotu smaže.

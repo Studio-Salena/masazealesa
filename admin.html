@@ -392,6 +392,7 @@ tr:hover td{background:#fffaf5}
         <div class="page-title">👥 Zákazníci</div>
         <div class="table-actions">
           <button class="btn btn-primary" onclick="openModal('modalNovaZakaznice')">+ Přidat zákaznici</button>
+          <button class="btn btn-outline" onclick="otevritHromadnyImport()">📋 Hromadný import</button>
           <button class="refresh-btn" onclick="loadZakaznici()">↻ Obnovit</button>
         </div>
       </div>
@@ -674,6 +675,27 @@ tr:hover td{background:#fffaf5}
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal('modalNovaZakaznice')">Zrušit</button>
       <button class="btn btn-primary" onclick="pridatZakaznici()">Přidat</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Hromadný import klientek (Fáze 9D) — vložený text se jen PARSUJE a
+     ukáže v náhledu; nic se neuloží do databáze, dokud admin výslovně nezaškrtne
+     řádky a neklikne na "Importovat". Řádky bez telefonu nebo odpovídající
+     vlastnímu telefonu salonu jsou defaultně odškrtnuté (telefon je jediný
+     bezpečný identifikační klíč klientky, viz najitNeboVytvoritKlientku). -->
+<div class="modal-overlay" id="modalHromadnyImport">
+  <div class="modal" style="max-width:900px">
+    <h3>📋 Hromadný import klientek</h3>
+    <div class="form-group">
+      <label>Vlož seznam (jméno, telefon, e-mail — po řádcích, v libovolném pořadí za sebou)</label>
+      <textarea id="hiVstup" rows="10" placeholder="AJ&#10;Antošová Jana&#10;602572636&#10;Antosova-J@seznam.cz&#10;..." style="width:100%;border:1px solid var(--tan-light);border-radius:6px;padding:8px 10px;font-family:'Nunito',sans-serif;resize:vertical"></textarea>
+    </div>
+    <div style="margin-bottom:10px"><button class="btn btn-primary btn-sm" onclick="zpracovatHromadnyImport()">🔍 Zpracovat a zobrazit náhled</button></div>
+    <div id="hiNahled"></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modalHromadnyImport')">Zavřít</button>
+      <button class="btn btn-primary" id="hiImportovatBtn" onclick="odeslatHromadnyImport()" disabled>Importovat vybrané</button>
     </div>
   </div>
 </div>
@@ -1922,6 +1944,131 @@ async function pridatZakaznici() {
     } else msg.innerHTML = '<div class="error-msg">Nepodařilo se přidat.</div>';
   } catch (e) { msg.innerHTML = '<div class="error-msg">Nejde se připojit k serveru.</div>'; }
 }
+// ── HROMADNÝ IMPORT KLIENTEK (Fáze 9D) ──────────────────────────────────────
+// Vstupní text se parsuje čistě v prohlížeči (žádný zápis do DB), ať admin
+// vidí přesně, co se naimportuje, než na cokoliv klikne. Formát: opakující se
+// bloky řádků "iniciály" (1-3 velká písmena, jen oddělovač záznamu) / "jméno"
+// (vždy hned po iniciálách) / volitelně "telefon" / volitelně "e-mail" (pozná
+// se podle "@"). Telefon i e-mail mohou chybět, pořadí telefon-pak-email se
+// nemění. Řádek bez telefonu nelze bezpečně přiřadit ke klientce (telefon je
+// jediný identifikační klíč, viz najitNeboVytvoritKlientku v server.js) —
+// takové řádky jdou do náhledu taky, ale defaultně odškrtnuté.
+let posledniHiZaznamy = [];
+
+function hiNormalizovatTelefon(raw) {
+  if (!raw) return null;
+  let cislice = String(raw).replace(/\D/g, '');
+  if (!cislice) return null;
+  if (cislice.startsWith('00420') && cislice.length === 14) cislice = cislice.slice(5);
+  else if (cislice.startsWith('420') && cislice.length === 12) cislice = cislice.slice(3);
+  return cislice;
+}
+
+function parsovatHromadnyImportText(text) {
+  const radky = text.split('\n').map(r => r.trim()).filter(r => r.length > 0);
+  const zaznamy = [];
+  let aktualni = null;
+  const jeIniciala = r => /^[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ]{1,3}$/.test(r);
+  radky.forEach(radek => {
+    if (jeIniciala(radek)) {
+      aktualni = { jmeno: '', telefon: '', email: '' };
+      zaznamy.push(aktualni);
+      return;
+    }
+    if (!aktualni) return; // text před první iniciálou ignorujeme
+    if (!aktualni.jmeno) { aktualni.jmeno = radek; return; }
+    if (radek.includes('@')) { aktualni.email = radek; return; }
+    if ((radek.match(/\d/g) || []).length >= 9) { aktualni.telefon = radek; return; }
+    // Řádek, který není ani e-mail, ani vypadá jako telefon (a jméno už je
+    // vyplněné) — nejspíš druhé jméno/poznámka navíc, připojí se ke jménu.
+    aktualni.jmeno += ' ' + radek;
+  });
+  return zaznamy.filter(z => z.jmeno);
+}
+
+function otevritHromadnyImport() {
+  document.getElementById('hiVstup').value = '';
+  document.getElementById('hiNahled').innerHTML = '';
+  document.getElementById('hiImportovatBtn').disabled = true;
+  posledniHiZaznamy = [];
+  openModal('modalHromadnyImport');
+}
+
+function zpracovatHromadnyImport() {
+  const text = document.getElementById('hiVstup').value;
+  const zaznamy = parsovatHromadnyImportText(text);
+  const vlastniTn = hiNormalizovatTelefon('736734951');
+  const pocetTelefonu = {};
+  zaznamy.forEach(z => {
+    const tn = hiNormalizovatTelefon(z.telefon);
+    if (tn) pocetTelefonu[tn] = (pocetTelefonu[tn] || 0) + 1;
+  });
+  zaznamy.forEach(z => {
+    const tn = hiNormalizovatTelefon(z.telefon);
+    z._tn = tn;
+    z._chybiTelefon = !tn;
+    z._vlastniKontakt = tn === vlastniTn;
+    z._duplicitni = tn && pocetTelefonu[tn] > 1;
+    z._zaskrtnuto = !z._chybiTelefon && !z._vlastniKontakt;
+  });
+  posledniHiZaznamy = zaznamy;
+  vykreslitHiNahled();
+}
+
+function vykreslitHiNahled() {
+  const el = document.getElementById('hiNahled');
+  if (!posledniHiZaznamy.length) {
+    el.innerHTML = '<div class="empty">Nerozpoznala jsem žádný záznam — zkontroluj formát vstupu.</div>';
+    document.getElementById('hiImportovatBtn').disabled = true;
+    return;
+  }
+  const pocetVybranych = posledniHiZaznamy.filter(z => z._zaskrtnuto).length;
+  el.innerHTML = `
+    <p style="font-size:0.82rem;color:var(--text-light)">Rozpoznáno ${posledniHiZaznamy.length} záznamů, vybráno k importu ${pocetVybranych}. Zkontroluj prosím řádky označené níž, než spustíš import.</p>
+    <div style="max-height:400px;overflow-y:auto;border:1px solid var(--tan-light);border-radius:8px">
+      <table><thead><tr><th></th><th>Jméno</th><th>Telefon</th><th>E-mail</th><th>Stav</th></tr></thead>
+      <tbody>${posledniHiZaznamy.map((z, i) => `<tr>
+        <td><input type="checkbox" ${z._zaskrtnuto ? 'checked' : ''} onchange="posledniHiZaznamy[${i}]._zaskrtnuto = this.checked; vykreslitHiPocet();"></td>
+        <td>${escapeHtml(z.jmeno)}</td>
+        <td>${escapeHtml(z.telefon) || '—'}</td>
+        <td>${escapeHtml(z.email) || '—'}</td>
+        <td style="font-size:0.78rem">${
+          z._chybiTelefon ? '<span style="color:#c0392b">⚠️ Chybí telefon — nelze bezpečně přiřadit</span>' :
+          z._vlastniKontakt ? '<span style="color:#c0392b">⚠️ Vypadá to na tvůj vlastní kontakt</span>' :
+          z._duplicitni ? '⚠️ Stejný telefon je v seznamu vícekrát' : '✅ OK'
+        }</td>
+      </tr>`).join('')}</tbody></table>
+    </div>
+    <p id="hiPocetVybranych" style="font-size:0.8rem;color:var(--text-light);margin-top:6px">Vybráno k importu: ${pocetVybranych}</p>
+  `;
+  document.getElementById('hiImportovatBtn').disabled = pocetVybranych === 0;
+}
+function vykreslitHiPocet() {
+  const pocet = posledniHiZaznamy.filter(z => z._zaskrtnuto).length;
+  const p = document.getElementById('hiPocetVybranych');
+  if (p) p.textContent = 'Vybráno k importu: ' + pocet;
+  document.getElementById('hiImportovatBtn').disabled = pocet === 0;
+}
+
+async function odeslatHromadnyImport() {
+  const vybrane = posledniHiZaznamy.filter(z => z._zaskrtnuto).map(z => ({ jmeno: z.jmeno, telefon: z.telefon, email: z.email || null }));
+  if (!vybrane.length) return;
+  if (!confirm('Opravdu naimportovat ' + vybrane.length + ' klientek?')) return;
+  const btn = document.getElementById('hiImportovatBtn');
+  btn.disabled = true; btn.textContent = 'Importuji…';
+  try {
+    const res = await adminFetch(API + '/admin/klientky/hromadny-import', { method: 'POST', body: JSON.stringify({ klientky: vybrane }) });
+    const data = await res.json();
+    if (!res.ok) { alert(data.chyba || 'Import se nepodařilo.'); btn.disabled = false; btn.textContent = 'Importovat vybrané'; return; }
+    alert('Hotovo — zpracováno ' + data.zpracovano + ' klientek.');
+    closeModal('modalHromadnyImport');
+    loadZakaznici();
+  } catch (e) {
+    alert('Nejde se připojit k serveru.');
+    btn.disabled = false; btn.textContent = 'Importovat vybrané';
+  }
+}
+
 async function smazatZakaznici(id) {
   if (!confirm('Smazat tuto klientku? (Jde jen tehdy, když nemá žádnou rezervaci ani poukaz — jinak by se ztratila historie.)')) return;
   const res = await adminFetch(API + '/admin/klientky/' + encodeURIComponent(id), { method: 'DELETE' });
