@@ -843,107 +843,128 @@ function emailSablona(telo) {
 </html>`;
 }
 
-// Rezervace přijata (hned po odeslání formuláře na webu)
-function prijataEmailHtml(jmeno, nazevMasaze, datum, casOd, casDo) {
-  return emailSablona(`
-    <h2>Dobrý den, ${jmeno},</h2>
+// ── Editovatelné e-mailové šablony (Fáze 9C) ────────────────────────────────
+// Text (předmět + tělo) jde upravit v adminu a žije v tabulce email_sablony;
+// VYCHOZI_SABLONY níž je jen fallback (použije se, dokud admin nic needitoval,
+// nebo kdyby DB dotaz selhal) — obsahuje PŮVODNÍ pevný text jedna ku jedné,
+// jen s proměnnými nahrazenými za {{zástupné symboly}}. Substituce je prostá
+// náhrada textu (žádné escapování) — stejná důvěra jako u newsletteru, kde
+// admin (jediná osoba s přístupem) píše HTML přímo (viz POST
+// /api/admin/newsletter/odeslat).
+const VYCHOZI_SABLONY = {
+  prijata: {
+    predmet: 'Rezervace přijata – Masáže Alesa',
+    telo: `<h2>Dobrý den, {{jmeno}},</h2>
     <p>děkuji za rezervaci. Přijala jsem ji a brzy vám ji telefonicky nebo e-mailem potvrdím.</p>
     <table class="rez-detail" width="100%" cellpadding="0" cellspacing="0">
       <tr><td>
-        <strong>Masáž:</strong> ${nazevMasaze}<br>
-        <strong>Datum:</strong> ${formatDatumCz(datum)}<br>
-        <strong>Čas:</strong> ${casOd}–${casDo}
+        <strong>Masáž:</strong> {{masaz}}<br>
+        <strong>Datum:</strong> {{datum}}<br>
+        <strong>Čas:</strong> {{cas}}
       </td></tr>
     </table>
     <p>V případě potřeby mě prosím kontaktujte na tel. 736 734 951.</p>
-    <p>S pozdravem,<br><strong>Alena Hasalová</strong><br>Masáže Alesa</p>
-  `);
-}
-
-// Rezervace potvrzena (odesílá se, když Alena v adminu přepne rezervaci na stav "potvrzena")
-function potvrzovaciEmailHtml(r) {
-  return emailSablona(`
-    <h2>Dobrý den, ${r.jmeno},</h2>
+    <p>S pozdravem,<br><strong>Alena Hasalová</strong><br>Masáže Alesa</p>`
+  },
+  potvrzovaci: {
+    predmet: 'Rezervace potvrzena – Masáže Alesa',
+    telo: `<h2>Dobrý den, {{jmeno}},</h2>
     <p>vaše rezervace je potvrzená — těším se na vaši návštěvu.</p>
     <table class="rez-detail" width="100%" cellpadding="0" cellspacing="0">
       <tr><td>
-        <strong>Masáž:</strong> ${r.masaz}<br>
-        <strong>Datum:</strong> ${formatDatumCz(r.datum)}<br>
-        <strong>Čas:</strong> ${r.cas_od.slice(0,5)}–${r.cas_do.slice(0,5)}
+        <strong>Masáž:</strong> {{masaz}}<br>
+        <strong>Datum:</strong> {{datum}}<br>
+        <strong>Čas:</strong> {{cas}}
       </td></tr>
     </table>
     <p>Pokud potřebujete termín změnit nebo zrušit, ozvěte se mi prosím co nejdřív.</p>
     <div class="btn-container">
       <a href="tel:736734951" class="btn">Zavolat kvůli změně termínu</a>
     </div>
-    <p>S pozdravem,<br><strong>Alena Hasalová</strong><br>Masáže Alesa</p>
-  `);
-}
-
-// Připomínka rezervace (denní cron úloha) — text záměrně neříká "zítra", protože
-// skutečný předstih je konfigurovatelný (viz ziskatNastaveniPripominek) a u pozdě
-// vytvořených rezervací může jít i o pár hodin dopředu, ne celý den.
-function pripomenkaEmailHtml(r) {
-  return emailSablona(`
-    <h2>Dobrý den, ${r.jmeno},</h2>
+    <p>S pozdravem,<br><strong>Alena Hasalová</strong><br>Masáže Alesa</p>`
+  },
+  // Text záměrně neříká "zítra", protože skutečný předstih je konfigurovatelný
+  // (viz ziskatNastaveniPripominek) a u pozdě vytvořených rezervací může jít
+  // i o pár hodin dopředu, ne celý den.
+  pripomenka: {
+    predmet: 'Připomínka rezervace – Masáže Alesa',
+    telo: `<h2>Dobrý den, {{jmeno}},</h2>
     <p>připomínám vaši blížící se rezervaci:</p>
     <table class="rez-detail" width="100%" cellpadding="0" cellspacing="0">
       <tr><td>
-        <strong>Masáž:</strong> ${r.masaz}<br>
-        <strong>Datum:</strong> ${formatDatumCz(r.datum)}<br>
-        <strong>Čas:</strong> ${String(r.cas_od).slice(0,5)}–${String(r.cas_do).slice(0,5)}
+        <strong>Masáž:</strong> {{masaz}}<br>
+        <strong>Datum:</strong> {{datum}}<br>
+        <strong>Čas:</strong> {{cas}}
       </td></tr>
     </table>
     <p>Pokud se nemůžete dostavit, dejte mi prosím vědět na tel. 736 734 951.</p>
-    <p>S pozdravem,<br><strong>Alena Hasalová</strong><br>Masáže Alesa</p>
-  `);
-}
-
-// Žádost o recenzi den po návštěvě (denní cron úloha)
-function recenzeEmailHtml(r) {
-  return emailSablona(`
-    <h2>Dobrý den, ${r.jmeno},</h2>
+    <p>S pozdravem,<br><strong>Alena Hasalová</strong><br>Masáže Alesa</p>`
+  },
+  recenze: {
+    predmet: 'Jak jste byla spokojená? – Masáže Alesa',
+    telo: `<h2>Dobrý den, {{jmeno}},</h2>
     <p>děkuji, že jste včera navštívila můj salón. Budu moc ráda, když mi napíšete pár slov zpětné vazby nebo necháte recenzi.</p>
     <div class="btn-container">
       <a href="https://www.facebook.com/masazehasalova" class="btn">Napsat recenzi na Facebooku</a>
     </div>
-    <p>S pozdravem,<br><strong>Alena Hasalová</strong><br>Masáže Alesa</p>
-  `);
-}
-
-// Rezervace změněna (odesílá se jen při skutečné změně data/času/služby v adminu)
-function zmenaEmailHtml(r) {
-  return emailSablona(`
-    <h2>Dobrý den, ${r.jmeno},</h2>
+    <p>S pozdravem,<br><strong>Alena Hasalová</strong><br>Masáže Alesa</p>`
+  },
+  zmena: {
+    predmet: 'Rezervace změněna – Masáže Alesa',
+    telo: `<h2>Dobrý den, {{jmeno}},</h2>
     <p>vaše rezervace byla změněna. Nový termín:</p>
     <table class="rez-detail" width="100%" cellpadding="0" cellspacing="0">
       <tr><td>
-        <strong>Masáž:</strong> ${r.masaz}<br>
-        <strong>Datum:</strong> ${formatDatumCz(r.datum)}<br>
-        <strong>Čas:</strong> ${String(r.cas_od).slice(0,5)}–${String(r.cas_do).slice(0,5)}<br>
-        <strong>Cena:</strong> ${Number(r.cena).toLocaleString('cs-CZ')} Kč
+        <strong>Masáž:</strong> {{masaz}}<br>
+        <strong>Datum:</strong> {{datum}}<br>
+        <strong>Čas:</strong> {{cas}}<br>
+        <strong>Cena:</strong> {{cena}}
       </td></tr>
     </table>
     <p>Pokud vám nový termín nevyhovuje, ozvěte se mi prosím co nejdřív na tel. 736 734 951.</p>
-    <p>S pozdravem,<br><strong>Alena Hasalová</strong><br>Masáže Alesa</p>
-  `);
-}
-
-// Rezervace zrušena (odesílá se jen při skutečném přechodu do stavu "zrusena")
-function zruseniEmailHtml(r) {
-  return emailSablona(`
-    <h2>Dobrý den, ${r.jmeno},</h2>
+    <p>S pozdravem,<br><strong>Alena Hasalová</strong><br>Masáže Alesa</p>`
+  },
+  zruseni: {
+    predmet: 'Rezervace zrušena – Masáže Alesa',
+    telo: `<h2>Dobrý den, {{jmeno}},</h2>
     <p>vaše rezervace byla zrušena:</p>
     <table class="rez-detail" width="100%" cellpadding="0" cellspacing="0">
       <tr><td>
-        <strong>Masáž:</strong> ${r.masaz}<br>
-        <strong>Datum:</strong> ${formatDatumCz(r.datum)}<br>
-        <strong>Čas:</strong> ${String(r.cas_od).slice(0,5)}–${String(r.cas_do).slice(0,5)}
+        <strong>Masáž:</strong> {{masaz}}<br>
+        <strong>Datum:</strong> {{datum}}<br>
+        <strong>Čas:</strong> {{cas}}
       </td></tr>
     </table>
     <p>Pokud jde o omyl nebo si chcete rezervovat jiný termín, ozvěte se mi prosím na tel. 736 734 951.</p>
-    <p>S pozdravem,<br><strong>Alena Hasalová</strong><br>Masáže Alesa</p>
-  `);
+    <p>S pozdravem,<br><strong>Alena Hasalová</strong><br>Masáže Alesa</p>`
+  }
+};
+// Lidský název + seznam dostupných proměnných pro každou šablonu — čte to jen
+// admin.html (pro nápovědu v editoru), žádná validace se na tom nestaví.
+const SABLONY_META = {
+  prijata: { nazev: 'Rezervace přijata (ihned po odeslání z webu)', promenne: ['jmeno', 'masaz', 'datum', 'cas'] },
+  potvrzovaci: { nazev: 'Rezervace potvrzena', promenne: ['jmeno', 'masaz', 'datum', 'cas'] },
+  pripomenka: { nazev: 'Připomínka rezervace (automaticky)', promenne: ['jmeno', 'masaz', 'datum', 'cas'] },
+  recenze: { nazev: 'Žádost o recenzi (den po masáži, automaticky)', promenne: ['jmeno'] },
+  zmena: { nazev: 'Rezervace změněna', promenne: ['jmeno', 'masaz', 'datum', 'cas', 'cena'] },
+  zruseni: { nazev: 'Rezervace zrušena', promenne: ['jmeno', 'masaz', 'datum', 'cas'] }
+};
+
+function vyplnitSablonu(text, promenne) {
+  return text.replace(/\{\{(\w+)\}\}/g, (shoda, nazev) => (nazev in promenne) ? promenne[nazev] : shoda);
+}
+
+async function ziskatSablonu(klic) {
+  try {
+    const { rows: [s] } = await db.query('SELECT predmet, telo FROM email_sablony WHERE klic = $1', [klic]);
+    if (s) return s;
+  } catch { /* spadne na výchozí níž */ }
+  return VYCHOZI_SABLONY[klic];
+}
+
+async function vykreslitEmail(klic, promenne) {
+  const s = await ziskatSablonu(klic);
+  return { predmet: vyplnitSablonu(s.predmet, promenne), html: emailSablona(vyplnitSablonu(s.telo, promenne)) };
 }
 
 // ── LOGIN (admin) ──
@@ -1210,7 +1231,8 @@ app.post('/api/rezervace', async (req, res) => {
     }
 
     if (email) {
-      odeslatEmail(email, 'Rezervace přijata – Masáže Alesa', prijataEmailHtml(jmeno, nazevMasaze, datum, cas_od, cas_do))
+      vykreslitEmail('prijata', { jmeno, masaz: nazevMasaze, datum: formatDatumCz(datum), cas: cas_od + '–' + cas_do })
+        .then(({ predmet, html }) => odeslatEmail(email, predmet, html))
         .then(uspech => {
           if (!uspech) console.error('Potvrzovací e-mail k rezervaci ' + rezervace.id + ' se nepodařilo odeslat.');
         });
@@ -1401,7 +1423,8 @@ app.post('/api/admin/rezervace', async (req, res) => {
     await client.query('COMMIT');
 
     if (email) {
-      odeslatEmail(email, 'Rezervace potvrzena – Masáže Alesa', potvrzovaciEmailHtml(rezervace));
+      vykreslitEmail('potvrzovaci', { jmeno: rezervace.jmeno, masaz: rezervace.masaz, datum: formatDatumCz(rezervace.datum), cas: String(rezervace.cas_od).slice(0,5) + '–' + String(rezervace.cas_do).slice(0,5) })
+        .then(({ predmet, html }) => odeslatEmail(email, predmet, html));
     }
 
     res.json({ ok: true, rezervace });
@@ -1523,7 +1546,8 @@ app.patch('/api/admin/rezervace/:id', async (req, res) => {
     // E-mail o změně se posílá jen při změně termínu/masáže — ne když se opraví
     // třeba jen telefon nebo poznámka (o tu klientka nežádá vědět).
     if (terminSeMeni && aktualizovana.email) {
-      odeslatEmail(aktualizovana.email, 'Rezervace změněna – Masáže Alesa', zmenaEmailHtml(aktualizovana));
+      vykreslitEmail('zmena', { jmeno: aktualizovana.jmeno, masaz: aktualizovana.masaz, datum: formatDatumCz(aktualizovana.datum), cas: String(aktualizovana.cas_od).slice(0,5) + '–' + String(aktualizovana.cas_do).slice(0,5), cena: Number(aktualizovana.cena).toLocaleString('cs-CZ') + ' Kč' })
+        .then(({ predmet, html }) => odeslatEmail(aktualizovana.email, predmet, html));
     }
 
     res.json({ ok: true, rezervace: aktualizovana, zmeneno: skutecnaZmena, terminZmenen: terminSeMeni });
@@ -1550,11 +1574,13 @@ app.patch('/api/admin/rezervace/:id/stav', async (req, res) => {
     // přístupu ke schránce (a ať to admin.html může případně ukázat).
     let emailOdeslan = false;
     if (stav === 'potvrzena' && predtim.stav !== 'potvrzena' && predtim.email) {
-      odeslatEmail(predtim.email, 'Rezervace potvrzena – Masáže Alesa', potvrzovaciEmailHtml(predtim));
+      vykreslitEmail('potvrzovaci', { jmeno: predtim.jmeno, masaz: predtim.masaz, datum: formatDatumCz(predtim.datum), cas: String(predtim.cas_od).slice(0,5) + '–' + String(predtim.cas_do).slice(0,5) })
+        .then(({ predmet, html }) => odeslatEmail(predtim.email, predmet, html));
       emailOdeslan = true;
     }
     if (stav === 'zrusena' && predtim.stav !== 'zrusena' && predtim.email) {
-      odeslatEmail(predtim.email, 'Rezervace zrušena – Masáže Alesa', zruseniEmailHtml(predtim));
+      vykreslitEmail('zruseni', { jmeno: predtim.jmeno, masaz: predtim.masaz, datum: formatDatumCz(predtim.datum), cas: String(predtim.cas_od).slice(0,5) + '–' + String(predtim.cas_do).slice(0,5) })
+        .then(({ predmet, html }) => odeslatEmail(predtim.email, predmet, html));
       emailOdeslan = true;
     }
     res.json({ ok: true, emailOdeslan });
@@ -1698,6 +1724,70 @@ app.delete('/api/admin/nastaveni/:klic', async (req, res) => {
     await db.query('DELETE FROM nastaveni WHERE klic = $1', [req.params.klic]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
+// -- E-mailové šablony (Fáze 9C) --
+// Vrátí všech 6 šablon — pro každou buď upravenou verzi z DB, nebo vestavěný
+// výchozí text (merge, ne jen to, co admin někdy uložil), plus metadata
+// (lidský název, dostupné proměnné) pro editor v adminu.
+app.get('/api/admin/email-sablony', async (req, res) => {
+  try {
+    const { rows } = await db.query('SELECT klic, predmet, telo, upraveno FROM email_sablony');
+    const ulozene = Object.fromEntries(rows.map(r => [r.klic, r]));
+    const vse = Object.keys(VYCHOZI_SABLONY).map(klic => ({
+      klic,
+      nazev: SABLONY_META[klic].nazev,
+      promenne: SABLONY_META[klic].promenne,
+      predmet: ulozene[klic] ? ulozene[klic].predmet : VYCHOZI_SABLONY[klic].predmet,
+      telo: ulozene[klic] ? ulozene[klic].telo : VYCHOZI_SABLONY[klic].telo,
+      upraveno: ulozene[klic] ? ulozene[klic].upraveno : null
+    }));
+    res.json(vse);
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+app.put('/api/admin/email-sablony/:klic', async (req, res) => {
+  const { predmet, telo } = req.body || {};
+  if (!VYCHOZI_SABLONY[req.params.klic]) return res.status(404).json({ chyba: 'Neznámá šablona.' });
+  if (!predmet || !predmet.trim() || !telo || !telo.trim()) {
+    return res.status(400).json({ chyba: 'Vyplňte prosím předmět i tělo e-mailu.' });
+  }
+  if (predmet.length > 200 || telo.length > 10000) {
+    return res.status(400).json({ chyba: 'Předmět nebo tělo e-mailu je příliš dlouhé.' });
+  }
+  try {
+    await db.query(
+      `INSERT INTO email_sablony (klic, predmet, telo, upraveno) VALUES ($1,$2,$3,now())
+       ON CONFLICT (klic) DO UPDATE SET predmet = $2, telo = $3, upraveno = now()`,
+      [req.params.klic, predmet.trim(), telo]
+    );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+// Vrátí šablonu zpět na vestavěný výchozí text (smaže uloženou úpravu).
+app.delete('/api/admin/email-sablony/:klic', async (req, res) => {
+  if (!VYCHOZI_SABLONY[req.params.klic]) return res.status(404).json({ chyba: 'Neznámá šablona.' });
+  try {
+    await db.query('DELETE FROM email_sablony WHERE klic = $1', [req.params.klic]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+// Pošle NA ADRESU, KTEROU ZADÁ ADMIN, náhled šablony se vzorovými (ne
+// reálnými) daty — ať si Alena ověří, jak e-mail skutečně vypadá, než ho
+// pustí na živé klientky. Používá přímo tělo/předmět z requestu (ne to, co
+// už je v DB), takže jde otestovat i rozepsanou úpravu před uložením.
+app.post('/api/admin/email-sablony/:klic/test', async (req, res) => {
+  const { email, predmet, telo } = req.body || {};
+  if (!email || !email.includes('@')) return res.status(400).json({ chyba: 'Zadejte prosím platný e-mail pro zaslání testu.' });
+  if (!VYCHOZI_SABLONY[req.params.klic]) return res.status(404).json({ chyba: 'Neznámá šablona.' });
+  const vzor = {
+    jmeno: 'Jana Nováková', masaz: 'Rekondiční masáž – Záda + šíje',
+    datum: formatDatumCz(new Date().toISOString().slice(0, 10)), cas: '10:00–10:45', cena: '890 Kč'
+  };
+  const predmetFinal = vyplnitSablonu(predmet || VYCHOZI_SABLONY[req.params.klic].predmet, vzor);
+  const htmlFinal = emailSablona(vyplnitSablonu(telo || VYCHOZI_SABLONY[req.params.klic].telo, vzor));
+  const odeslano = await odeslatEmail(email, '[TEST] ' + predmetFinal, htmlFinal);
+  if (!odeslano) return res.status(500).json({ chyba: 'Odeslání testovacího e-mailu se nepodařilo.' });
+  res.json({ ok: true });
 });
 
 // -- Provozní výjimky (dovolená, svátky) --
@@ -2485,7 +2575,8 @@ app.get('/api/cron/denni', async (req, res) => {
         );
         if (!claimnuto) { pripominky.preskoceno++; continue; }
 
-        const odeslano = await odeslatEmail(claimnuto.email, 'Připomínka rezervace – Masáže Alesa', pripomenkaEmailHtml(claimnuto));
+        const { predmet: pripPredmet, html: pripHtml } = await vykreslitEmail('pripomenka', { jmeno: claimnuto.jmeno, masaz: claimnuto.masaz, datum: formatDatumCz(claimnuto.datum), cas: String(claimnuto.cas_od).slice(0,5) + '–' + String(claimnuto.cas_do).slice(0,5) });
+        const odeslano = await odeslatEmail(claimnuto.email, pripPredmet, pripHtml);
         if (odeslano) {
           await db.query('UPDATE rezervace SET pripomenuto = true WHERE id = $1', [r.id]);
           pripominky.odeslano++;
@@ -2505,7 +2596,8 @@ app.get('/api/cron/denni', async (req, res) => {
     );
     recenze.zkontrolovano = vcerejsi.length;
     for (const r of vcerejsi) {
-      const odeslano = await odeslatEmail(r.email, 'Jak jste byla spokojená? – Masáže Alesa', recenzeEmailHtml(r));
+      const { predmet: recPredmet, html: recHtml } = await vykreslitEmail('recenze', { jmeno: r.jmeno });
+      const odeslano = await odeslatEmail(r.email, recPredmet, recHtml);
       if (odeslano) {
         await db.query('UPDATE rezervace SET pozadano_recenze = true WHERE id = $1', [r.id]);
         recenze.odeslano++;

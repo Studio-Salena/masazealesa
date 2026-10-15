@@ -267,6 +267,18 @@ create table if not exists klientky_udalosti (
   kdy timestamptz not null default now()
 );
 
+-- Fáze 9C: editovatelné e-mailové šablony. "klic" odpovídá pevné sadě ve
+-- server.js (VYCHOZI_SABLONY) — řádek tu existuje, jen když ho admin někdy
+-- upravil; dokud neexistuje, používá se vestavěný výchozí text (žádný seed
+-- řádek tu záměrně není, ať je na první pohled vidět, co admin skutečně
+-- změnil oproti výchozímu stavu).
+create table if not exists email_sablony (
+  klic text primary key,
+  predmet text not null,
+  telo text not null,
+  upraveno timestamptz not null default now()
+);
+
 -- Fáze 7D.2B/7G.3: klíče v "nastaveni" pro retenční engine (viz
 -- ziskatRetenciNastaveni v server.js a tabulka retence_udalosti níž) —
 -- záměrně se sem NEVKLÁDÁ žádný řádek/výchozí hodnota, dokud nejsou lhůty
