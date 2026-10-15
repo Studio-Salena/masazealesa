@@ -1968,6 +1968,7 @@ function vykreslitZakazniky() {
     || (z.jmeno || '').toLowerCase().includes(hledat)
     || (z.telefon || '').includes(hledat)
     || (z.email || '').toLowerCase().includes(hledat));
+  seznam.sort((a, b) => (a.jmeno || '').localeCompare(b.jmeno || '', 'cs'));
   if (!seznam.length) { document.getElementById('zakazniciTable').innerHTML = '<div class="empty">Žádné zákaznice nenalezeny</div>'; return; }
   document.getElementById('zakazniciTable').innerHTML = `
     <table><thead><tr><th>Jméno</th><th>Kontakt</th><th>Návštěvy (dokončené)</th><th>Celkem uhrazeno</th><th>Poslední návštěva</th><th>Aktivní poukazy</th><th>Poznámka / alergie / preference</th><th></th></tr></thead>
