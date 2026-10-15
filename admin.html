@@ -1319,7 +1319,10 @@ function vykreslitDetailRezervace(r) {
     <div class="form-group"><label>Telefon</label><div>${escapeHtml(r.telefon) || '—'}</div></div>
     <div class="form-group"><label>E-mail</label><div>${escapeHtml(r.email) || '—'}</div></div>
     ${r.poukaz_kod ? `<div class="form-group"><label>Kód poukazu</label><div>🎁 ${escapeHtml(r.poukaz_kod)}</div></div>` : ''}
-    <div class="form-group"><label>Poznámka</label><div>${escapeHtml(r.poznamka) || '—'}</div></div>
+    <div class="form-group"><label>Poznámka k rezervaci</label>
+      <textarea id="detailRezPoznamka" rows="2" placeholder="Rychlý zápisek, např. po masáži…" style="width:100%;border:1px solid var(--tan-light);border-radius:6px;padding:6px 8px;font-family:'Nunito',sans-serif;resize:vertical">${escapeHtml(r.poznamka) || ''}</textarea>
+      <div style="margin-top:4px"><button class="btn btn-green btn-sm" onclick="ulozitPoznamkuRezervace(${r.id})">💾 Uložit poznámku</button></div>
+    </div>
     <div class="form-group"><label>Alergie / preference klientky</label><div id="detailRezAlergiePreference" style="font-size:0.85rem;color:var(--text-light)">Načítám...</div></div>
     <div class="form-group"><label>Stav</label><div>${stavBadge[r.stav] || r.stav}</div></div>
     <div class="form-group"><label>Platba</label>
@@ -1400,6 +1403,14 @@ async function zaznamenatPlatbu(id) {
   const res = await adminFetch(API + '/admin/rezervace/' + id + '/platba', { method: 'PATCH', body: JSON.stringify({ castka, zpusob_platby }) });
   const data = await res.json();
   if (!res.ok) { alert(data.chyba || 'Zaznamenání platby se nepodařilo.'); return; }
+  await loadRezervace();
+  otevritDetailRezervace(id);
+}
+async function ulozitPoznamkuRezervace(id) {
+  const poznamka = document.getElementById('detailRezPoznamka').value;
+  const res = await adminFetch(API + '/admin/rezervace/' + id + '/poznamka', { method: 'PATCH', body: JSON.stringify({ poznamka }) });
+  const data = await res.json();
+  if (!res.ok) { alert(data.chyba || 'Uložení poznámky se nepodařilo.'); return; }
   await loadRezervace();
   otevritDetailRezervace(id);
 }

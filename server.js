@@ -1561,6 +1561,25 @@ app.patch('/api/admin/rezervace/:id/stav', async (req, res) => {
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
+// Rychlá poznámka k rezervaci (např. zápisek po masáži) — jen jeden sloupec,
+// žádná revalidace termínu/kolize/klientky jako u plné úpravy přes
+// PATCH /api/admin/rezervace/:id (Fáze 9B) — stejný lehký vzor jako /stav výš.
+app.patch('/api/admin/rezervace/:id/poznamka', async (req, res) => {
+  const { poznamka } = req.body || {};
+  if (poznamka && poznamka.length > 1000) {
+    return res.status(400).json({ chyba: 'Poznámka je příliš dlouhá.' });
+  }
+  try {
+    const { rows: [predtim] } = await db.query('SELECT id FROM rezervace WHERE id = $1', [req.params.id]);
+    if (!predtim) return res.status(404).json({ chyba: 'Rezervace nebyla nalezena.' });
+    const { rows: [aktualizovana] } = await db.query(
+      'UPDATE rezervace SET poznamka = $1 WHERE id = $2 RETURNING *',
+      [(poznamka || '').trim() || null, req.params.id]
+    );
+    res.json({ ok: true, rezervace: aktualizovana });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
 // Zaznamenání platby NEBO vratky k rezervaci — zapíše řádek do deníku "platby"
 // a ve STEJNÉ transakci přepočte souhrn na rezervaci (viz prepocitatSouhrnRezervace).
 // Buď se zapíše obojí, nebo nic (žádný poloviční zápis). Stav platby je záměrně
