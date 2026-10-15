@@ -2414,24 +2414,154 @@ app.delete('/api/admin/prodejna/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
-// -- Účetnictví (Fáze 3B): 4 oddělené přehledy, ať jedno číslo nemusí
-// představovat čtyři různé věci najednou.
+// -- Produkty a sklad (Fáze 9E) --
+app.get('/api/admin/produkty', async (req, res) => {
+  try {
+    const { rows } = await db.query('SELECT * FROM produkty ORDER BY skupina, varianta');
+    res.json(rows);
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+app.post('/api/admin/produkty', async (req, res) => {
+  const { skupina, varianta, cena, nakupni_cena, dodavatel, sklad, minimalni_sklad } = req.body || {};
+  if (!skupina || !varianta || cena === undefined || cena === null || cena === '') {
+    return res.status(400).json({ chyba: 'Vyplňte prosím skupinu, variantu a prodejní cenu.' });
+  }
+  const cenaNum = Number(cena);
+  if (!Number.isFinite(cenaNum) || cenaNum < 0) return res.status(400).json({ chyba: 'Zadejte prosím platnou prodejní cenu.' });
+  try {
+    const { rows: [produkt] } = await db.query(
+      `INSERT INTO produkty (skupina, varianta, cena, nakupni_cena, dodavatel, sklad, minimalni_sklad)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [skupina, varianta, cenaNum, nakupni_cena || null, dodavatel || null, Number(sklad) || 0, minimalni_sklad || null]
+    );
+    res.json({ ok: true, produkt });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+app.put('/api/admin/produkty/:id', async (req, res) => {
+  const { skupina, varianta, cena, nakupni_cena, dodavatel, minimalni_sklad, aktivni } = req.body || {};
+  if (!skupina || !varianta || cena === undefined || cena === null || cena === '') {
+    return res.status(400).json({ chyba: 'Vyplňte prosím skupinu, variantu a prodejní cenu.' });
+  }
+  const cenaNum = Number(cena);
+  if (!Number.isFinite(cenaNum) || cenaNum < 0) return res.status(400).json({ chyba: 'Zadejte prosím platnou prodejní cenu.' });
+  try {
+    const { rows: [produkt] } = await db.query(
+      `UPDATE produkty SET skupina=$1, varianta=$2, cena=$3, nakupni_cena=$4, dodavatel=$5, minimalni_sklad=$6, aktivni=$7 WHERE id=$8 RETURNING *`,
+      [skupina, varianta, cenaNum, nakupni_cena || null, dodavatel || null, minimalni_sklad || null, aktivni !== false, req.params.id]
+    );
+    if (!produkt) return res.status(404).json({ chyba: 'Produkt nebyl nalezen.' });
+    res.json({ ok: true, produkt });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+// Smazání jen bez historie pohybů (jinak by se nenávratně ztratila dohledatelnost
+// starých prodejů/naskladnění) — pro vyřazení produktu z nabídky slouží "aktivni".
+app.delete('/api/admin/produkty/:id', async (req, res) => {
+  try {
+    const { rows: [pocty] } = await db.query(
+      `SELECT (SELECT count(*) FROM prodeje_produktu WHERE produkt_id = $1) AS prodeju,
+              (SELECT count(*) FROM naskladneni_produktu WHERE produkt_id = $1) AS naskladneni`,
+      [req.params.id]
+    );
+    if (Number(pocty.prodeju) > 0 || Number(pocty.naskladneni) > 0) {
+      return res.status(400).json({ chyba: 'Produkt má historii prodejů/naskladnění, nelze smazat — místo toho ho deaktivuj.' });
+    }
+    await db.query('DELETE FROM produkty WHERE id = $1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+// Prodej produktu klientce — atomicky sníží sklad a zapíše tržbu (zámek řádku
+// produktu chrání proti dvěma souběžným prodejům, co by si jinak mohly
+// přečíst stejný "sklad" a oba projít, i když by dohromady přečerpaly zásobu).
+app.post('/api/admin/produkty/:id/prodat', async (req, res) => {
+  const { mnozstvi, zpusob_platby } = req.body || {};
+  const mnozstviNum = Number(mnozstvi);
+  if (!Number.isInteger(mnozstviNum) || mnozstviNum <= 0) return res.status(400).json({ chyba: 'Zadejte prosím kladný celočíselný počet kusů.' });
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: [produkt] } = await client.query('SELECT * FROM produkty WHERE id = $1 FOR UPDATE', [req.params.id]);
+    if (!produkt) { await client.query('ROLLBACK'); return res.status(404).json({ chyba: 'Produkt nebyl nalezen.' }); }
+    if (produkt.sklad < mnozstviNum) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ chyba: `Na skladě je jen ${produkt.sklad} ks.` });
+    }
+    const cenaCelkem = Number(produkt.cena) * mnozstviNum;
+    const { rows: [prodej] } = await client.query(
+      `INSERT INTO prodeje_produktu (produkt_id, nazev, mnozstvi, cena_za_kus, cena_celkem, zpusob_platby)
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [produkt.id, produkt.skupina + ' – ' + produkt.varianta, mnozstviNum, produkt.cena, cenaCelkem, zpusob_platby || 'hotove']
+    );
+    const { rows: [aktualizovany] } = await client.query('UPDATE produkty SET sklad = sklad - $1 WHERE id = $2 RETURNING *', [mnozstviNum, produkt.id]);
+    await client.query('COMMIT');
+    res.json({ ok: true, prodej, produkt: aktualizovany });
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch {}
+    res.status(500).json({ chyba: e.message });
+  } finally {
+    client.release();
+  }
+});
+// Naskladnění (nákup od dodavatele) — atomicky zvýší sklad a zapíše záznam.
+app.post('/api/admin/produkty/:id/naskladnit', async (req, res) => {
+  const { mnozstvi, nakupni_cena_celkem, dodavatel, poznamka } = req.body || {};
+  const mnozstviNum = Number(mnozstvi);
+  if (!Number.isInteger(mnozstviNum) || mnozstviNum <= 0) return res.status(400).json({ chyba: 'Zadejte prosím kladný celočíselný počet kusů.' });
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: [produkt] } = await client.query('SELECT id FROM produkty WHERE id = $1 FOR UPDATE', [req.params.id]);
+    if (!produkt) { await client.query('ROLLBACK'); return res.status(404).json({ chyba: 'Produkt nebyl nalezen.' }); }
+    const { rows: [zaznam] } = await client.query(
+      `INSERT INTO naskladneni_produktu (produkt_id, mnozstvi, nakupni_cena_celkem, dodavatel, poznamka)
+       VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+      [produkt.id, mnozstviNum, nakupni_cena_celkem || null, dodavatel || null, poznamka || null]
+    );
+    const { rows: [aktualizovany] } = await client.query('UPDATE produkty SET sklad = sklad + $1 WHERE id = $2 RETURNING *', [mnozstviNum, produkt.id]);
+    await client.query('COMMIT');
+    res.json({ ok: true, naskladneni: zaznam, produkt: aktualizovany });
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch {}
+    res.status(500).json({ chyba: e.message });
+  } finally {
+    client.release();
+  }
+});
+// Historie pohybů skladu u jednoho produktu (prodeje + naskladnění chronologicky pohromadě).
+app.get('/api/admin/produkty/:id/historie', async (req, res) => {
+  try {
+    const [prodeje, naskladneni] = await Promise.all([
+      db.query('SELECT id, mnozstvi, cena_celkem, zpusob_platby, vytvoreno FROM prodeje_produktu WHERE produkt_id = $1 ORDER BY vytvoreno DESC', [req.params.id]),
+      db.query('SELECT id, mnozstvi, nakupni_cena_celkem, dodavatel, poznamka, vytvoreno FROM naskladneni_produktu WHERE produkt_id = $1 ORDER BY vytvoreno DESC', [req.params.id])
+    ]);
+    const historie = [
+      ...prodeje.rows.map(p => ({ typ: 'prodej', zmena: -p.mnozstvi, castka: Number(p.cena_celkem), zpusob_platby: p.zpusob_platby, vytvoreno: p.vytvoreno })),
+      ...naskladneni.rows.map(n => ({ typ: 'naskladneni', zmena: n.mnozstvi, castka: n.nakupni_cena_celkem !== null ? Number(n.nakupni_cena_celkem) : null, dodavatel: n.dodavatel, poznamka: n.poznamka, vytvoreno: n.vytvoreno }))
+    ].sort((a, b) => new Date(b.vytvoreno) - new Date(a.vytvoreno));
+    res.json(historie);
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
+// -- Účetnictví (Fáze 3B, rozšířeno 9E): 5 oddělených přehledů, ať jedno číslo
+// nemusí představovat pět různých věcí najednou.
 //
 // A) TRŽBY ZA SLUŽBY — hodnota uskutečněné/objednané služby podle DATA MASÁŽE
 //    (rezervace.datum), bez ohledu na to, kdy/jestli už je zaplacená. Prodejna
 //    (walk-in prodej) sem patří taky, tam ale datum vytvoření = datum služby
-//    (platí se na místě hned), takže žádný rozdíl není.
-// B) PŘIJATÉ PLATBY — skutečný pohyb peněz podle deníku "platby" (+prodejna).
-//    Platby se zpusob_platby='poukaz' se sem NEPOČÍTAJÍ — ty peníze už byly
-//    jednou započítané v okamžiku PRODEJE poukazu (viz C), takže by se jinak
+//    (platí se na místě hned), takže žádný rozdíl není. Prodej PRODUKTŮ sem
+//    záměrně NEPATŘÍ — produkt není odvedená služba (viz E).
+// B) PŘIJATÉ PLATBY — skutečný pohyb peněz podle deníku "platby" (+prodejna
+//    +prodej produktů, obojí se platí na místě hned). Platby se
+//    zpusob_platby='poukaz' se sem NEPOČÍTAJÍ — ty peníze už byly jednou
+//    započítané v okamžiku PRODEJE poukazu (viz C), takže by se jinak
 //    počítaly dvakrát. Vratky (záporné částky) se přirozeně odečtou.
 // C) PRODEJ POUKAZŮ — kdy a kolik se prodalo dárkových poukazů (podle
 //    poukazy.vytvoreno = okamžik prodeje/platby za poukaz).
 // D) VRATKY — přehled všech vrácení peněz z deníku "platby" (typ='vratka'),
 //    bez ohledu na to, jestli šlo o platbu hotově/kartou/poukazem.
+// E) PRODEJ PRODUKTŮ — tržba z prodeje_produktu, odděleně od A (viz výš).
 //
 // Nepovinné query parametry ?od=YYYY-MM-DD&do=YYYY-MM-DD omezí období (podle
-// data té které položky — masáže, platby, nebo prodeje poukazu).
+// data té které položky — masáže, platby, nebo prodeje poukazu/produktu).
 app.get('/api/admin/ucetnictvi', async (req, res) => {
   try {
     const { od, do: doParam } = req.query;
@@ -2442,14 +2572,16 @@ app.get('/api/admin/ucetnictvi', async (req, res) => {
       return Object.entries(mapa).sort((a, b) => b[0].localeCompare(a[0])).map(([den, c]) => ({ den, castka: c }));
     };
 
-    const [rez, prod, pouk, plat] = await Promise.all([
+    const [rez, prod, pouk, plat, prodProd] = await Promise.all([
       db.query("SELECT cena, datum FROM rezervace WHERE stav IN ('potvrzena', 'dokoncena')"),
       db.query('SELECT cena, vytvoreno FROM prodeje'),
       db.query('SELECT id, hodnota, vytvoreno FROM poukazy'),
-      db.query('SELECT id, rezervace_id, castka, typ, zpusob_platby, vytvoreno FROM platby')
+      db.query('SELECT id, rezervace_id, castka, typ, zpusob_platby, vytvoreno FROM platby'),
+      db.query('SELECT id, nazev, mnozstvi, cena_celkem, vytvoreno FROM prodeje_produktu')
     ]);
 
     const prodejnaPolozky = prod.rows.map(p => ({ castka: Number(p.cena) || 0, datum: p.vytvoreno.toISOString().slice(0, 10) }));
+    const produktyPolozky = prodProd.rows.map(p => ({ ...p, castka: Number(p.cena_celkem) || 0, datum: p.vytvoreno.toISOString().slice(0, 10) }));
 
     // A) Tržby za služby (rezervace podle data masáže + prodejna podle data prodeje)
     const trzbyPolozky = [
@@ -2457,13 +2589,14 @@ app.get('/api/admin/ucetnictvi', async (req, res) => {
       ...prodejnaPolozky.filter(p => vObdobi(p.datum))
     ];
 
-    // B) Přijaté platby — deník bez poukazových řádků (ty patří do C) + prodejna
+    // B) Přijaté platby — deník bez poukazových řádků (ty patří do C) + prodejna + produkty
     const platbyFiltr = plat.rows
       .map(p => ({ ...p, den: p.vytvoreno.toISOString().slice(0, 10) }))
       .filter(p => vObdobi(p.den));
     const prijatePlatbyPolozky = [
       ...platbyFiltr.filter(p => p.zpusob_platby !== 'poukaz').map(p => ({ castka: Number(p.castka), datum: p.den })),
-      ...prodejnaPolozky.filter(p => vObdobi(p.datum))
+      ...prodejnaPolozky.filter(p => vObdobi(p.datum)),
+      ...produktyPolozky.filter(p => vObdobi(p.datum))
     ];
 
     // C) Prodej poukazů
@@ -2473,6 +2606,9 @@ app.get('/api/admin/ucetnictvi', async (req, res) => {
 
     // D) Vratky
     const vratkyFiltr = platbyFiltr.filter(p => p.typ === 'vratka');
+
+    // E) Prodej produktů
+    const produktyFiltr = produktyPolozky.filter(p => vObdobi(p.datum));
 
     res.json({
       obdobi: { od: od || null, do: doParam || null },
@@ -2496,6 +2632,11 @@ app.get('/api/admin/ucetnictvi', async (req, res) => {
         celkem: poukazyFiltr.reduce((s, p) => s + Number(p.hodnota), 0),
         pocet: poukazyFiltr.length,
         podleDne: seskupitPodleDne(poukazyFiltr, p => Number(p.hodnota), p => p.den)
+      },
+      prodejProduktu: {
+        celkem: produktyFiltr.reduce((s, p) => s + p.castka, 0),
+        pocet: produktyFiltr.length,
+        podleDne: seskupitPodleDne(produktyFiltr, p => p.castka, p => p.datum)
       },
       vratky: {
         celkem: vratkyFiltr.reduce((s, p) => s + Math.abs(Number(p.castka)), 0),
@@ -2606,7 +2747,26 @@ app.get('/api/cron/denni', async (req, res) => {
       }
     }
 
-    res.json({ ok: true, pripominky, recenze });
+    // Upozornění na docházející zásobu produktů (Fáze 9E) — jeden souhrnný
+    // e-mail denně, dokud je aspoň jeden aktivní produkt pod nastavenou
+    // hranicí (žádné "již odesláno" sledování navíc — prostý denní souhrn,
+    // stejně jako u newsletteru/Účetnictví nejde o automatizaci kritickou na
+    // duplicitu, jen o připomínku).
+    const sklad = { nizkychProduktu: 0, odeslano: false };
+    const { rows: nizkySklad } = await db.query(
+      'SELECT skupina, varianta, sklad, minimalni_sklad FROM produkty WHERE aktivni = true AND minimalni_sklad IS NOT NULL AND sklad <= minimalni_sklad ORDER BY skupina, varianta'
+    );
+    sklad.nizkychProduktu = nizkySklad.length;
+    if (nizkySklad.length) {
+      const seznamHtml = nizkySklad.map(p => `<li>${p.skupina} – ${p.varianta}: skladem ${p.sklad} ks (hranice ${p.minimalni_sklad})</li>`).join('');
+      sklad.odeslano = await odeslatEmail(
+        'info@masazealesa.cz',
+        `Dochází zásoba — ${nizkySklad.length} produktů`,
+        emailSablona(`<h2>Dochází zásoba</h2><p>Tyto produkty jsou na skladě pod nastavenou hranicí:</p><ul>${seznamHtml}</ul>`)
+      );
+    }
+
+    res.json({ ok: true, pripominky, recenze, sklad });
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 

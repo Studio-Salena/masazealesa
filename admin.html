@@ -217,6 +217,7 @@ tr:hover td{background:#fffaf5}
     <div class="nav-item" onclick="showPage('cenik',this)"><span class="icon">💰</span> Ceník</div>
     <div class="nav-label">Prodejna</div>
     <div class="nav-item" onclick="showPage('masaze',this)"><span class="icon">🧖</span> Masáže</div>
+    <div class="nav-item" onclick="showPage('produkty',this)"><span class="icon">📦</span> Produkty <span class="nav-badge" id="navBadgeProdukty" style="display:none">0</span></div>
     <div class="nav-item" onclick="showPage('ucetnictvi',this)"><span class="icon">📈</span> Účetnictví</div>
     <div class="nav-label">GDPR</div>
     <div class="nav-item" onclick="showPage('retence',this)"><span class="icon">🗂️</span> Retence</div>
@@ -491,6 +492,27 @@ tr:hover td{background:#fffaf5}
       </div>
     </div>
 
+    <!-- PRODUKTY A SKLAD (Fáze 9E) -->
+    <div class="page" id="page-produkty">
+      <div class="page-header">
+        <div class="page-title">📦 Produkty a sklad</div>
+        <div class="table-actions">
+          <button class="btn btn-primary" onclick="otevritNovyProdukt()">+ Přidat produkt</button>
+          <button class="refresh-btn" onclick="loadProdukty()">↻ Obnovit</button>
+        </div>
+      </div>
+      <div class="stats-grid" style="grid-template-columns:repeat(3,1fr)">
+        <div class="stat-card"><div class="stat-label">Aktivních produktů</div><div class="stat-value" id="pdCelkem">—</div></div>
+        <div class="stat-card"><div class="stat-label">Hodnota skladu (nákupní ceny)</div><div class="stat-value" id="pdHodnotaSkladu">—</div></div>
+        <div class="stat-card"><div class="stat-label">Dochází zásoba</div><div class="stat-value stat-orange" id="pdNizkySklad">—</div></div>
+      </div>
+      <div class="table-wrap">
+        <div class="table-header"><h3>📋 Seznam produktů</h3></div>
+        <div id="produktyTable"><div class="loading">Načítám...</div></div>
+      </div>
+      <p style="padding:0 4px;font-size:0.78rem;color:var(--text-light)">Sklad se mění jen přes "Prodat" / "Naskladnit" — nikdy ručně, ať zůstane dohledatelná historie pohybů. Upozornění na docházející zásobu (pokud je u produktu nastavená hranice) chodí jednou denně na info@masazealesa.cz.</p>
+    </div>
+
     <!-- ÚČETNICTVÍ -->
     <div class="page" id="page-ucetnictvi">
       <div class="page-header">
@@ -510,11 +532,12 @@ tr:hover td{background:#fffaf5}
           <button class="btn btn-outline btn-sm" onclick="document.getElementById('ucetOd').value='';document.getElementById('ucetDo').value='';loadUcetnictvi()">Celé období</button>
         </div>
       </div>
-      <p style="padding:0 4px;font-size:0.78rem;color:var(--text-light)">Čtyři různé věci, záměrně oddělené — nejde o jedno číslo. <strong>Tržby za služby</strong> = hodnota odvedené práce podle data masáže. <strong>Přijaté platby</strong> = skutečný pohyb peněz (poukaz se tu nepočítá znovu, ten už je v „Prodej poukazů“). <strong>Prodej poukazů</strong> = kdy se prodaly. <strong>Vráceno</strong> = kolik se vrátilo klientkám.</p>
-      <div class="stats-grid" style="grid-template-columns:repeat(4,1fr)">
+      <p style="padding:0 4px;font-size:0.78rem;color:var(--text-light)">Pět různých věcí, záměrně oddělené — nejde o jedno číslo. <strong>Tržby za služby</strong> = hodnota odvedené práce podle data masáže (produkty sem nepatří). <strong>Přijaté platby</strong> = skutečný pohyb peněz, včetně prodeje produktů (poukaz se tu nepočítá znovu, ten už je v „Prodej poukazů“). <strong>Prodej poukazů</strong> / <strong>Prodej produktů</strong> = kdy se co prodalo. <strong>Vráceno</strong> = kolik se vrátilo klientkám.</p>
+      <div class="stats-grid" style="grid-template-columns:repeat(5,1fr)">
         <div class="stat-card"><div class="stat-label">🌸 Tržby za služby</div><div class="stat-value" id="ucetTrzbySluzby">—</div></div>
         <div class="stat-card"><div class="stat-label">💰 Přijaté platby</div><div class="stat-value stat-green" id="ucetPrijatePlatby">—</div></div>
         <div class="stat-card"><div class="stat-label">🎁 Prodané poukazy</div><div class="stat-value" id="ucetProdejPoukazu">—</div></div>
+        <div class="stat-card"><div class="stat-label">📦 Prodej produktů</div><div class="stat-value" id="ucetProdejProduktu">—</div></div>
         <div class="stat-card"><div class="stat-label">↺ Vráceno</div><div class="stat-value stat-orange" id="ucetVratky">—</div></div>
       </div>
 
@@ -541,6 +564,10 @@ tr:hover td{background:#fffaf5}
           <div class="table-header"><h3>↺ D) Vratky</h3></div>
           <div id="ucetVratkySeznam"><div class="loading">Načítám...</div></div>
         </div>
+      </div>
+      <div class="table-wrap">
+        <div class="table-header"><h3>📦 E) Prodej produktů — podle dnů</h3></div>
+        <div id="ucetProdejProduktuDny"><div class="loading">Načítám...</div></div>
       </div>
     </div>
 
@@ -826,6 +853,83 @@ tr:hover td{background:#fffaf5}
   </div>
 </div>
 
+<!-- MODAL: Přidat/upravit produkt (Fáze 9E) -->
+<div class="modal-overlay" id="modalNovyProdukt">
+  <div class="modal">
+    <h3 id="pdModalNadpis">+ Přidat produkt</h3>
+    <div id="pdModalMsg"></div>
+    <div class="form-grid-2">
+      <div class="form-group"><label>Skupina</label><input type="text" id="pdSkupina" placeholder="např. Masážní olej"></div>
+      <div class="form-group"><label>Varianta</label><input type="text" id="pdVarianta" placeholder="např. Levandule 100ml"></div>
+    </div>
+    <div class="form-grid-2">
+      <div class="form-group"><label>Prodejní cena (Kč)</label><input type="number" id="pdCena" min="0"></div>
+      <div class="form-group"><label>Nákupní cena (Kč, nepovinné)</label><input type="number" id="pdNakupniCena" min="0"></div>
+    </div>
+    <div class="form-grid-2">
+      <div class="form-group"><label>Dodavatel (nepovinné)</label><input type="text" id="pdDodavatel"></div>
+      <div class="form-group"><label>Minimální sklad pro upozornění (nepovinné)</label><input type="number" id="pdMinimalniSklad" min="0"></div>
+    </div>
+    <div class="form-group" id="pdSkladNovyWrap"><label>Počáteční sklad (ks)</label><input type="number" id="pdSklad" min="0" value="0"></div>
+    <div class="form-group" id="pdAktivniWrap" style="display:none">
+      <label>Stav</label>
+      <select id="pdAktivni"><option value="true">Aktivní (nabízí se)</option><option value="false">Deaktivovaný (skrytý)</option></select>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modalNovyProdukt')">Zrušit</button>
+      <button class="btn btn-primary" onclick="ulozitProdukt()">Uložit</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Prodat produkt -->
+<div class="modal-overlay" id="modalProdatProdukt">
+  <div class="modal">
+    <h3>Prodat — <span id="ppNazev"></span></h3>
+    <div id="ppMsg"></div>
+    <p style="font-size:0.82rem;color:var(--text-light)">Na skladě: <strong id="ppSkladem"></strong> ks</p>
+    <div class="form-grid-2">
+      <div class="form-group"><label>Množství (ks)</label><input type="number" id="ppMnozstvi" min="1" value="1"></div>
+      <div class="form-group"><label>Způsob platby</label>
+        <select id="ppZpusobPlatby"><option value="hotove">Hotově</option><option value="kartou">Kartou</option><option value="online">Online</option></select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modalProdatProdukt')">Zrušit</button>
+      <button class="btn btn-primary" onclick="potvrditProdejProduktu()">Prodat</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Naskladnit produkt -->
+<div class="modal-overlay" id="modalNaskladnitProdukt">
+  <div class="modal">
+    <h3>Naskladnit — <span id="npNazev"></span></h3>
+    <div id="npMsg"></div>
+    <div class="form-grid-2">
+      <div class="form-group"><label>Množství (ks)</label><input type="number" id="npMnozstvi" min="1" value="1"></div>
+      <div class="form-group"><label>Nákupní cena celkem (Kč, nepovinné)</label><input type="number" id="npNakupniCenaCelkem" min="0"></div>
+    </div>
+    <div class="form-group"><label>Dodavatel (nepovinné)</label><input type="text" id="npDodavatel"></div>
+    <div class="form-group"><label>Poznámka (nepovinné)</label><input type="text" id="npPoznamka"></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modalNaskladnitProdukt')">Zrušit</button>
+      <button class="btn btn-primary" onclick="potvrditNaskladneni()">Naskladnit</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Historie pohybů skladu u produktu -->
+<div class="modal-overlay" id="modalHistorieProduktu">
+  <div class="modal">
+    <h3>Historie skladu — <span id="phNazev"></span></h3>
+    <div id="phObsah"><div class="loading">Načítám...</div></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modalHistorieProduktu')">Zavřít</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ⚠️ Jakmile zprovozníš backend na Renderu, sem doplň jeho URL adresu:
 const API = 'https://masazealesa.onrender.com/api';
@@ -904,6 +1008,7 @@ function showPage(name, el) {
   if (name === 'newsletter') loadNewsletter();
   if (name === 'sablony') loadSablony();
   if (name === 'cenik') loadCenik();
+  if (name === 'produkty') loadProdukty();
   if (name === 'masaze') loadProdejna();
   if (name === 'ucetnictvi') loadUcetnictvi();
   if (name === 'retence') loadRetenceNastaveni();
@@ -2387,6 +2492,177 @@ async function smazatProdej(id) {
   loadProdejna();
 }
 
+// ── PRODUKTY A SKLAD (Fáze 9E) ──────────────────────────────────────────
+let posledniProdukty = [];
+let aktivniProduktId = null;
+
+async function loadProdukty() {
+  try {
+    posledniProdukty = await adminFetch(API + '/admin/produkty').then(r => r.json());
+    const aktivni = posledniProdukty.filter(p => p.aktivni);
+    document.getElementById('pdCelkem').textContent = aktivni.length;
+    document.getElementById('pdHodnotaSkladu').textContent = posledniProdukty
+      .reduce((s, p) => s + (Number(p.nakupni_cena) || 0) * p.sklad, 0).toLocaleString('cs-CZ') + ' Kč';
+    const nizkych = aktivni.filter(p => p.minimalni_sklad !== null && p.sklad <= p.minimalni_sklad);
+    document.getElementById('pdNizkySklad').textContent = nizkych.length;
+    const badge = document.getElementById('navBadgeProdukty');
+    if (nizkych.length) { badge.textContent = nizkych.length; badge.style.display = 'inline-block'; }
+    else badge.style.display = 'none';
+    vykreslitProdukty();
+  } catch (e) {
+    document.getElementById('produktyTable').innerHTML = '<div class="error-msg">Chyba načítání.</div>';
+  }
+}
+function vykreslitProdukty() {
+  if (!posledniProdukty.length) { document.getElementById('produktyTable').innerHTML = '<div class="empty">Zatím žádné produkty</div>'; return; }
+  document.getElementById('produktyTable').innerHTML = `
+    <table><thead><tr><th>Produkt</th><th>Cena</th><th>Sklad</th><th>Dodavatel</th><th>Stav</th><th></th></tr></thead>
+    <tbody>${posledniProdukty.map(p => {
+      const nizko = p.minimalni_sklad !== null && p.sklad <= p.minimalni_sklad;
+      return `<tr${p.aktivni ? '' : ' style="opacity:0.55"'}>
+        <td>${escapeHtml(p.skupina)} – ${escapeHtml(p.varianta)}</td>
+        <td>${Number(p.cena).toLocaleString('cs-CZ')} Kč</td>
+        <td${nizko ? ' style="color:#c0392b;font-weight:700"' : ''}>${p.sklad} ks${nizko ? ' ⚠️' : ''}</td>
+        <td>${escapeHtml(p.dodavatel) || '—'}</td>
+        <td>${p.aktivni ? '<span class="badge badge-ok">Aktivní</span>' : '<span class="badge badge-zruseno">Deaktivováno</span>'}</td>
+        <td style="display:flex;gap:4px;flex-wrap:wrap">
+          <button class="btn btn-green btn-sm" onclick="otevritProdatProdukt(${p.id})" title="Prodat">💳</button>
+          <button class="btn btn-outline btn-sm" onclick="otevritNaskladnitProdukt(${p.id})" title="Naskladnit">📥</button>
+          <button class="btn btn-outline btn-sm" onclick="otevritHistoriiProduktu(${p.id})" title="Historie">📜</button>
+          <button class="btn btn-outline btn-sm" onclick="otevritEditProdukt(${p.id})" title="Upravit">✏️</button>
+        </td>
+      </tr>`;
+    }).join('')}</tbody></table>
+  `;
+}
+function otevritNovyProdukt() {
+  aktivniProduktId = null;
+  document.getElementById('pdModalNadpis').textContent = '+ Přidat produkt';
+  document.getElementById('pdModalMsg').innerHTML = '';
+  document.getElementById('pdSkupina').value = '';
+  document.getElementById('pdVarianta').value = '';
+  document.getElementById('pdCena').value = '';
+  document.getElementById('pdNakupniCena').value = '';
+  document.getElementById('pdDodavatel').value = '';
+  document.getElementById('pdMinimalniSklad').value = '';
+  document.getElementById('pdSklad').value = '0';
+  document.getElementById('pdSkladNovyWrap').style.display = 'block';
+  document.getElementById('pdAktivniWrap').style.display = 'none';
+  openModal('modalNovyProdukt');
+}
+function otevritEditProdukt(id) {
+  const p = posledniProdukty.find(p => p.id === id);
+  if (!p) return;
+  aktivniProduktId = id;
+  document.getElementById('pdModalNadpis').textContent = 'Upravit — ' + p.skupina + ' – ' + p.varianta;
+  document.getElementById('pdModalMsg').innerHTML = '';
+  document.getElementById('pdSkupina').value = p.skupina;
+  document.getElementById('pdVarianta').value = p.varianta;
+  document.getElementById('pdCena').value = p.cena;
+  document.getElementById('pdNakupniCena').value = p.nakupni_cena || '';
+  document.getElementById('pdDodavatel').value = p.dodavatel || '';
+  document.getElementById('pdMinimalniSklad').value = p.minimalni_sklad === null ? '' : p.minimalni_sklad;
+  document.getElementById('pdSkladNovyWrap').style.display = 'none';
+  document.getElementById('pdAktivniWrap').style.display = 'block';
+  document.getElementById('pdAktivni').value = String(p.aktivni);
+  openModal('modalNovyProdukt');
+}
+async function ulozitProdukt() {
+  const skupina = document.getElementById('pdSkupina').value.trim();
+  const varianta = document.getElementById('pdVarianta').value.trim();
+  const cena = document.getElementById('pdCena').value;
+  const nakupni_cena = document.getElementById('pdNakupniCena').value || null;
+  const dodavatel = document.getElementById('pdDodavatel').value.trim() || null;
+  const minimalni_sklad = document.getElementById('pdMinimalniSklad').value || null;
+  const msg = document.getElementById('pdModalMsg');
+  if (!skupina || !varianta || !cena) { msg.innerHTML = '<div class="error-msg">Vyplňte prosím skupinu, variantu a cenu.</div>'; return; }
+  try {
+    let res;
+    if (aktivniProduktId) {
+      const aktivni = document.getElementById('pdAktivni').value === 'true';
+      res = await adminFetch(API + '/admin/produkty/' + aktivniProduktId, { method: 'PUT', body: JSON.stringify({ skupina, varianta, cena, nakupni_cena, dodavatel, minimalni_sklad, aktivni }) });
+    } else {
+      const sklad = document.getElementById('pdSklad').value || 0;
+      res = await adminFetch(API + '/admin/produkty', { method: 'POST', body: JSON.stringify({ skupina, varianta, cena, nakupni_cena, dodavatel, minimalni_sklad, sklad }) });
+    }
+    const data = await res.json();
+    if (!res.ok) { msg.innerHTML = '<div class="error-msg">' + (data.chyba || 'Uložení se nepodařilo.') + '</div>'; return; }
+    closeModal('modalNovyProdukt');
+    loadProdukty();
+  } catch (e) { msg.innerHTML = '<div class="error-msg">Nejde se připojit k serveru.</div>'; }
+}
+function otevritProdatProdukt(id) {
+  const p = posledniProdukty.find(p => p.id === id);
+  if (!p) return;
+  aktivniProduktId = id;
+  document.getElementById('ppNazev').textContent = p.skupina + ' – ' + p.varianta;
+  document.getElementById('ppSkladem').textContent = p.sklad;
+  document.getElementById('ppMnozstvi').value = 1;
+  document.getElementById('ppMnozstvi').max = p.sklad;
+  document.getElementById('ppMsg').innerHTML = '';
+  openModal('modalProdatProdukt');
+}
+async function potvrditProdejProduktu() {
+  const mnozstvi = document.getElementById('ppMnozstvi').value;
+  const zpusob_platby = document.getElementById('ppZpusobPlatby').value;
+  const msg = document.getElementById('ppMsg');
+  try {
+    const res = await adminFetch(API + '/admin/produkty/' + aktivniProduktId + '/prodat', { method: 'POST', body: JSON.stringify({ mnozstvi, zpusob_platby }) });
+    const data = await res.json();
+    if (!res.ok) { msg.innerHTML = '<div class="error-msg">' + (data.chyba || 'Prodej se nepodařil.') + '</div>'; return; }
+    closeModal('modalProdatProdukt');
+    loadProdukty();
+  } catch (e) { msg.innerHTML = '<div class="error-msg">Nejde se připojit k serveru.</div>'; }
+}
+function otevritNaskladnitProdukt(id) {
+  const p = posledniProdukty.find(p => p.id === id);
+  if (!p) return;
+  aktivniProduktId = id;
+  document.getElementById('npNazev').textContent = p.skupina + ' – ' + p.varianta;
+  document.getElementById('npMnozstvi').value = 1;
+  document.getElementById('npNakupniCenaCelkem').value = '';
+  document.getElementById('npDodavatel').value = p.dodavatel || '';
+  document.getElementById('npPoznamka').value = '';
+  document.getElementById('npMsg').innerHTML = '';
+  openModal('modalNaskladnitProdukt');
+}
+async function potvrditNaskladneni() {
+  const mnozstvi = document.getElementById('npMnozstvi').value;
+  const nakupni_cena_celkem = document.getElementById('npNakupniCenaCelkem').value || null;
+  const dodavatel = document.getElementById('npDodavatel').value.trim() || null;
+  const poznamka = document.getElementById('npPoznamka').value.trim() || null;
+  const msg = document.getElementById('npMsg');
+  try {
+    const res = await adminFetch(API + '/admin/produkty/' + aktivniProduktId + '/naskladnit', { method: 'POST', body: JSON.stringify({ mnozstvi, nakupni_cena_celkem, dodavatel, poznamka }) });
+    const data = await res.json();
+    if (!res.ok) { msg.innerHTML = '<div class="error-msg">' + (data.chyba || 'Naskladnění se nepodařilo.') + '</div>'; return; }
+    closeModal('modalNaskladnitProdukt');
+    loadProdukty();
+  } catch (e) { msg.innerHTML = '<div class="error-msg">Nejde se připojit k serveru.</div>'; }
+}
+async function otevritHistoriiProduktu(id) {
+  const p = posledniProdukty.find(p => p.id === id);
+  if (!p) return;
+  document.getElementById('phNazev').textContent = p.skupina + ' – ' + p.varianta;
+  document.getElementById('phObsah').innerHTML = '<div class="loading">Načítám...</div>';
+  openModal('modalHistorieProduktu');
+  try {
+    const historie = await adminFetch(API + '/admin/produkty/' + id + '/historie').then(r => r.json());
+    if (!historie.length) { document.getElementById('phObsah').innerHTML = '<div class="empty">Zatím žádné pohyby skladu.</div>'; return; }
+    document.getElementById('phObsah').innerHTML = `
+      <table><thead><tr><th>Datum</th><th>Typ</th><th>Změna</th><th>Detail</th></tr></thead>
+      <tbody>${historie.map(h => `<tr>
+        <td>${new Date(h.vytvoreno).toLocaleDateString('cs-CZ')}</td>
+        <td>${h.typ === 'prodej' ? '💳 Prodej' : '📥 Naskladnění'}</td>
+        <td style="color:${h.zmena > 0 ? '#1e8449' : '#c0392b'}">${h.zmena > 0 ? '+' : ''}${h.zmena} ks</td>
+        <td>${h.typ === 'prodej'
+          ? (h.castka !== null ? Number(h.castka).toLocaleString('cs-CZ') + ' Kč' : '—')
+          : (escapeHtml(h.dodavatel) || '—') + (h.castka !== null ? ' · ' + Number(h.castka).toLocaleString('cs-CZ') + ' Kč' : '') + (h.poznamka ? ' · ' + escapeHtml(h.poznamka) : '')
+        }</td>
+      </tr>`).join('')}</tbody></table>`;
+  } catch (e) { document.getElementById('phObsah').innerHTML = '<div class="error-msg">Chyba načítání.</div>'; }
+}
+
 // ── ÚČETNICTVÍ (Fáze 3B) — 4 oddělené přehledy, ať jedno číslo nemusí
 // představovat čtyři různé věci (hodnota služby, přijaté peníze, prodej
 // poukazu, vratka). Viz GET /api/admin/ucetnictvi.
@@ -2409,11 +2685,13 @@ async function loadUcetnictvi() {
     document.getElementById('ucetTrzbySluzby').textContent = Math.round(d.trzbyZaSluzby.celkem).toLocaleString('cs-CZ') + ' Kč';
     document.getElementById('ucetPrijatePlatby').textContent = Math.round(d.prijatePlatby.celkem).toLocaleString('cs-CZ') + ' Kč';
     document.getElementById('ucetProdejPoukazu').textContent = Math.round(d.prodejPoukazu.celkem).toLocaleString('cs-CZ') + ' Kč';
+    document.getElementById('ucetProdejProduktu').textContent = Math.round(d.prodejProduktu.celkem).toLocaleString('cs-CZ') + ' Kč';
     document.getElementById('ucetVratky').textContent = Math.round(d.vratky.celkem).toLocaleString('cs-CZ') + ' Kč';
 
     document.getElementById('ucetTrzbySluzbyDny').innerHTML = tabulkaPodleDne(d.trzbyZaSluzby.podleDne, 'Zatím žádné služby v tomto období');
     document.getElementById('ucetPrijatePlatbyDny').innerHTML = tabulkaPodleDne(d.prijatePlatby.podleDne, 'Zatím žádné platby v tomto období');
     document.getElementById('ucetProdejPoukazuDny').innerHTML = tabulkaPodleDne(d.prodejPoukazu.podleDne, 'Zatím žádné prodané poukazy v tomto období');
+    document.getElementById('ucetProdejProduktuDny').innerHTML = tabulkaPodleDne(d.prodejProduktu.podleDne, 'Zatím žádné prodané produkty v tomto období');
 
     const zpusobLabel = { hotove: 'Hotově', kartou: 'Kartou', online: 'Online', poukaz: 'Poukaz' };
     document.getElementById('ucetPrijatePlatbySeznam').innerHTML = !d.prijatePlatby.seznam.length ? '<div class="empty">Zatím žádné platby v tomto období</div>' : `

@@ -267,6 +267,51 @@ create table if not exists klientky_udalosti (
   kdy timestamptz not null default now()
 );
 
+-- Fáze 9E: Produkty a sklad (doplňkový prodej v salonu — oleje, čaje,
+-- kosmetika...). "skupina"/"varianta" je stejný vzor jako u ceníku (jeden
+-- konkrétní produkt/velikost/vůně = jeden řádek s vlastním skladem, žádná
+-- samostatná hierarchie kategorií).
+create table if not exists produkty (
+  id serial primary key,
+  skupina text not null,         -- např. "Masážní olej"
+  varianta text not null,        -- např. "Levandule 100ml"
+  cena numeric not null,         -- prodejní cena za kus
+  nakupni_cena numeric,          -- pořizovací cena za kus (nepovinné, jen pro orientační marži)
+  dodavatel text,                -- nepovinné
+  sklad integer not null default 0,       -- aktuální počet kusů skladem (mění se JEN přes prodej/naskladnění, nikdy ručně)
+  minimalni_sklad integer,       -- nepovinné; sklad <= tahle hodnota => denní e-mailové upozornění
+  aktivni boolean not null default true,  -- false = skrytý v nabídce k prodeji, historie zůstává
+  vytvoreno timestamptz not null default now()
+);
+
+-- Prodej produktu klientce — snižuje produkty.sklad, zaznamenává tržbu
+-- (odděleně od "prodeje", což jsou masáže na místě bez rezervace — produkt
+-- není služba, viz Účetnictví kategorie "Prodej produktů").
+create table if not exists prodeje_produktu (
+  id serial primary key,
+  produkt_id integer not null references produkty(id) on delete restrict,
+  nazev text not null,           -- snímek "skupina – varianta" v době prodeje
+  mnozstvi integer not null,
+  cena_za_kus numeric not null,  -- snímek prodejní ceny v době prodeje
+  cena_celkem numeric not null,
+  zpusob_platby text not null default 'hotove', -- hotove | kartou | online
+  vytvoreno timestamptz not null default now(),
+  check (mnozstvi > 0)
+);
+
+-- Naskladnění (nákup od dodavatele) — zvyšuje produkty.sklad. Samostatný
+-- log, ne ruční přepsání čísla, ať zůstane dohledatelná historie pohybů.
+create table if not exists naskladneni_produktu (
+  id serial primary key,
+  produkt_id integer not null references produkty(id) on delete restrict,
+  mnozstvi integer not null,
+  nakupni_cena_celkem numeric,
+  dodavatel text,
+  poznamka text,
+  vytvoreno timestamptz not null default now(),
+  check (mnozstvi > 0)
+);
+
 -- Fáze 9C: editovatelné e-mailové šablony. "klic" odpovídá pevné sadě ve
 -- server.js (VYCHOZI_SABLONY) — řádek tu existuje, jen když ho admin někdy
 -- upravil; dokud neexistuje, používá se vestavěný výchozí text (žádný seed
