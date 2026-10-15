@@ -79,7 +79,7 @@ tr:last-child td{border-bottom:none}
 .ak-hlavicka small{display:block;font-weight:400;color:var(--text-light);font-size:0.65rem}
 .ak-hlavicka.dnes{color:var(--tan)}
 .ak-hodiny-col{position:relative}
-.ak-den{position:relative;border-left:1px solid #f4e9e0;border-top:1px solid #f4e9e0}
+.ak-den{position:relative;border-left:1px solid #f4e9e0;border-top:1px solid #f4e9e0;cursor:pointer}
 .ak-blok{position:absolute;left:2px;right:2px;border-radius:5px;padding:2px 5px;font-size:0.62rem;line-height:1.25;color:#fff;overflow:hidden;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,0.15)}
 .ak-blok strong{display:block;font-size:0.66rem}
 tr:hover td{background:#fffaf5}
@@ -1154,16 +1154,27 @@ function vykreslitAdminKalendar() {
       const top = (od - minMin) * PX_MIN;
       const h = Math.max((doo - od) * PX_MIN, 15);
       const barva = barvy[r.stav] || '#b0a89f';
-      return `<div class="ak-blok" style="top:${top}px;height:${h}px;background:${barva}" onclick="otevritDetailRezervace(${r.id})" title="${escapeHtml(r.jmeno)} — ${escapeHtml(r.masaz)}"><strong>${String(r.cas_od).slice(0, 5)}</strong>${escapeHtml(r.jmeno)}</div>`;
+      return `<div class="ak-blok" style="top:${top}px;height:${h}px;background:${barva}" onclick="event.stopPropagation();otevritDetailRezervace(${r.id})" title="${escapeHtml(r.jmeno)} — ${escapeHtml(r.masaz)}"><strong>${String(r.cas_od).slice(0, 5)}</strong>${escapeHtml(r.jmeno)}</div>`;
     }).join('');
-    html += `<div class="ak-den" style="height:${vyska}px">${blokyHtml}</div>`;
+    html += `<div class="ak-den" style="height:${vyska}px" onclick="akKliknoutNaDen(event,'${isoDny[i]}',${minMin})" title="Kliknutím sem založíš rezervaci na tento čas">${blokyHtml}</div>`;
   });
 
   wrap.innerHTML = html;
 }
+// Klik na prázdné místo v kalendáři (ne na existující rezervaci, viz
+// event.stopPropagation() v bloku výš) rovnou otevře formulář nové rezervace
+// s předvyplněným datem a časem odvozeným z pozice kliknutí (zaokrouhleno na
+// čtvrthodiny) — ať se nemusí datum/čas přepisovat ručně.
+function akKliknoutNaDen(ev, datum, minMin) {
+  const rect = ev.currentTarget.getBoundingClientRect();
+  const offsetY = ev.clientY - rect.top;
+  let minuty = minMin + Math.round(offsetY / 1); // PX_MIN = 1 (viz vykreslitAdminKalendar)
+  minuty = Math.round(minuty / 15) * 15;
+  otevritNovouRezervaci(datum, akMinNaCas(Math.max(0, minuty)));
+}
 
 let upravovanaRezervaceId = null;
-async function otevritNovouRezervaci() {
+async function otevritNovouRezervaci(predvyplnDatum, predvyplnCas) {
   upravovanaRezervaceId = null;
   document.getElementById('nrModalNadpis').textContent = '+ Přidat rezervaci';
   document.getElementById('nrModalHint').textContent = 'Jde i mimo běžnou otevírací dobu — hodí se pro klientky domluvené mimo web. Rezervace se rovnou založí jako potvrzená a pokud vyplníš e-mail, hned se jí pošle potvrzovací e-mail.';
@@ -1171,8 +1182,8 @@ async function otevritNovouRezervaci() {
   const sel = document.getElementById('nrMasaz');
   sel.innerHTML = '<option value="">Načítám…</option>';
   document.getElementById('novaRezervaceMsg').innerHTML = '';
-  document.getElementById('nrDatum').value = '';
-  document.getElementById('nrCas').value = '';
+  document.getElementById('nrDatum').value = predvyplnDatum || '';
+  document.getElementById('nrCas').value = predvyplnCas || '';
   document.getElementById('nrJmeno').value = '';
   document.getElementById('nrTelefon').value = '';
   document.getElementById('nrEmail').value = '';
