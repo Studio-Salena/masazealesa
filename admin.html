@@ -244,6 +244,13 @@ tr:hover td{background:#fffaf5}
         <div class="stat-card"><div class="stat-label">Hodnota aktivních poukazů</div><div class="stat-value" id="stPoukazyHodnota">—</div></div>
         <div class="stat-card"><div class="stat-label">Nové žádosti o poukaz</div><div class="stat-value stat-orange" id="stZadosti">—</div></div>
       </div>
+      <div class="stats-grid" style="grid-template-columns:1fr">
+        <div class="stat-card"><div class="stat-label">Tržby za služby tento měsíc</div><div class="stat-value stat-green" id="stTrzbyMesic">—</div></div>
+      </div>
+      <div class="table-wrap">
+        <div class="table-header"><h3>📅 Dnešní program</h3></div>
+        <div id="dnesniProgramTable"><div class="loading">Načítám...</div></div>
+      </div>
     </div>
 
     <!-- REZERVACE -->
@@ -853,6 +860,8 @@ async function loadPrehled() {
     document.getElementById('stPoukazy').textContent = d.poukazyAktivni;
     document.getElementById('stPoukazyHodnota').textContent = Number(d.poukazyHodnota).toLocaleString('cs-CZ') + ' Kč';
     document.getElementById('stZadosti').textContent = d.poukazyZadostiNove;
+    document.getElementById('stTrzbyMesic').textContent = Number(d.trzbyTentoMesic).toLocaleString('cs-CZ') + ' Kč';
+    vykreslitDnesniProgram(d.dnesniProgram || []);
     const rezBadge = document.getElementById('navBadgeRez');
     if (d.rezervaceCekajici > 0) { rezBadge.textContent = d.rezervaceCekajici; rezBadge.style.display = 'inline-block'; }
     else rezBadge.style.display = 'none';
@@ -860,6 +869,28 @@ async function loadPrehled() {
     if (d.poukazyZadostiNove > 0) { poukBadge.textContent = d.poukazyZadostiNove; poukBadge.style.display = 'inline-block'; }
     else poukBadge.style.display = 'none';
   } catch (e) { /* tichá chyba na přehledu */ }
+}
+
+// Klikatelný seznam dnešních rezervací na dashboardu — detail se otevírá přes
+// stejný modál jako odjinud (Rezervace/Účetnictví), viz zobrazitRezervaciZPrehledu.
+function vykreslitDnesniProgram(seznam) {
+  const el = document.getElementById('dnesniProgramTable');
+  if (!seznam.length) { el.innerHTML = '<div class="empty">Na dnešek nejsou žádné rezervace.</div>'; return; }
+  const stavBadge = {
+    cekajici: '⏳ Čeká', potvrzena: '✅ Potvrzena', dokoncena: '🌸 Dokončena',
+    nedostavila_se: '🚫 Nedostavila se', zrusena: '❌ Zrušena'
+  };
+  el.innerHTML = `<table><thead><tr><th>Čas</th><th>Jméno</th><th>Masáž</th><th>Stav</th></tr></thead>
+    <tbody>${seznam.map(r => `<tr class="row-clickable" onclick="zobrazitRezervaciZPrehledu(${r.id})">
+      <td>${String(r.cas_od).slice(0, 5)}–${String(r.cas_do).slice(0, 5)}</td>
+      <td>${escapeHtml(r.jmeno)}</td>
+      <td>${escapeHtml(r.masaz)}</td>
+      <td>${stavBadge[r.stav] || r.stav}</td>
+    </tr>`).join('')}</tbody></table>`;
+}
+async function zobrazitRezervaciZPrehledu(id) {
+  if (!vsechnyRezervace.length) await loadRezervace();
+  otevritDetailRezervace(id);
 }
 
 // ── REZERVACE ──

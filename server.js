@@ -1310,18 +1310,39 @@ app.use('/api/admin', vyzadovatAdmina);
 app.get('/api/admin/prehled', async (req, res) => {
   try {
     const dnes = new Date().toISOString().slice(0, 10);
-    const [rez, pouk, zad] = await Promise.all([
-      db.query('SELECT id, stav, datum FROM rezervace'),
+    const zacatekMesice = dnes.slice(0, 8) + '01';
+    const [rez, pouk, zad, prod] = await Promise.all([
+      db.query('SELECT id, stav, datum, cas_od, cas_do, jmeno, masaz, cena FROM rezervace'),
       db.query('SELECT id, stav, zustatek, platnost_do FROM poukazy'),
-      db.query('SELECT id, stav FROM poukazy_zadosti')
+      db.query('SELECT id, stav FROM poukazy_zadosti'),
+      db.query('SELECT cena, vytvoreno FROM prodeje')
     ]);
+
+    // "Dnešní program" — dnešní rezervace (kromě zrušených), seřazené podle času.
+    const dnesniProgram = rez.rows
+      .filter(r => r.datum === dnes && r.stav !== 'zrusena')
+      .sort((a, b) => a.cas_od.localeCompare(b.cas_od))
+      .map(r => ({ id: r.id, cas_od: r.cas_od, cas_do: r.cas_do, jmeno: r.jmeno, masaz: r.masaz, stav: r.stav }));
+
+    // Tržby za služby tento měsíc — stejná definice jako "A) Tržby za služby"
+    // v Účetnictví (rezervace podle data masáže + prodejna podle data prodeje),
+    // jen omezená na aktuální kalendářní měsíc.
+    const trzbyTentoMesic = rez.rows
+      .filter(r => ['potvrzena', 'dokoncena'].includes(r.stav) && r.datum >= zacatekMesice)
+      .reduce((s, r) => s + Number(r.cena), 0)
+      + prod.rows
+        .filter(p => p.vytvoreno.toISOString().slice(0, 10) >= zacatekMesice)
+        .reduce((s, p) => s + Number(p.cena), 0);
+
     res.json({
       rezervaceCelkem: rez.rows.length,
       rezervaceCekajici: rez.rows.filter(r => r.stav === 'cekajici').length,
       rezervaceBudouci: rez.rows.filter(r => r.datum >= dnes && r.stav !== 'zrusena').length,
       poukazyAktivni: pouk.rows.filter(jePoukazSkutecneAktivni).length,
       poukazyHodnota: pouk.rows.filter(jePoukazSkutecneAktivni).reduce((s, p) => s + Number(p.zustatek), 0),
-      poukazyZadostiNove: zad.rows.filter(z => z.stav === 'nova').length
+      poukazyZadostiNove: zad.rows.filter(z => z.stav === 'nova').length,
+      dnesniProgram,
+      trzbyTentoMesic
     });
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
