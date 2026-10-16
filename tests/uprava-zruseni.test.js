@@ -176,10 +176,10 @@ async function main() {
     console.log('--- Test 6: přesun na obsazený termín ---');
     {
       const { datum, cas1, cas2 } = await dvaVolneTerminySameDen(polozka.id, 30 + Math.floor(Math.random() * 100));
-      const rA = await adminFetch('/admin/rezervace', { method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, datum, cas_od: cas1, jmeno: 'TEST-UPRAVA-A (smazat)', telefon: '000000035' }) }).then(x => x.json());
+      const rA = await adminFetch('/admin/rezervace', { method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, datum, cas_od: cas1, jmeno: 'TEST-UPRAVA-A (smazat)', telefon: '000000035', email: 'test-uprava-a@example.cz' }) }).then(x => x.json());
       uklidRezervace.push(rA.rezervace.id);
       if (rA.rezervace.klientka_id) uklidKlientky.add(rA.rezervace.klientka_id);
-      const rB = await adminFetch('/admin/rezervace', { method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, datum, cas_od: cas2, jmeno: 'TEST-UPRAVA-B (smazat)', telefon: '000000036' }) }).then(x => x.json());
+      const rB = await adminFetch('/admin/rezervace', { method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, datum, cas_od: cas2, jmeno: 'TEST-UPRAVA-B (smazat)', telefon: '000000036', email: 'test-uprava-b@example.cz' }) }).then(x => x.json());
       uklidRezervace.push(rB.rezervace.id);
       if (rB.rezervace.klientka_id) uklidKlientky.add(rB.rezervace.klientka_id);
 

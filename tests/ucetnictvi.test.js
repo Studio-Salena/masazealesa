@@ -54,7 +54,7 @@ async function main() {
 
     const vytvorRes = await adminFetch('/admin/rezervace', {
       method: 'POST',
-      body: JSON.stringify({ cenik_id: polozka.id, datum: datumIso, cas_od: cas, jmeno: 'TEST-UCETNICTVI (smazat)', telefon: '000000000' })
+      body: JSON.stringify({ cenik_id: polozka.id, datum: datumIso, cas_od: cas, jmeno: 'TEST-UCETNICTVI (smazat)', telefon: '000000000', email: 'test-ucetnictvi@example.cz' })
     });
     const vytvor = await vytvorRes.json();
     assert.equal(vytvorRes.status, 200, 'Vytvoření testovací rezervace selhalo: ' + JSON.stringify(vytvor));

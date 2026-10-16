@@ -1385,9 +1385,14 @@ app.get('/api/admin/rezervace', async (req, res) => {
 app.post('/api/admin/rezervace', async (req, res) => {
   const { datum, cas_od, jmeno, telefon, email, cenik_id, poznamka } = req.body || {};
   // telefon je v databázi "not null" — bez kontroly tady by INSERT spadl na chybě
-  // databáze a vrátil nesrozumitelnou 500 míso jasné validační chyby.
-  if (!datum || !cas_od || !jmeno || !telefon || !cenik_id) {
-    return res.status(400).json({ chyba: 'Vyplňte prosím jméno, telefon, masáž, datum a čas.' });
+  // databáze a vrátil nesrozumitelnou 500 míso jasné validační chyby. E-mail je
+  // tu (na rozdíl od PATCH úpravy existující rezervace) povinný — bez něj by se
+  // nemohlo odeslat potvrzení nově založené rezervace (viz odeslatEmail níž).
+  if (!datum || !cas_od || !jmeno || !telefon || !email || !cenik_id) {
+    return res.status(400).json({ chyba: 'Vyplňte prosím jméno, telefon, e-mail, masáž, datum a čas.' });
+  }
+  if (!email.includes('@')) {
+    return res.status(400).json({ chyba: 'Zadejte prosím platný e-mail.' });
   }
   const client = await db.connect();
   try {

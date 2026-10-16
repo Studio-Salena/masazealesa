@@ -782,7 +782,7 @@ tr:hover td{background:#fffaf5}
       <div class="form-group"><label>Jméno a příjmení*</label><input type="text" id="nrJmeno" placeholder="Jana Nováková"></div>
       <div class="form-group"><label>Telefon*</label><input type="tel" id="nrTelefon" placeholder="736 734 951"></div>
     </div>
-    <div class="form-group"><label>E-mail (nepovinné — bez něj se e-mail neodešle)</label><input type="email" id="nrEmail" placeholder="jana@example.cz"></div>
+    <div class="form-group"><label id="nrEmailLabel">E-mail*</label><input type="email" id="nrEmail" placeholder="jana@example.cz"></div>
     <div class="form-group"><label>Poznámka</label><input type="text" id="nrPoznamka" placeholder="Nepovinné"></div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal('modalNovaRezervace')">Zrušit</button>
@@ -1177,8 +1177,9 @@ let upravovanaRezervaceId = null;
 async function otevritNovouRezervaci(predvyplnDatum, predvyplnCas) {
   upravovanaRezervaceId = null;
   document.getElementById('nrModalNadpis').textContent = '+ Přidat rezervaci';
-  document.getElementById('nrModalHint').textContent = 'Jde i mimo běžnou otevírací dobu — hodí se pro klientky domluvené mimo web. Rezervace se rovnou založí jako potvrzená a pokud vyplníš e-mail, hned se jí pošle potvrzovací e-mail.';
+  document.getElementById('nrModalHint').textContent = 'Jde i mimo běžnou otevírací dobu — hodí se pro klientky domluvené mimo web. Rezervace se rovnou založí jako potvrzená a hned se na zadaný e-mail pošle potvrzení.';
   document.getElementById('nrUlozitBtn').textContent = 'Přidat';
+  document.getElementById('nrEmailLabel').textContent = 'E-mail*';
   const sel = document.getElementById('nrMasaz');
   sel.innerHTML = '<option value="">Načítám…</option>';
   document.getElementById('novaRezervaceMsg').innerHTML = '';
@@ -1203,6 +1204,7 @@ async function otevritUpravitRezervaci(id) {
   document.getElementById('nrModalNadpis').textContent = '✏️ Upravit rezervaci';
   document.getElementById('nrModalHint').textContent = 'Změna termínu se znovu ověří proti otevírací době, výjimkám a kolizím. Platby a jejich historie se úpravou nemění. E-mail o změně se pošle jen při skutečné změně termínu/masáže.';
   document.getElementById('nrUlozitBtn').textContent = 'Uložit změny';
+  document.getElementById('nrEmailLabel').textContent = 'E-mail (nepovinné — bez něj se e-mail o změně neodešle)';
   document.getElementById('novaRezervaceMsg').innerHTML = '';
   document.getElementById('nrDatum').value = r.datum;
   document.getElementById('nrCas').value = String(r.cas_od).slice(0, 5);
@@ -1229,12 +1231,19 @@ async function pridatRezervaci() {
   const email = document.getElementById('nrEmail').value.trim();
   const poznamka = document.getElementById('nrPoznamka').value.trim();
   const msg = document.getElementById('novaRezervaceMsg');
+  const editace = !!upravovanaRezervaceId;
   if (!cenik_id || !datum || !cas_od || !jmeno || !telefon) {
     msg.innerHTML = '<div class="error-msg">Vyplňte prosím masáž, datum, čas, jméno a telefon.</div>';
     return;
   }
+  // E-mail je povinný jen při zakládání nové rezervace (bez něj by se nemohlo
+  // odeslat potvrzení) — u editace starších rezervací bez e-mailu to zůstává
+  // volitelné, ať se kvůli tomu nezablokuje úprava jinak existujícího záznamu.
+  if (!editace && (!email || !email.includes('@'))) {
+    msg.innerHTML = '<div class="error-msg">Zadejte prosím platný e-mail — bez něj by se nemohlo odeslat potvrzení rezervace.</div>';
+    return;
+  }
   try {
-    const editace = !!upravovanaRezervaceId;
     const res = await adminFetch(API + '/admin/rezervace' + (editace ? '/' + upravovanaRezervaceId : ''), {
       method: editace ? 'PATCH' : 'POST',
       body: JSON.stringify({ cenik_id, datum, cas_od, jmeno, telefon, email, poznamka })

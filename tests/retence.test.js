@@ -49,7 +49,7 @@ async function smazNastaveni(klic) {
 async function vytvorRezervaciNaDatum(cenikId, datumIso, telefon, jmeno = 'TEST-RETENCE (smazat)') {
   const res = await adminFetch('/admin/rezervace', {
     method: 'POST',
-    body: JSON.stringify({ cenik_id: cenikId, datum: datumIso, cas_od: '10:00', jmeno, telefon })
+    body: JSON.stringify({ cenik_id: cenikId, datum: datumIso, cas_od: '10:00', jmeno, telefon, email: 'test-retence@example.cz' })
   });
   const data = await res.json();
   assert.equal(res.status, 200, 'Vytvoření testovací rezervace selhalo: ' + JSON.stringify(data));

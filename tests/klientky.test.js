@@ -40,7 +40,7 @@ async function novyVolnyTermin(cenikId, odpocetDni) {
   }
   throw new Error('Nenalezen volný termín pro test');
 }
-async function vytvorRezervaci(cenikId, telefon, odpocetDni, jmeno, email) {
+async function vytvorRezervaci(cenikId, telefon, odpocetDni, jmeno, email = 'test-klientky@example.cz') {
   const { datum, cas } = await novyVolnyTermin(cenikId, odpocetDni);
   const res = await adminFetch('/admin/rezervace', {
     method: 'POST',

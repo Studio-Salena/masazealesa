@@ -42,7 +42,7 @@ async function vytvorRezervaci(cenikId, telefonSuffix, extra = {}) {
   const { datum, cas } = await novyVolnyTermin(cenikId, 30 + Math.floor(Math.random() * 200));
   const res = await adminFetch('/admin/rezervace', {
     method: 'POST',
-    body: JSON.stringify({ cenik_id: cenikId, datum, cas_od: cas, jmeno: 'TEST-PLATBY (smazat)', telefon: '00000' + telefonSuffix, ...extra })
+    body: JSON.stringify({ cenik_id: cenikId, datum, cas_od: cas, jmeno: 'TEST-PLATBY (smazat)', telefon: '00000' + telefonSuffix, email: 'test-platby@example.cz', ...extra })
   });
   const data = await res.json();
   assert.equal(res.status, 200, 'Vytvoření testovací rezervace selhalo: ' + JSON.stringify(data));

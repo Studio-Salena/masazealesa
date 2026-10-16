@@ -55,7 +55,7 @@ async function vytvorRezervaci(cenikId, telefon, odpocetDni, jmeno = 'TEST-ANONY
   const { datum, cas } = await novyVolnyTermin(cenikId, odpocetDni);
   const res = await adminFetch('/admin/rezervace', {
     method: 'POST',
-    body: JSON.stringify({ cenik_id: cenikId, datum, cas_od: cas, jmeno, telefon })
+    body: JSON.stringify({ cenik_id: cenikId, datum, cas_od: cas, jmeno, telefon, email: 'test-anonymizace@example.cz' })
   });
   const data = await res.json();
   assert.equal(res.status, 200, 'Vytvoření testovací rezervace selhalo: ' + JSON.stringify(data));
