@@ -1454,6 +1454,14 @@
     #navbar { padding: 1rem 4rem !important; }
   }
 
+  /* ── VELMI ŠIROKÉ OBRAZOVKY (1700px+) — text i logo byly každý u svého
+     okraje s velkou prázdnou mezerou mezi nimi; omezíme šířku hero sekce
+     a obsah (text zleva + logo napravo, viz .hero-deco) zcentrujeme, ať
+     jsou k sobě blíž ── */
+  @media (min-width: 1700px) {
+    .hero { max-width: 1700px !important; margin: 0 auto !important; justify-content: center !important; }
+  }
+
   /* ── STŘEDNÍ OBRAZOVKY (1100-1400px) ── */
   @media (max-width: 1400px) and (min-width: 1100px) {
     .container { padding: 0 3rem !important; }
