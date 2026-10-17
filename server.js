@@ -1346,11 +1346,13 @@ app.get('/api/admin/prehled', async (req, res) => {
       .sort((a, b) => a.cas_od.localeCompare(b.cas_od))
       .map(r => ({ id: r.id, cas_od: r.cas_od, cas_do: r.cas_do, jmeno: r.jmeno, masaz: r.masaz, stav: r.stav }));
 
-    // Tržby za služby tento měsíc — stejná definice jako "A) Tržby za služby"
-    // v Účetnictví (rezervace podle data masáže + prodejna podle data prodeje),
-    // jen omezená na aktuální kalendářní měsíc.
+    // Tržby za služby tento měsíc — na rozdíl od Účetnictví (kategorie A, která
+    // počítá i "potvrzena" — budoucí, zatím neuskutečněné rezervace) tenhle
+    // souhrn na dashboardu záměrně počítá JEN "dokoncena", ať neukazuje peníze
+    // za masáže, které ještě vůbec neproběhly. Prodejna (walk-in, platí se na
+    // místě hned) se počítá vždy — tam není co čekat.
     const trzbyTentoMesic = rez.rows
-      .filter(r => ['potvrzena', 'dokoncena'].includes(r.stav) && r.datum >= zacatekMesice)
+      .filter(r => r.stav === 'dokoncena' && r.datum >= zacatekMesice)
       .reduce((s, r) => s + Number(r.cena), 0)
       + prod.rows
         .filter(p => p.vytvoreno.toISOString().slice(0, 10) >= zacatekMesice)
