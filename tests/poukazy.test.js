@@ -375,6 +375,63 @@ async function main() {
 
     console.log('✅ 8E.3: validace POST /api/poukazy/zadost prošla (18/18 scénářů)');
 
+    // --- Ochrana proti duplicitnímu vystavení při schválení žádosti ---
+    // (audit poukazů, Fáze B bod 1) — PATCH /api/admin/poukazy/zadosti/:id/stav
+    // dřív při souběžném/opakovaném schválení stejné žádosti uměl vytvořit dva
+    // poukazy; oprava přidává "FOR UPDATE" zámek řádku žádosti + kontrolu, že
+    // žádost je ještě "nova". Scénář 21 přímo reprodukuje chybu nahlášenou
+    // auditem a ověřenou živě na TEST DB před opravou.
+    {
+      const email19 = 'test-schvaleni-19-' + Date.now() + '@example.invalid';
+      const v19 = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-SCHVALENI (smazat)', kupujici_email: email19, zpusob_platby: 'prevodem' });
+      assert.equal(v19.status, 200, '19) Vytvoření žádosti selhalo: ' + JSON.stringify(v19.data));
+      const schv19 = await adminFetch(`/admin/poukazy/zadosti/${v19.data.zadost.id}/stav`, { method: 'PATCH', body: JSON.stringify({ stav: 'vyrizena' }) });
+      const d19 = await schv19.json();
+      assert.equal(schv19.status, 200, '19) Schválení selhalo: ' + JSON.stringify(d19));
+      assert.ok(d19.poukaz && d19.poukaz.id, '19) Schválení nevrátilo vytvořený poukaz');
+      uklidPoukazy.push(d19.poukaz.id);
+      if (d19.poukaz.klientka_id) uklidKlientky.add(d19.poukaz.klientka_id);
+      const poukazy19 = await adminFetch('/admin/poukazy').then(r => r.json());
+      assert.equal(poukazy19.filter(p => p.kupujici_email === email19).length, 1, '19) běžné schválení muselo vytvořit přesně 1 poukaz');
+      console.log('OK — 19) běžné jednorázové schválení žádosti vytvoří přesně 1 poukaz (regrese)');
+    }
+    {
+      const email20 = 'test-schvaleni-20-' + Date.now() + '@example.invalid';
+      const v20 = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-SCHVALENI (smazat)', kupujici_email: email20, zpusob_platby: 'prevodem' });
+      const zadostId20 = v20.data.zadost.id;
+      const prvni20 = await adminFetch(`/admin/poukazy/zadosti/${zadostId20}/stav`, { method: 'PATCH', body: JSON.stringify({ stav: 'vyrizena' }) });
+      const prvniData20 = await prvni20.json();
+      assert.equal(prvni20.status, 200, '20) první schválení selhalo: ' + JSON.stringify(prvniData20));
+      uklidPoukazy.push(prvniData20.poukaz.id);
+      if (prvniData20.poukaz.klientka_id) uklidKlientky.add(prvniData20.poukaz.klientka_id);
+      const druhy20 = await adminFetch(`/admin/poukazy/zadosti/${zadostId20}/stav`, { method: 'PATCH', body: JSON.stringify({ stav: 'vyrizena' }) });
+      assert.equal(druhy20.status, 400, '20) opakované schválení už vyřízené žádosti mělo být odmítnuto (400)');
+      const poukazy20 = await adminFetch('/admin/poukazy').then(r => r.json());
+      assert.equal(poukazy20.filter(p => p.kupujici_email === email20).length, 1, '20) opakované schválení nesmí vytvořit druhý poukaz');
+      console.log('OK — 20) opakované (sekvenční) schválení už vyřízené žádosti je odmítnuto, nevznikl druhý poukaz');
+    }
+    {
+      const email21 = 'test-schvaleni-21-' + Date.now() + '@example.invalid';
+      const v21 = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-SCHVALENI (smazat)', kupujici_email: email21, zpusob_platby: 'prevodem' });
+      const zadostId21 = v21.data.zadost.id;
+      const [sA, sB] = await Promise.all([
+        adminFetch(`/admin/poukazy/zadosti/${zadostId21}/stav`, { method: 'PATCH', body: JSON.stringify({ stav: 'vyrizena' }) })
+          .then(r => r.json().then(d => ({ status: r.status, data: d }))),
+        adminFetch(`/admin/poukazy/zadosti/${zadostId21}/stav`, { method: 'PATCH', body: JSON.stringify({ stav: 'vyrizena' }) })
+          .then(r => r.json().then(d => ({ status: r.status, data: d })))
+      ]);
+      const uspesnych21 = [sA.status, sB.status].filter(s => s === 200).length;
+      assert.equal(uspesnych21, 1, `21) Souběžné schválení prošlo ${uspesnych21}× místo 1× (race condition!)`);
+      const poukazVysledek21 = (sA.data && sA.data.poukaz) || (sB.data && sB.data.poukaz);
+      assert.ok(poukazVysledek21 && poukazVysledek21.id, '21) úspěšné schválení muselo vrátit vytvořený poukaz');
+      uklidPoukazy.push(poukazVysledek21.id);
+      if (poukazVysledek21.klientka_id) uklidKlientky.add(poukazVysledek21.klientka_id);
+      const poukazy21 = await adminFetch('/admin/poukazy').then(r => r.json());
+      assert.equal(poukazy21.filter(p => p.kupujici_email === email21).length, 1, '21) souběžné schválení nesmí vytvořit dva poukazy');
+      console.log('OK — 21) souběžné schválení stejné žádosti (Promise.all) vytvoří jen jeden poukaz, bez race condition');
+    }
+    console.log('✅ ochrana proti duplicitnímu vystavení žádosti prošla (19-21/21 scénářů)');
+
     console.log('\n✅ VŠECHNY TESTY POUKAZŮ PROŠLY');
   } finally {
     if (poukazId) {

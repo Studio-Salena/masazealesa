@@ -2026,15 +2026,24 @@ app.get('/api/admin/poukazy/zadosti', async (req, res) => {
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
-// Schválení žádosti → automaticky vytvoří aktivní poukaz
+// Schválení žádosti → automaticky vytvoří aktivní poukaz. "FOR UPDATE" +
+// kontrola aktuálního stavu žádosti (musí být "nova") chrání proti
+// duplicitnímu vystavení poukazu při dvojkliku nebo souběžném/opakovaném
+// požadavku (viz audit poukazů, bod 1 Fáze B) — stejný princip zámku řádku
+// jako u /uplatnit výš. Jakmile je žádost jednou rozhodnutá (vyrizena nebo
+// zamitnuta), přes tenhle endpoint se už znovu "rozhodnout" nedá.
 app.patch('/api/admin/poukazy/zadosti/:id/stav', async (req, res) => {
   const { stav } = req.body || {};
   if (!['nova', 'vyrizena', 'zamitnuta'].includes(stav)) return res.status(400).json({ chyba: 'Neplatný stav.' });
   const client = await db.connect();
   try {
     await client.query('BEGIN');
-    const { rows: [zadost] } = await client.query('SELECT * FROM poukazy_zadosti WHERE id = $1', [req.params.id]);
+    const { rows: [zadost] } = await client.query('SELECT * FROM poukazy_zadosti WHERE id = $1 FOR UPDATE', [req.params.id]);
     if (!zadost) { await client.query('ROLLBACK'); return res.status(404).json({ chyba: 'Žádost nenalezena.' }); }
+    if (zadost.stav !== 'nova') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ chyba: 'Tato žádost už byla vyřízena nebo zamítnuta.' });
+    }
 
     await client.query('UPDATE poukazy_zadosti SET stav = $1 WHERE id = $2', [stav, req.params.id]);
 
