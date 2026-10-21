@@ -739,6 +739,15 @@ function vygenerovatKod() {
   return kod;
 }
 
+// Kódy slevových kupónů (Fáze: "slevové kupóny") — záměrně jiný prefix než
+// dárkové poukazy (ALESA-...), ať jde na první pohled poznat, o co jde.
+function vygenerovatKuponKod() {
+  const znaky = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let kod = 'AKCE-';
+  for (let i = 0; i < 6; i++) kod += znaky[Math.floor(Math.random() * znaky.length)];
+  return kod;
+}
+
 // Vygeneruje EAN-13 čárový kód pro tisk na poukaz (prefix 20-29 = vyhrazeno GS1 pro vlastní/interní použití)
 function vygenerovatEan() {
   let zaklad = '20';
@@ -1930,10 +1939,11 @@ app.patch('/api/admin/poukazy/:id/stav', async (req, res) => {
   const { stav } = req.body || {};
   if (!['aktivni', 'castecne_vyuzity', 'pouzity', 'zruseny'].includes(stav)) return res.status(400).json({ chyba: 'Neplatný stav.' });
   try {
-    await db.query(
+    const { rowCount } = await db.query(
       `UPDATE poukazy SET stav = $1, uzavreno_kdy = CASE WHEN $1 IN ('pouzity','zruseny') THEN now() ELSE NULL END WHERE id = $2`,
       [stav, req.params.id]
     );
+    if (!rowCount) return res.status(404).json({ chyba: 'Poukaz nebyl nalezen.' });
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
@@ -2011,11 +2021,42 @@ app.post('/api/admin/poukazy/:id/uplatnit', async (req, res) => {
   }
 });
 
+// Smazání jen bez jakékoliv stopy použití (jinak by se nenávratně ztratila
+// dohledatelnost — platby.poukaz_id má ON DELETE SET NULL, takže by se řádky
+// jen odpojily, ne smazaly, ale vazba na "který poukaz to byl" by zmizela
+// napořád). Pro použitý/historický poukaz slouží zrušení (PATCH .../stav
+// {stav:'zruseny'}) — zachovává řádek i historii, jen ho vyřadí z dalšího
+// uplatnění. Kontrolují se DVĚ věci, ne jen deník "platby": /uplatnit do něj
+// zapisuje jen při čerpání propojeném s konkrétní rezervací (rezervace_id) —
+// poukaz čerpaný BEZ propojení na rezervaci žádný řádek v "platby" nemá, i
+// když byl prokazatelně použitý (zustatek < hodnota). Smazání proto odmítáme
+// i v tomhle případě, ať nezmizí stopa po reálném čerpání. "FOR UPDATE"
+// zamyká řádek poukazu po dobu kontroly i mazání — kdyby právě souběžně
+// probíhalo uplatnění (to drží stejný zámek), DELETE počká, až skončí, a pak
+// uvidí stav/zůstatek i historii, kterou uplatnění vytvořilo.
 app.delete('/api/admin/poukazy/:id', async (req, res) => {
+  const client = await db.connect();
   try {
-    await db.query('DELETE FROM poukazy WHERE id = $1', [req.params.id]);
+    await client.query('BEGIN');
+    const { rows: [poukaz] } = await client.query('SELECT * FROM poukazy WHERE id = $1 FOR UPDATE', [req.params.id]);
+    if (!poukaz) { await client.query('ROLLBACK'); return res.status(404).json({ chyba: 'Poukaz nebyl nalezen.' }); }
+
+    const cerpano = Number(poukaz.zustatek) !== Number(poukaz.hodnota);
+    const { rows: [pocty] } = await client.query('SELECT count(*) FROM platby WHERE poukaz_id = $1', [req.params.id]);
+    if (cerpano || Number(pocty.count) > 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ chyba: 'Poukaz má historii čerpání, nelze smazat — použij zrušení.' });
+    }
+
+    await client.query('DELETE FROM poukazy WHERE id = $1', [req.params.id]);
+    await client.query('COMMIT');
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ chyba: e.message }); }
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch {}
+    res.status(500).json({ chyba: e.message });
+  } finally {
+    client.release();
+  }
 });
 
 // -- Žádosti o poukaz --
@@ -2411,16 +2452,42 @@ app.get('/api/admin/prodejna', async (req, res) => {
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
+// Nepovinné kupon_kod: pokud je vyplněný, spotřebování kupónu a zápis prodeje
+// proběhnou v JEDNÉ transakci — buď se zapíše prodej A kupón se spotřebuje
+// oba, nebo ani jedno (žádný kupón "spálený" bez odpovídajícího prodeje,
+// žádný prodej se slevou bez skutečně spotřebovaného kupónu). Cena se tu
+// nepřepočítává/nekontroluje proti slevě — stejná důvěra jako u zbytku
+// tohohle formuláře, kde admin cenu může volně upravit pro libovolný důvod.
 app.post('/api/admin/prodejna', async (req, res) => {
-  const { masaz, cena, zpusob_platby, poznamka } = req.body || {};
+  const { masaz, cena, zpusob_platby, poznamka, kupon_kod } = req.body || {};
   if (!masaz || !cena) return res.status(400).json({ chyba: 'Vyberte masáž a zadejte cenu.' });
+  const client = await db.connect();
   try {
-    const { rows: [prodej] } = await db.query(
+    await client.query('BEGIN');
+    if (kupon_kod && kupon_kod.trim()) {
+      const { rows: [spotrebovan] } = await client.query(
+        `UPDATE slevove_kupony SET pouzito_kdy = now() WHERE upper(kod) = upper($1) AND pouzito_kdy IS NULL RETURNING *`,
+        [kupon_kod.trim()]
+      );
+      if (!spotrebovan) {
+        const { rows: [existuje] } = await client.query('SELECT pouzito_kdy FROM slevove_kupony WHERE upper(kod) = upper($1)', [kupon_kod.trim()]);
+        await client.query('ROLLBACK');
+        if (existuje) return res.status(400).json({ chyba: 'Tento kupón už byl použit.' });
+        return res.status(404).json({ chyba: 'Kupón s tímto kódem nebyl nalezen.' });
+      }
+    }
+    const { rows: [prodej] } = await client.query(
       'INSERT INTO prodeje (masaz, cena, zpusob_platby, poznamka) VALUES ($1,$2,$3,$4) RETURNING *',
       [masaz, cena, zpusob_platby || 'hotove', poznamka || null]
     );
+    await client.query('COMMIT');
     res.json({ ok: true, prodej });
-  } catch (e) { res.status(500).json({ chyba: e.message }); }
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch {}
+    res.status(500).json({ chyba: e.message });
+  } finally {
+    client.release();
+  }
 });
 
 app.delete('/api/admin/prodejna/:id', async (req, res) => {
@@ -2428,6 +2495,60 @@ app.delete('/api/admin/prodejna/:id', async (req, res) => {
     await db.query('DELETE FROM prodeje WHERE id = $1', [req.params.id]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
+// -- Slevové kupóny (jednorázové, na konkrétní marketingovou akci) --
+app.get('/api/admin/slevove-kupony', async (req, res) => {
+  try {
+    const { rows } = await db.query('SELECT * FROM slevove_kupony ORDER BY vytvoreno DESC');
+    res.json(rows);
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
+// Čisté vyhledání kódu PRO NÁHLED (admin.html ho používá k ukázání slevy ve
+// formuláři "Rychlý prodej" ještě PŘED potvrzením prodeje) — nic nemění,
+// nespotřebovává. Skutečné spotřebování kupónu dělá výhradně POST
+// /api/admin/prodejna výš, atomicky spolu se zápisem prodeje.
+app.get('/api/admin/slevove-kupony/:kod', async (req, res) => {
+  try {
+    const { rows: [kupon] } = await db.query('SELECT * FROM slevove_kupony WHERE upper(kod) = upper($1)', [req.params.kod]);
+    if (!kupon) return res.status(404).json({ chyba: 'Kupón s tímto kódem nebyl nalezen.' });
+    res.json({ ok: true, kupon });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
+// Hromadné vygenerování N nových kódů na jednu akci (max 100 najednou —
+// bezpečnostní strop, ne provozní nastavení). V jedné transakci: buď vzniknou
+// všechny, nebo žádný.
+app.post('/api/admin/slevove-kupony/vygenerovat', async (req, res) => {
+  const { pocet, nazev_akce, sleva_castka } = req.body || {};
+  const pocetNum = Number(pocet);
+  const slevaNum = Number(sleva_castka);
+  if (!Number.isInteger(pocetNum) || pocetNum < 1 || pocetNum > 100) {
+    return res.status(400).json({ chyba: 'Zadejte prosím počet kupónů mezi 1 a 100.' });
+  }
+  if (!nazev_akce || !nazev_akce.trim()) return res.status(400).json({ chyba: 'Vyplňte prosím název akce.' });
+  if (!Number.isFinite(slevaNum) || slevaNum <= 0) return res.status(400).json({ chyba: 'Zadejte prosím kladnou výši slevy v Kč.' });
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const vytvorene = [];
+    for (let i = 0; i < pocetNum; i++) {
+      const { rows: [kupon] } = await client.query(
+        'INSERT INTO slevove_kupony (kod, nazev_akce, sleva_castka) VALUES ($1,$2,$3) RETURNING *',
+        [vygenerovatKuponKod(), nazev_akce.trim(), slevaNum]
+      );
+      vytvorene.push(kupon);
+    }
+    await client.query('COMMIT');
+    res.json({ ok: true, kupony: vytvorene });
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch {}
+    res.status(500).json({ chyba: e.message });
+  } finally {
+    client.release();
+  }
 });
 
 // -- Produkty a sklad (Fáze 9E) --

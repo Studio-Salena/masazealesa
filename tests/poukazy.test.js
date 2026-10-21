@@ -432,10 +432,116 @@ async function main() {
     }
     console.log('✅ ochrana proti duplicitnímu vystavení žádosti prošla (19-21/21 scénářů)');
 
+    // --- Ochrana historie poukazů (audit poukazů, Fáze B krok 2) ---
+    // DELETE /api/admin/poukazy/:id teď odmítne smazat poukaz s platební
+    // historií (400) — pro takový poukaz slouží zrušení (PATCH .../stav
+    // {stav:'zruseny'}), které historii nijak nemaže ani nepřepisuje.
+    {
+      // 1) Smazání poukazu BEZ platební historie → 200, skutečně zmizí.
+      const nova1 = await adminFetch('/admin/poukazy', {
+        method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-HISTORIE-1 (smazat)' })
+      }).then(r => r.json());
+      assert.ok(nova1.poukaz && nova1.poukaz.id, '1) Vydání testovacího poukazu selhalo: ' + JSON.stringify(nova1));
+      if (nova1.poukaz.klientka_id) uklidKlientky.add(nova1.poukaz.klientka_id);
+      const smaz1 = await adminFetch(`/admin/poukazy/${nova1.poukaz.id}`, { method: 'DELETE' });
+      assert.equal(smaz1.status, 200, '1) Smazání poukazu bez historie mělo projít: ' + JSON.stringify(await smaz1.json().catch(() => ({}))));
+      const seznamPo1 = await adminFetch('/admin/poukazy').then(r => r.json());
+      assert.ok(!seznamPo1.some(p => p.id === nova1.poukaz.id), '1) Smazaný poukaz nesmí být dál v seznamu');
+      console.log('OK — 1) smazání poukazu bez platební historie → 200, skutečně smazán');
+    }
+    {
+      // 2) Pokus o smazání poukazu S platební historií → 400, poukaz zůstává.
+      // Znovupoužívá hlavní testovací "poukazId" výš v tomhle souboru — ten už
+      // prošel částečným i souběžným uplatněním, takže historii má jistě.
+      const smaz2 = await adminFetch(`/admin/poukazy/${poukazId}`, { method: 'DELETE' });
+      const d2 = await smaz2.json();
+      assert.equal(smaz2.status, 400, '2) Smazání poukazu s historií mělo být odmítnuto: ' + JSON.stringify(d2));
+      assert.ok(d2.chyba && d2.chyba.includes('historii'), '2) Chybová hláška měla zmínit historii: ' + JSON.stringify(d2));
+      const seznamPo2 = await adminFetch('/admin/poukazy').then(r => r.json());
+      assert.ok(seznamPo2.some(p => p.id === poukazId), '2) Poukaz s historií musí v DB zůstat');
+      console.log('OK — 2) smazání poukazu s platební historií je odmítnuto (400), poukaz zůstává v DB');
+    }
+    {
+      // 3) Zrušení poukazu přes existující endpoint → 200, stav i uzavreno_kdy.
+      const nova3 = await adminFetch('/admin/poukazy', {
+        method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-HISTORIE-3 (smazat)' })
+      }).then(r => r.json());
+      if (nova3.poukaz.klientka_id) uklidKlientky.add(nova3.poukaz.klientka_id);
+      uklidPoukazy.push(nova3.poukaz.id);
+      const zrus3 = await adminFetch(`/admin/poukazy/${nova3.poukaz.id}/stav`, { method: 'PATCH', body: JSON.stringify({ stav: 'zruseny' }) });
+      assert.equal(zrus3.status, 200, '3) Zrušení poukazu selhalo: ' + JSON.stringify(await zrus3.json().catch(() => ({}))));
+      const seznamPo3 = await adminFetch('/admin/poukazy').then(r => r.json());
+      const aktualni3 = seznamPo3.find(p => p.id === nova3.poukaz.id);
+      assert.equal(aktualni3.stav, 'zruseny', '3) Stav po zrušení musí být "zruseny"');
+      assert.ok(aktualni3.uzavreno_kdy, '3) uzavreno_kdy musí být po zrušení nastaveno');
+      console.log('OK — 3) zrušení poukazu přes PATCH .../stav funguje, stav i uzavreno_kdy se nastaví');
+    }
+    {
+      // 4) Platební historie zůstává po zrušení zachována. Poznámka: dedikovaný
+      // endpoint pro čtení historie konkrétního poukazu zatím neexistuje (je
+      // to samostatný pozdější krok Fáze B) — ověřujeme proto dostupně přes
+      // API: zůstatek (zustatek) poukazu "poukazId" se zrušením NIKDY nesmí
+      // resetovat zpět na plnou hodnotu ani jinak změnit — UPDATE u zrušení
+      // sloupec zustatek vůbec nemění, takže zachovaný (snížený) zůstatek je
+      // přímý důkaz, že historické čerpání nebylo zrušením vymazáno/přepsáno.
+      const seznamPred4 = await adminFetch('/admin/poukazy').then(r => r.json());
+      const pred4 = seznamPred4.find(p => p.id === poukazId);
+      assert.equal(pred4.stav, 'zruseny', '4) očekávám, že "poukazId" je v tuhle chvíli už zrušený (ze scénáře dřív v souboru)');
+      assert.ok(Number(pred4.zustatek) < Number(pred4.hodnota), '4) zůstatek musí odrážet dřívější čerpání (být nižší než hodnota), ne reset');
+      // Druhé zrušení (idempotentní no-op) nesmí zůstatek nijak změnit.
+      await adminFetch(`/admin/poukazy/${poukazId}/stav`, { method: 'PATCH', body: JSON.stringify({ stav: 'zruseny' }) });
+      const seznamPo4 = await adminFetch('/admin/poukazy').then(r => r.json());
+      const po4 = seznamPo4.find(p => p.id === poukazId);
+      assert.equal(Number(po4.zustatek), Number(pred4.zustatek), '4) Opakované zrušení nesmí zůstatek (= odraz historie čerpání) nijak změnit');
+      console.log('OK — 4) platební historie (odražená v zůstatku) zůstává po zrušení i po opakovaném zrušení beze změny');
+    }
+    {
+      // 5) Uplatnění zrušeného poukazu je odmítnuto (beze změny chování —
+      // stejné pravidlo jako dřív, jen explicitně zopakované v kontextu téhle
+      // ochrany kvůli úplnosti požadovaných scénářů).
+      const uplatnit5 = await adminFetch(`/admin/poukazy/${poukazId}/uplatnit`, { method: 'POST', body: JSON.stringify({ castka: 1 }) });
+      assert.equal(uplatnit5.status, 400, '5) Uplatnění zrušeného poukazu mělo selhat');
+      console.log('OK — 5) uplatnění zrušeného poukazu je odmítnuto (400)');
+    }
+    {
+      // 6) Neexistující ID — DELETE i PATCH .../stav musí vracet 404 (dřív
+      // obojí tiše vracelo 200, i když se nic nenašlo/nesmazalo).
+      const neexistujiciId = 999999999;
+      const smaz6 = await adminFetch(`/admin/poukazy/${neexistujiciId}`, { method: 'DELETE' });
+      assert.equal(smaz6.status, 404, '6) DELETE na neexistující poukaz musí vracet 404');
+      const stav6 = await adminFetch(`/admin/poukazy/${neexistujiciId}/stav`, { method: 'PATCH', body: JSON.stringify({ stav: 'zruseny' }) });
+      assert.equal(stav6.status, 404, '6) PATCH .../stav na neexistující poukaz musí vracet 404');
+      console.log('OK — 6) neexistující ID poukazu → 404 u DELETE i PATCH .../stav');
+    }
+    {
+      // 7) Souběžné mazání stejného (bezhistorického) poukazu — právě jeden
+      // požadavek smí uspět, druhý musí dostat 404 (poukaz mezitím zmizel),
+      // nikdy ne nekonzistentní stav (např. oba 200, nebo chyba 500).
+      const nova7 = await adminFetch('/admin/poukazy', {
+        method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-HISTORIE-7 (smazat)' })
+      }).then(r => r.json());
+      if (nova7.poukaz.klientka_id) uklidKlientky.add(nova7.poukaz.klientka_id);
+      const [sA7, sB7] = await Promise.all([
+        adminFetch(`/admin/poukazy/${nova7.poukaz.id}`, { method: 'DELETE' }),
+        adminFetch(`/admin/poukazy/${nova7.poukaz.id}`, { method: 'DELETE' })
+      ]);
+      const stavy7 = [sA7.status, sB7.status].sort();
+      assert.deepEqual(stavy7, [200, 404], `7) Souběžné mazání mělo dát přesně jeden 200 a jeden 404, dostal jsem ${JSON.stringify(stavy7)}`);
+      const seznamPo7 = await adminFetch('/admin/poukazy').then(r => r.json());
+      assert.ok(!seznamPo7.some(p => p.id === nova7.poukaz.id), '7) Poukaz musí být po souběžném mazání skutečně pryč');
+      console.log('OK — 7) souběžné mazání stejného poukazu (Promise.all) → právě 1× 200, 1× 404, žádná nekonzistence');
+    }
+    console.log('✅ ochrana historie poukazů prošla (7/7 scénářů)');
+
     console.log('\n✅ VŠECHNY TESTY POUKAZŮ PROŠLY');
   } finally {
+    // Hlavní testovací poukaz má v tuhle chvíli už platební historii (scénáře
+    // uplatnění výš) — po ochraně historie (Fáze B krok 2) ho tedy smazání
+    // odmítne (400), a to je správně, ne chyba úklidu. Zůstane v TEST DB jako
+    // zrušený (scénář 6 ho na "zruseny" nastavil už dřív) — .catch() tu jen
+    // chrání proti síťové chybě, ne proti očekávanému 400.
     if (poukazId) {
-      await adminFetch(`/admin/poukazy/${poukazId}`, { method: 'DELETE' });
+      await adminFetch(`/admin/poukazy/${poukazId}`, { method: 'DELETE' }).catch(() => {});
     }
     for (const id of uklidPoukazy) {
       await adminFetch(`/admin/poukazy/${id}`, { method: 'DELETE' }).catch(() => {});

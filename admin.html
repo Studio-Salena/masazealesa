@@ -218,6 +218,7 @@ tr:hover td{background:#fffaf5}
     <div class="nav-label">Prodejna</div>
     <div class="nav-item" onclick="showPage('masaze',this)"><span class="icon">🧖</span> Masáže</div>
     <div class="nav-item" onclick="showPage('produkty',this)"><span class="icon">📦</span> Produkty <span class="nav-badge" id="navBadgeProdukty" style="display:none">0</span></div>
+    <div class="nav-item" onclick="showPage('kupony',this)"><span class="icon">🎟️</span> Slevové kupóny</div>
     <div class="nav-item" onclick="showPage('ucetnictvi',this)"><span class="icon">📈</span> Účetnictví</div>
     <div class="nav-label">GDPR</div>
     <div class="nav-item" onclick="showPage('retence',this)"><span class="icon">🗂️</span> Retence</div>
@@ -511,6 +512,27 @@ tr:hover td{background:#fffaf5}
         <div id="produktyTable"><div class="loading">Načítám...</div></div>
       </div>
       <p style="padding:0 4px;font-size:0.78rem;color:var(--text-light)">Sklad se mění jen přes "Prodat" / "Naskladnit" — nikdy ručně, ať zůstane dohledatelná historie pohybů. Upozornění na docházející zásobu (pokud je u produktu nastavená hranice) chodí jednou denně na info@masazealesa.cz.</p>
+    </div>
+
+    <!-- SLEVOVÉ KUPÓNY -->
+    <div class="page" id="page-kupony">
+      <div class="page-header">
+        <div class="page-title">🎟️ Slevové kupóny</div>
+        <div class="table-actions">
+          <button class="btn btn-primary" onclick="otevritVygenerovatKupony()">+ Vygenerovat kupóny</button>
+          <button class="refresh-btn" onclick="loadKupony()">↻ Obnovit</button>
+        </div>
+      </div>
+      <div class="stats-grid" style="grid-template-columns:repeat(3,1fr)">
+        <div class="stat-card"><div class="stat-label">Vygenerováno</div><div class="stat-value" id="kpCelkem">—</div></div>
+        <div class="stat-card"><div class="stat-label">Použito</div><div class="stat-value" id="kpPouzito">—</div></div>
+        <div class="stat-card"><div class="stat-label">Zbývá</div><div class="stat-value stat-green" id="kpZbyva">—</div></div>
+      </div>
+      <div class="table-wrap">
+        <div class="table-header"><h3>📋 Seznam kupónů</h3></div>
+        <div id="kuponyTable"><div class="loading">Načítám...</div></div>
+      </div>
+      <p style="padding:0 4px;font-size:0.78rem;color:var(--text-light)">Kupón se zadává přímo ve formuláři "Rychlý prodej" na stránce Masáže — sleva se tam automaticky odečte z ceny a kupón se spotřebuje až skutečným potvrzením prodeje.</p>
     </div>
 
     <!-- ÚČETNICTVÍ -->
@@ -930,6 +952,24 @@ tr:hover td{background:#fffaf5}
   </div>
 </div>
 
+<!-- MODAL: Vygenerovat slevové kupóny -->
+<div class="modal-overlay" id="modalVygenerovatKupony">
+  <div class="modal">
+    <h3>🎟️ Vygenerovat slevové kupóny</h3>
+    <div id="kgMsg"></div>
+    <div class="form-group"><label>Název akce</label><input type="text" id="kgNazevAkce" placeholder="např. Relax Beauty Day"></div>
+    <div class="form-grid-2">
+      <div class="form-group"><label>Počet kupónů</label><input type="number" id="kgPocet" min="1" max="100" value="10"></div>
+      <div class="form-group"><label>Sleva (Kč)</label><input type="number" id="kgSleva" min="1" value="100"></div>
+    </div>
+    <div id="kgVysledek"></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modalVygenerovatKupony')">Zavřít</button>
+      <button class="btn btn-primary" id="kgGenerovatBtn" onclick="vygenerovatKupony()">Vygenerovat</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ⚠️ Jakmile zprovozníš backend na Renderu, sem doplň jeho URL adresu:
 const API = 'https://masazealesa.onrender.com/api';
@@ -1009,6 +1049,7 @@ function showPage(name, el) {
   if (name === 'sablony') loadSablony();
   if (name === 'cenik') loadCenik();
   if (name === 'produkty') loadProdukty();
+  if (name === 'kupony') loadKupony();
   if (name === 'masaze') loadProdejna();
   if (name === 'ucetnictvi') loadUcetnictvi();
   if (name === 'retence') loadRetenceNastaveni();
@@ -1667,7 +1708,8 @@ async function loadPoukazy() {
           <td><span class="badge ${badgeTrida}">${stav.text}</span></td>
           <td style="display:flex;gap:4px">
             <button class="btn btn-outline btn-sm" onclick="zobrazitPoukaz(${p.id})" title="Zobrazit / vytisknout">🖨️</button>
-            <button class="btn btn-red btn-sm" onclick="smazatPoukaz(${p.id})">🗑️</button>
+            ${p.stav !== 'zruseny' ? `<button class="btn btn-outline btn-sm" onclick="zrusitPoukaz(${p.id})" title="Zrušit">❌</button>` : ''}
+            <button class="btn btn-red btn-sm" onclick="smazatPoukaz(${p.id})" title="Smazat (jen bez historie plateb)">🗑️</button>
           </td>
         </tr>`; }).join('')}</tbody></table>`;
     }
@@ -1782,7 +1824,22 @@ async function vydatPoukaz() {
 }
 async function smazatPoukaz(id) {
   if (!confirm('Smazat tento poukaz?')) return;
-  await adminFetch(API + '/admin/poukazy/' + id, { method: 'DELETE' });
+  const res = await adminFetch(API + '/admin/poukazy/' + id, { method: 'DELETE' });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    alert(data.chyba || 'Smazání se nepodařilo.');
+    return;
+  }
+  loadPoukazy();
+}
+async function zrusitPoukaz(id) {
+  if (!confirm('Zrušit tento poukaz? Zůstane dohledatelný v historii, ale nepůjde dál uplatnit.')) return;
+  const res = await adminFetch(API + '/admin/poukazy/' + id + '/stav', { method: 'PATCH', body: JSON.stringify({ stav: 'zruseny' }) });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    alert(data.chyba || 'Zrušení se nepodařilo.');
+    return;
+  }
   loadPoukazy();
 }
 
@@ -2462,6 +2519,14 @@ async function loadProdejna() {
               <select id="prodejPlatba"><option value="hotove">Hotově</option><option value="qr">QR kód</option></select>
             </div>
           </div>
+          <div class="form-group">
+            <label>Kód slevového kupónu (nepovinné)</label>
+            <div style="display:flex;gap:8px">
+              <input type="text" id="prodejKupon" placeholder="např. AKCE-X7K9P2" style="flex:1">
+              <button type="button" class="btn btn-outline btn-sm" onclick="overitKupon()">Ověřit</button>
+            </div>
+            <div id="prodejKuponInfo" style="font-size:0.82rem;margin-top:4px"></div>
+          </div>
           <div id="prodejMsg"></div>
           <div style="display:flex;gap:10px;margin-top:8px">
             <button class="btn btn-outline" onclick="document.getElementById('prodejForm').style.display='none'">Zrušit</button>
@@ -2492,19 +2557,42 @@ async function loadProdejna() {
 function otevritProdej(id, nazev, cena) {
   document.getElementById('prodejForm').style.display = 'block';
   document.getElementById('prodejForm').dataset.masaz = nazev;
+  document.getElementById('prodejForm').dataset.puvodniCena = cena;
   document.getElementById('prodejNazev').textContent = nazev;
   document.getElementById('prodejCena').value = cena;
+  document.getElementById('prodejKupon').value = '';
+  document.getElementById('prodejKuponInfo').innerHTML = '';
+}
+// Jen náhled slevy PŘED potvrzením prodeje — nic nemění na serveru, kupón se
+// nespotřebovává. Skutečné spotřebování dělá až potvrditProdej() níž, atomicky
+// spolu se zápisem prodeje (viz POST /api/admin/prodejna).
+async function overitKupon() {
+  const kod = document.getElementById('prodejKupon').value.trim();
+  const info = document.getElementById('prodejKuponInfo');
+  const puvodniCena = Number(document.getElementById('prodejForm').dataset.puvodniCena);
+  if (!kod) { info.innerHTML = ''; document.getElementById('prodejCena').value = puvodniCena; return; }
+  try {
+    const res = await adminFetch(API + '/admin/slevove-kupony/' + encodeURIComponent(kod));
+    const data = await res.json();
+    if (!res.ok) { info.innerHTML = '<span style="color:#c0392b">❌ ' + escapeHtml(data.chyba || 'Kupón nenalezen.') + '</span>'; document.getElementById('prodejCena').value = puvodniCena; return; }
+    if (data.kupon.pouzito_kdy) { info.innerHTML = '<span style="color:#c0392b">❌ Tento kupón už byl použit ' + new Date(data.kupon.pouzito_kdy).toLocaleDateString('cs-CZ') + '.</span>'; document.getElementById('prodejCena').value = puvodniCena; return; }
+    const sleva = Number(data.kupon.sleva_castka);
+    document.getElementById('prodejCena').value = Math.max(0, puvodniCena - sleva);
+    info.innerHTML = '<span style="color:var(--tan)">✅ Platný kupón — ' + escapeHtml(data.kupon.nazev_akce) + ', sleva ' + sleva.toLocaleString('cs-CZ') + ' Kč (odečtena z ceny)</span>';
+  } catch (e) { info.innerHTML = '<span style="color:#c0392b">Nejde se připojit k serveru.</span>'; }
 }
 async function potvrditProdej() {
   const masaz = document.getElementById('prodejForm').dataset.masaz;
   const cena = document.getElementById('prodejCena').value;
   const zpusob_platby = document.getElementById('prodejPlatba').value;
+  const kupon_kod = document.getElementById('prodejKupon').value.trim();
   const msg = document.getElementById('prodejMsg');
   if (!cena) { msg.innerHTML = '<div class="error-msg">Zadejte cenu.</div>'; return; }
   try {
-    const res = await adminFetch(API + '/admin/prodejna', { method: 'POST', body: JSON.stringify({ masaz, cena, zpusob_platby }) });
-    if (res.ok) { document.getElementById('prodejForm').style.display = 'none'; loadProdejna(); }
-    else msg.innerHTML = '<div class="error-msg">Nepodařilo se zapsat prodej.</div>';
+    const res = await adminFetch(API + '/admin/prodejna', { method: 'POST', body: JSON.stringify({ masaz, cena, zpusob_platby, kupon_kod: kupon_kod || undefined }) });
+    const data = await res.json();
+    if (res.ok) { document.getElementById('prodejForm').style.display = 'none'; loadProdejna(); loadKupony(); }
+    else msg.innerHTML = '<div class="error-msg">' + (data.chyba || 'Nepodařilo se zapsat prodej.') + '</div>';
   } catch (e) { msg.innerHTML = '<div class="error-msg">Nejde se připojit k serveru — backend ještě neběží nebo není doplněná jeho adresa v proměnné API.</div>'; }
 }
 async function smazatProdej(id) {
@@ -2682,6 +2770,55 @@ async function otevritHistoriiProduktu(id) {
         }</td>
       </tr>`).join('')}</tbody></table>`;
   } catch (e) { document.getElementById('phObsah').innerHTML = '<div class="error-msg">Chyba načítání.</div>'; }
+}
+
+// ── SLEVOVÉ KUPÓNY ───────────────────────────────────────────────────────
+let posledniKupony = [];
+async function loadKupony() {
+  try {
+    posledniKupony = await adminFetch(API + '/admin/slevove-kupony').then(r => r.json());
+    const pouzito = posledniKupony.filter(k => k.pouzito_kdy).length;
+    document.getElementById('kpCelkem').textContent = posledniKupony.length;
+    document.getElementById('kpPouzito').textContent = pouzito;
+    document.getElementById('kpZbyva').textContent = posledniKupony.length - pouzito;
+    if (!posledniKupony.length) { document.getElementById('kuponyTable').innerHTML = '<div class="empty">Zatím žádné vygenerované kupóny</div>'; return; }
+    document.getElementById('kuponyTable').innerHTML = `
+      <table><thead><tr><th>Kód</th><th>Akce</th><th>Sleva</th><th>Stav</th></tr></thead>
+      <tbody>${posledniKupony.map(k => `<tr>
+        <td><code style="background:var(--cream);padding:2px 6px;border-radius:4px">${escapeHtml(k.kod)}</code></td>
+        <td>${escapeHtml(k.nazev_akce)}</td>
+        <td>${Number(k.sleva_castka).toLocaleString('cs-CZ')} Kč</td>
+        <td>${k.pouzito_kdy ? '<span class="badge badge-zruseno">✔️ Použito ' + new Date(k.pouzito_kdy).toLocaleDateString('cs-CZ') + '</span>' : '<span class="badge badge-ok">Nepoužito</span>'}</td>
+      </tr>`).join('')}</tbody></table>`;
+  } catch (e) { document.getElementById('kuponyTable').innerHTML = '<div class="error-msg">Chyba načítání.</div>'; }
+}
+function otevritVygenerovatKupony() {
+  document.getElementById('kgMsg').innerHTML = '';
+  document.getElementById('kgVysledek').innerHTML = '';
+  document.getElementById('kgNazevAkce').value = '';
+  document.getElementById('kgPocet').value = 10;
+  document.getElementById('kgSleva').value = 100;
+  document.getElementById('kgGenerovatBtn').style.display = 'inline-block';
+  openModal('modalVygenerovatKupony');
+}
+async function vygenerovatKupony() {
+  const nazev_akce = document.getElementById('kgNazevAkce').value.trim();
+  const pocet = document.getElementById('kgPocet').value;
+  const sleva_castka = document.getElementById('kgSleva').value;
+  const msg = document.getElementById('kgMsg');
+  if (!nazev_akce) { msg.innerHTML = '<div class="error-msg">Vyplňte prosím název akce.</div>'; return; }
+  try {
+    const res = await adminFetch(API + '/admin/slevove-kupony/vygenerovat', { method: 'POST', body: JSON.stringify({ pocet, nazev_akce, sleva_castka }) });
+    const data = await res.json();
+    if (!res.ok) { msg.innerHTML = '<div class="error-msg">' + (data.chyba || 'Vygenerování se nepodařilo.') + '</div>'; return; }
+    msg.innerHTML = '';
+    document.getElementById('kgGenerovatBtn').style.display = 'none';
+    document.getElementById('kgVysledek').innerHTML = `
+      <p style="font-size:0.85rem;color:var(--text-light)">Vygenerováno ${data.kupony.length} kódů — zkopíruj si je k vytištění:</p>
+      <textarea readonly rows="10" style="width:100%;font-family:monospace;font-size:0.85rem;border:1px solid var(--tan-light);border-radius:6px;padding:8px">${data.kupony.map(k => k.kod).join('\n')}</textarea>
+    `;
+    loadKupony();
+  } catch (e) { msg.innerHTML = '<div class="error-msg">Nejde se připojit k serveru.</div>'; }
 }
 
 // ── ÚČETNICTVÍ (Fáze 3B) — 4 oddělené přehledy, ať jedno číslo nemusí

@@ -217,6 +217,19 @@ alter table poukazy add constraint poukazy_klientka_id_fkey
 alter table platby add constraint platby_poukaz_id_fkey
   foreign key (poukaz_id) references poukazy(id) on delete set null;
 
+-- Jednorázové slevové kupóny na konkrétní marketingovou akci (např. "100 Kč
+-- sleva na první masáž") — záměrně ODDĚLENO od dárkových poukazů (jiný účel:
+-- žádná hodnota/zůstatek k čerpání po částech, jen jednorázové "použito/ne").
+-- Uplatňuje se jen osobně v salonu přes "Rychlý prodej", ne online.
+create table if not exists slevove_kupony (
+  id serial primary key,
+  kod text not null unique,
+  nazev_akce text not null,
+  sleva_castka numeric not null,
+  pouzito_kdy timestamptz, -- NULL = ještě nepoužitý
+  vytvoreno timestamptz not null default now()
+);
+
 -- Žádosti o poukaz z veřejného webového formuláře
 create table if not exists poukazy_zadosti (
   id serial primary key,
