@@ -1285,8 +1285,10 @@ app.post('/api/poukazy/zadost', async (req, res) => {
   ) {
     return res.status(400).json({ chyba: 'Některé z vyplněných polí je příliš dlouhé.' });
   }
-  if (!['qr', 'prevodem', 'pri_prevzeti'].includes(zpusob_platby)) {
-    return res.status(400).json({ chyba: 'Vyberte prosím způsob platby.' });
+  // Online platba (QR/převodem) je dočasně zablokovaná — poukaz jde koupit jen
+  // s platbou při převzetí osobně v salonu.
+  if (zpusob_platby !== 'pri_prevzeti') {
+    return res.status(400).json({ chyba: 'Online platba je momentálně nedostupná — poukaz je možné koupit jen s platbou při převzetí v salonu.' });
   }
   try {
     const { rows: [zadost] } = await db.query(

@@ -1825,10 +1825,14 @@
     <div class="form-field form-field-full" style="margin-top:1.1rem">
       <label>Způsob platby*</label>
       <div class="rez-slots" id="pkPlatbaSlots" style="justify-content:flex-start">
-        <button type="button" class="rez-slot-btn" onclick="pkVybratPlatbu('qr',this)">📱 QR kód</button>
-        <button type="button" class="rez-slot-btn" onclick="pkVybratPlatbu('prevodem',this)">🏦 Převodem</button>
         <button type="button" class="rez-slot-btn" onclick="pkVybratPlatbu('pri_prevzeti',this)">🤝 Při převzetí</button>
       </div>
+      <!-- Online platba (QR/převodem) je dočasně zablokovaná — tlačítka zůstávají
+           v kódu zakomentovaná (viz níže), ať se dá rychle vrátit zpět. -->
+      <!--
+      <button type="button" class="rez-slot-btn" onclick="pkVybratPlatbu('qr',this)">📱 QR kód</button>
+      <button type="button" class="rez-slot-btn" onclick="pkVybratPlatbu('prevodem',this)">🏦 Převodem</button>
+      -->
     </div>
 
     <div id="pkPlatbaBox" class="pk-platba-box" style="display:none;margin-top:1rem"></div>

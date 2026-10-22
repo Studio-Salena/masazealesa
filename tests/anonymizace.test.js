@@ -577,7 +577,7 @@ async function main() {
 
       const zadostRes = await fetch(API + '/poukazy/zadost', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hodnota: 500, kupujici_jmeno: 'TEST-ANON-19 (smazat)', kupujici_email: 'test-anon-19@example.invalid', kupujici_telefon: telefon, zpusob_platby: 'prevodem' })
+        body: JSON.stringify({ hodnota: 500, kupujici_jmeno: 'TEST-ANON-19 (smazat)', kupujici_email: 'test-anon-19@example.invalid', kupujici_telefon: telefon, zpusob_platby: 'pri_prevzeti' })
       });
       const zadost = (await zadostRes.json()).zadost;
       uklidZadosti.push(zadost.id);

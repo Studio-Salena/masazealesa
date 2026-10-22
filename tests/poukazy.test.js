@@ -243,7 +243,7 @@ async function main() {
     // 1) validní žádost → 200
     {
       const email = novyEmailZadost();
-      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, zpusob_platby: 'prevodem' });
+      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, zpusob_platby: 'pri_prevzeti' });
       if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
       assert.equal(v.status, 200, JSON.stringify(v.data));
       console.log('OK — 1) validní žádost (telefon nevyplněn) → 200');
@@ -251,7 +251,7 @@ async function main() {
 
     // 2) chybějící email → 400
     {
-      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-8E3 (smazat)', zpusob_platby: 'prevodem' });
+      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-8E3 (smazat)', zpusob_platby: 'pri_prevzeti' });
       if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
       assert.equal(v.status, 400, JSON.stringify(v.data));
       console.log('OK — 2) chybějící email → 400');
@@ -259,7 +259,7 @@ async function main() {
 
     // 3) email bez "@" → 400
     {
-      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: 'neplatny-email', zpusob_platby: 'prevodem' });
+      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: 'neplatny-email', zpusob_platby: 'pri_prevzeti' });
       if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
       assert.equal(v.status, 400, JSON.stringify(v.data));
       console.log('OK — 3) email bez "@" → 400');
@@ -268,7 +268,7 @@ async function main() {
     // 4) telefon chybí → 200 (telefon je u žádosti nepovinný, na rozdíl od rezervace)
     {
       const email = novyEmailZadost();
-      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, zpusob_platby: 'prevodem' });
+      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, zpusob_platby: 'pri_prevzeti' });
       if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
       assert.equal(v.status, 200, 'chybějící telefon musí projít — je nepovinný: ' + JSON.stringify(v.data));
       console.log('OK — 4) chybějící telefon → 200 (nepovinné pole)');
@@ -277,7 +277,7 @@ async function main() {
     // 5) telefon "123" (vyplněný, ale příliš krátký po normalizaci) → 400
     {
       const email = novyEmailZadost();
-      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, kupujici_telefon: '123', zpusob_platby: 'prevodem' });
+      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, kupujici_telefon: '123', zpusob_platby: 'pri_prevzeti' });
       if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
       assert.equal(v.status, 400, JSON.stringify(v.data));
       console.log('OK — 5) vyplněný, ale nevalidní telefon ("123") → 400');
@@ -286,7 +286,7 @@ async function main() {
     // 6) jméno > 100 znaků → 400
     {
       const email = novyEmailZadost();
-      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'X'.repeat(101), kupujici_email: email, zpusob_platby: 'prevodem' });
+      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'X'.repeat(101), kupujici_email: email, zpusob_platby: 'pri_prevzeti' });
       if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
       assert.equal(v.status, 400, JSON.stringify(v.data));
       console.log('OK — 6) kupujici_jmeno > 100 znaků → 400');
@@ -295,7 +295,7 @@ async function main() {
     // 7) vzkaz > 500 znaků → 400
     {
       const email = novyEmailZadost();
-      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, vzkaz: 'X'.repeat(501), zpusob_platby: 'prevodem' });
+      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, vzkaz: 'X'.repeat(501), zpusob_platby: 'pri_prevzeti' });
       if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
       assert.equal(v.status, 400, JSON.stringify(v.data));
       console.log('OK — 7) vzkaz > 500 znaků → 400');
@@ -304,7 +304,7 @@ async function main() {
     // 8) pro_koho > 500 znaků → 400
     {
       const email = novyEmailZadost();
-      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, pro_koho: 'X'.repeat(501), zpusob_platby: 'prevodem' });
+      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, pro_koho: 'X'.repeat(501), zpusob_platby: 'pri_prevzeti' });
       if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
       assert.equal(v.status, 400, JSON.stringify(v.data));
       console.log('OK — 8) pro_koho > 500 znaků → 400');
@@ -313,7 +313,7 @@ async function main() {
     // 9) konkretni_masaz > 500 znaků → 400
     {
       const email = novyEmailZadost();
-      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, konkretni_masaz: 'X'.repeat(501), zpusob_platby: 'prevodem' });
+      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, konkretni_masaz: 'X'.repeat(501), zpusob_platby: 'pri_prevzeti' });
       if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
       assert.equal(v.status, 400, JSON.stringify(v.data));
       console.log('OK — 9) konkretni_masaz > 500 znaků → 400');
@@ -322,7 +322,7 @@ async function main() {
     // 10) chybějící hodnota → 400
     {
       const email = novyEmailZadost();
-      const v = await zadost({ kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, zpusob_platby: 'prevodem' });
+      const v = await zadost({ kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, zpusob_platby: 'pri_prevzeti' });
       if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
       assert.equal(v.status, 400, JSON.stringify(v.data));
       console.log('OK — 10) chybějící hodnota → 400');
@@ -331,7 +331,7 @@ async function main() {
     // 11-15) nevalidní hodnota (abc, 0, -500, "NaN", null) → 400
     for (const h of ['abc', 0, -500, 'NaN', null]) {
       const email = novyEmailZadost();
-      const v = await zadost({ hodnota: h, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, zpusob_platby: 'prevodem' });
+      const v = await zadost({ hodnota: h, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, zpusob_platby: 'pri_prevzeti' });
       if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
       assert.equal(v.status, 400, 'hodnota=' + JSON.stringify(h) + ' musí vrátit 400: ' + JSON.stringify(v.data));
       const pocet = await pocetZadostiSEmailem(email);
@@ -342,7 +342,7 @@ async function main() {
     // 16) hodnota přesně na horní hranici (10000) → 200
     {
       const email = novyEmailZadost();
-      const v = await zadost({ hodnota: 10000, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, zpusob_platby: 'prevodem' });
+      const v = await zadost({ hodnota: 10000, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, zpusob_platby: 'pri_prevzeti' });
       if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
       assert.equal(v.status, 200, 'hodnota přesně 10000 (horní hranice, včetně) musí projít: ' + JSON.stringify(v.data));
       console.log('OK — 16) hodnota = 10000 (horní hranice) → 200');
@@ -351,7 +351,7 @@ async function main() {
     // 17) hodnota nad horní hranicí (10000.01) → 400
     {
       const email = novyEmailZadost();
-      const v = await zadost({ hodnota: 10000.01, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, zpusob_platby: 'prevodem' });
+      const v = await zadost({ hodnota: 10000.01, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, zpusob_platby: 'pri_prevzeti' });
       if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
       assert.equal(v.status, 400, JSON.stringify(v.data));
       const pocet = await pocetZadostiSEmailem(email);
@@ -365,7 +365,7 @@ async function main() {
     // nikdy 500 (žádný pád na pokusu o aritmetiku/DB zápis nekonečné hodnoty).
     {
       const email = novyEmailZadost();
-      const v = await zadost({ hodnota: 'Infinity', kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, zpusob_platby: 'prevodem' });
+      const v = await zadost({ hodnota: 'Infinity', kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, zpusob_platby: 'pri_prevzeti' });
       if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
       assert.equal(v.status, 400, '"Infinity" musí být ošetřeno jako 400, ne spadnout na 500: ' + JSON.stringify(v.data));
       const pocet = await pocetZadostiSEmailem(email);
@@ -383,7 +383,7 @@ async function main() {
     // auditem a ověřenou živě na TEST DB před opravou.
     {
       const email19 = 'test-schvaleni-19-' + Date.now() + '@example.invalid';
-      const v19 = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-SCHVALENI (smazat)', kupujici_email: email19, zpusob_platby: 'prevodem' });
+      const v19 = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-SCHVALENI (smazat)', kupujici_email: email19, zpusob_platby: 'pri_prevzeti' });
       assert.equal(v19.status, 200, '19) Vytvoření žádosti selhalo: ' + JSON.stringify(v19.data));
       const schv19 = await adminFetch(`/admin/poukazy/zadosti/${v19.data.zadost.id}/stav`, { method: 'PATCH', body: JSON.stringify({ stav: 'vyrizena' }) });
       const d19 = await schv19.json();
@@ -397,7 +397,7 @@ async function main() {
     }
     {
       const email20 = 'test-schvaleni-20-' + Date.now() + '@example.invalid';
-      const v20 = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-SCHVALENI (smazat)', kupujici_email: email20, zpusob_platby: 'prevodem' });
+      const v20 = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-SCHVALENI (smazat)', kupujici_email: email20, zpusob_platby: 'pri_prevzeti' });
       const zadostId20 = v20.data.zadost.id;
       const prvni20 = await adminFetch(`/admin/poukazy/zadosti/${zadostId20}/stav`, { method: 'PATCH', body: JSON.stringify({ stav: 'vyrizena' }) });
       const prvniData20 = await prvni20.json();
@@ -412,7 +412,7 @@ async function main() {
     }
     {
       const email21 = 'test-schvaleni-21-' + Date.now() + '@example.invalid';
-      const v21 = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-SCHVALENI (smazat)', kupujici_email: email21, zpusob_platby: 'prevodem' });
+      const v21 = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-SCHVALENI (smazat)', kupujici_email: email21, zpusob_platby: 'pri_prevzeti' });
       const zadostId21 = v21.data.zadost.id;
       const [sA, sB] = await Promise.all([
         adminFetch(`/admin/poukazy/zadosti/${zadostId21}/stav`, { method: 'PATCH', body: JSON.stringify({ stav: 'vyrizena' }) })
