@@ -170,16 +170,10 @@ tr:hover td{background:#fffaf5}
   text-overflow:ellipsis;
 }
 .pp-radek strong{font-weight:800}
-.pp-bottom{
-  position:absolute;
-  display:flex; align-items:center; justify-content:center; gap:8px;
-  background:rgba(255,255,255,0.9);
-  border-radius:8px;
-  padding:4px 8px;
-}
-.pp-barcode-col{display:flex;flex-direction:column;align-items:center;gap:2px}
-.pp-barcode{width:100%;max-width:150px;line-height:0}
-.pp-ean{font-family:monospace;font-size:0.56rem;color:var(--text-light);letter-spacing:0.08em;margin:0}
+
+/* POUKAZ — prázdné (nevyplněné) karty k ručnímu dopsání, 3× na A4 */
+#pbKarty{display:flex;flex-direction:column;gap:14px}
+.pb-blank{display:inline-block;min-width:90px;border-bottom:1.5px solid var(--brown)}
 
 @media print{
   body *{visibility:hidden}
@@ -189,6 +183,9 @@ tr:hover td{background:#fffaf5}
   #ktKarta{position:fixed;top:20px;left:50%;transform:translateX(-50%);width:500px;box-shadow:none}
   #khKarty,#khKarty *{visibility:visible}
   #khKarty{position:fixed;top:10px;left:10px;right:10px;display:grid;gap:14px}
+  #pbKarty,#pbKarty *{visibility:visible}
+  #pbKarty{position:fixed;top:10mm;left:0;right:0;display:flex;flex-direction:column;align-items:center;gap:8mm}
+  #pbKarty .poukaz-print-card{width:130mm;flex-shrink:0}
   .no-print{display:none!important}
 }
 </style>
@@ -357,6 +354,7 @@ tr:hover td{background:#fffaf5}
         <div class="page-title">🎁 Dárkové poukazy</div>
         <div class="table-actions">
           <button class="btn btn-primary" onclick="openModal('modalNovyPoukaz')">+ Vydat poukaz</button>
+          <button class="btn btn-outline" onclick="otevritPrazdnePoukazy()">🖨️ Tisk prázdných poukazů</button>
           <button class="refresh-btn" onclick="loadPoukazy()">↻ Obnovit</button>
         </div>
       </div>
@@ -380,11 +378,10 @@ tr:hover td{background:#fffaf5}
         <div class="table-header"><h3>🔍 Uplatnit poukaz</h3></div>
         <div style="padding:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
           <div class="form-group" style="flex:1;min-width:240px;margin-bottom:0">
-            <label>Kód nebo čárový kód (EAN) poukazu</label>
-            <input type="text" id="hledatPoukazKod" placeholder="Naskenujte čárový kód nebo zadejte kód ručně" onkeydown="if(event.key==='Enter') najitPoukaz()">
+            <label>Kód poukazu</label>
+            <input type="text" id="hledatPoukazKod" placeholder="Zadejte kód poukazu" onkeydown="if(event.key==='Enter') najitPoukaz()">
           </div>
           <button class="btn btn-primary" onclick="najitPoukaz()">🔍 Najít</button>
-          <button class="btn btn-outline" onclick="otevritSkener()" title="Naskenovat kód fotoaparátem">📷</button>
         </div>
         <div id="poukazHledaniVysledek" style="padding:0 16px 16px"></div>
       </div>
@@ -643,18 +640,6 @@ tr:hover td{background:#fffaf5}
   </div>
 </div>
 
-<!-- MODAL: Skener čárového kódu (fotoaparát) -->
-<div class="modal-overlay" id="modalSkener">
-  <div class="modal" style="max-width:420px">
-    <h3>📷 Naskenovat kód poukazu</h3>
-    <video id="skenerVideo" style="width:100%;border-radius:12px;background:#000;display:block" autoplay playsinline muted></video>
-    <div id="skenerZprava" style="margin-top:10px"></div>
-    <div class="modal-footer">
-      <button class="btn btn-outline" onclick="zavritSkener()">Zavřít</button>
-    </div>
-  </div>
-</div>
-
 <!-- MODAL: Náhled/tisk poukazu -->
 <div class="modal-overlay" id="modalPoukazTisk">
   <div class="modal" style="max-width:440px">
@@ -668,6 +653,25 @@ tr:hover td{background:#fffaf5}
     <div class="poukaz-print-card" id="poukazPrintCard"></div>
     <div class="modal-footer no-print">
       <button class="btn btn-outline" onclick="closeModal('modalPoukazTisk')">Zavřít</button>
+      <button class="btn btn-primary" onclick="window.print()">🖨️ Vytisknout</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Tisk prázdných poukazů (3× na A4, k ručnímu vyplnění) -->
+<div class="modal-overlay" id="modalPoukazBlankTisk">
+  <div class="modal" style="max-width:480px">
+    <div class="form-group no-print" style="margin-bottom:14px">
+      <label>Vzhled poukazu</label>
+      <select id="pbSablona" onchange="vykreslitPrazdnePoukazy()">
+        <option value="klasicky">🌸 Klasický</option>
+        <option value="vanocni">🎄 Vánoční</option>
+      </select>
+    </div>
+    <p class="no-print" style="font-size:0.85rem;color:var(--text-light);margin:0 0 10px">Na jednu stránku A4 se vytisknou 3 prázdné poukazy — údaje (pro koho, hodnota, platnost) na ně pak doplníš ručně.</p>
+    <div id="pbKarty"></div>
+    <div class="modal-footer no-print">
+      <button class="btn btn-outline" onclick="closeModal('modalPoukazBlankTisk')">Zavřít</button>
       <button class="btn btn-primary" onclick="window.print()">🖨️ Vytisknout</button>
     </div>
   </div>
@@ -1895,41 +1899,6 @@ async function zrusitPoukaz(id) {
   loadPoukazy();
 }
 
-// Naskenování čárového kódu fotoaparátem telefonu (funguje jen v prohlížečích s podporou BarcodeDetector, např. Chrome na Androidu)
-let skenerStream = null, skenerInterval = null;
-async function otevritSkener() {
-  const zprava = document.getElementById('skenerZprava');
-  zprava.innerHTML = '';
-  openModal('modalSkener');
-  if (!('BarcodeDetector' in window)) {
-    zprava.innerHTML = '<div class="error-msg">Tento prohlížeč neumí skenovat fotoaparátem — zadejte prosím kód ručně.</div>';
-    return;
-  }
-  try {
-    const detektor = new BarcodeDetector({ formats: ['ean_13', 'code_128', 'qr_code'] });
-    skenerStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-    const video = document.getElementById('skenerVideo');
-    video.srcObject = skenerStream;
-    skenerInterval = setInterval(async () => {
-      try {
-        const kody = await detektor.detect(video);
-        if (kody.length) {
-          document.getElementById('hledatPoukazKod').value = kody[0].rawValue;
-          zavritSkener();
-          najitPoukaz();
-        }
-      } catch (e) { /* ignorovat neúspěšný jednotlivý snímek */ }
-    }, 400);
-  } catch (e) {
-    zprava.innerHTML = '<div class="error-msg">Nepodařilo se spustit fotoaparát — zkontrolujte prosím oprávnění v prohlížeči.</div>';
-  }
-}
-function zavritSkener() {
-  if (skenerInterval) { clearInterval(skenerInterval); skenerInterval = null; }
-  if (skenerStream) { skenerStream.getTracks().forEach(t => t.stop()); skenerStream = null; }
-  closeModal('modalSkener');
-}
-
 // Stav poukazu k zobrazení — "prošlý" se nikde neukládá, dopočítává se vždy podle
 // dnešního data (platnost_do), ať se stav nikdy nerozejde se skutečností.
 function poukazZobrazenyStav(p) {
@@ -1946,12 +1915,12 @@ function poukazZobrazenyStav(p) {
   return { klic: p.stav, text: mapa[p.stav] || p.stav };
 }
 
-// Vyhledání poukazu podle kódu nebo naskenovaného EAN (čárová čtečka funguje jako klávesnice + Enter)
+// Vyhledání poukazu podle kódu
 function najitPoukaz() {
   const vstup = document.getElementById('hledatPoukazKod').value.trim();
   const vysledek = document.getElementById('poukazHledaniVysledek');
   if (!vstup) { vysledek.innerHTML = ''; return; }
-  const p = posledniPoukazy.find(x => (x.kod && x.kod.toLowerCase() === vstup.toLowerCase()) || (x.ean && x.ean === vstup));
+  const p = posledniPoukazy.find(x => x.kod && x.kod.toLowerCase() === vstup.toLowerCase());
   if (!p) { vysledek.innerHTML = '<div class="error-msg">Poukaz s tímto kódem nebyl nalezen.</div>'; return; }
   const { klic, text } = poukazZobrazenyStav(p);
   const lzeUplatnit = klic === 'aktivni' || klic === 'castecne_vyuzity';
@@ -1981,26 +1950,6 @@ async function uplatnitPoukaz(id) {
   loadPoukazy();
 }
 
-// ── EAN-13 čárový kód jako SVG (bez externí knihovny, tiskově ostrý vektor) ──
-const EAN_L = ['0001101','0011001','0010011','0111101','0100011','0110001','0101111','0111011','0110111','0001011'];
-const EAN_G = ['0100111','0110011','0011011','0100001','0011101','0111001','0000101','0010001','0001001','0010111'];
-const EAN_R = ['1110010','1100110','1101100','1000010','1011100','1001110','1010000','1000100','1001000','1110100'];
-const EAN_PARITY = ['LLLLLL','LLGLGG','LLGGLG','LLGGGL','LGLLGG','LGGLLG','LGGGLL','LGLGLG','LGLGGL','LGGLGL'];
-function eanBarcodeSvg(ean13, barH) {
-  if (!ean13 || ean13.length !== 13) return '';
-  barH = barH || 64;
-  const parity = EAN_PARITY[Number(ean13[0])];
-  let bits = '101';
-  for (let i = 0; i < 6; i++) { const d = Number(ean13[1 + i]); bits += parity[i] === 'L' ? EAN_L[d] : EAN_G[d]; }
-  bits += '01010';
-  for (let i = 0; i < 6; i++) { const d = Number(ean13[7 + i]); bits += EAN_R[d]; }
-  bits += '101';
-  const moduleW = 2.2, width = bits.length * moduleW;
-  let rects = '';
-  for (let i = 0; i < bits.length; i++) { if (bits[i] === '1') rects += `<rect x="${(i * moduleW).toFixed(2)}" y="0" width="${moduleW}" height="${barH}" fill="#000"/>`; }
-  return `<svg viewBox="0 0 ${width} ${barH}" width="100%" height="${barH}" xmlns="http://www.w3.org/2000/svg" style="display:block">${rects}</svg>`;
-}
-
 // Šablony grafického vzhledu poukazu k tisku — každá má vlastní pozadí a pozice popisků
 const POUKAZ_SABLONY = {
   klasicky: {
@@ -2009,8 +1958,7 @@ const POUKAZ_SABLONY = {
     logo: false,
     stin: true,
     box: { left: '10%', right: '10%' },
-    radky: { pro: '53%', hodnota: '60%', platnost: '67%' },
-    spodek: { top: '78%', left: '35%', right: '35%' }
+    radky: { pro: '53%', hodnota: '60%', platnost: '67%' }
   },
   vanocni: {
     obrazek: 'assets/vanocni-poukaz.jpg',
@@ -2019,8 +1967,7 @@ const POUKAZ_SABLONY = {
     stin: true,
     logoBox: { top: '8%', left: '32%', right: '15%' },
     box: { left: '32%', right: '15%' },
-    radky: { pro: '34%', hodnota: '44%', platnost: '54%' },
-    spodek: { top: '64%', left: '36%', right: '18%' }
+    radky: { pro: '34%', hodnota: '44%', platnost: '54%' }
   }
 };
 
@@ -2053,13 +2000,32 @@ function vykreslitNahledPoukazu() {
     <div class="pp-radek${stin}" style="top:${s.radky.pro};left:${s.box.left};right:${s.box.right}">Pro: <strong>${escapeHtml(p.pro_koho) || escapeHtml(p.kupujici_jmeno) || ''}</strong></div>
     <div class="pp-radek${stin}" style="top:${s.radky.hodnota};left:${s.box.left};right:${s.box.right}">${p.konkretni_masaz ? `Masáž: <strong>${escapeHtml(p.konkretni_masaz)}</strong>` : `Hodnota: <strong>${Number(p.hodnota).toLocaleString('cs-CZ')} Kč</strong>`}</div>
     <div class="pp-radek${stin}" style="top:${s.radky.platnost};left:${s.box.left};right:${s.box.right}">Platnost: <strong>${new Date(p.platnost_do).toLocaleDateString('cs-CZ')}</strong></div>
-    <div class="pp-bottom" style="top:${s.spodek.top};left:${s.spodek.left};right:${s.spodek.right}">
-      ${p.ean ? `<div class="pp-barcode-col">
-        <div class="pp-barcode">${eanBarcodeSvg(p.ean, 24)}</div>
-        <div class="pp-ean">${p.ean}</div>
-      </div>` : ''}
-    </div>
   `;
+}
+
+// Prázdné (nevyplněné) poukazy k ručnímu dopsání — 3 kopie stejné šablony na
+// jednu A4 stránku (žádná konkrétní poukazová data, žádný čárový kód).
+function otevritPrazdnePoukazy() {
+  document.getElementById('pbSablona').value = localStorage.getItem('poukazSablona') || 'klasicky';
+  // vynutit A4 bez ohledu na to, v jakém formátu se naposledy tiskly slevové kupóny
+  document.getElementById('khPageFormat').textContent = '@page{size:A4;margin:10mm}';
+  vykreslitPrazdnePoukazy();
+  openModal('modalPoukazBlankTisk');
+}
+function vykreslitPrazdnePoukazy() {
+  const s = POUKAZ_SABLONY[document.getElementById('pbSablona').value];
+  const stin = s.stin ? ' pp-text-shadow' : '';
+  const karta = `
+    <div class="poukaz-print-card" style="background-image:url('${s.obrazek}');aspect-ratio:${s.pomer}">
+      ${s.logo ? `<div class="pp-logo-overlay${stin}" style="top:${s.logoBox.top};left:${s.logoBox.left};right:${s.logoBox.right}">
+        <img src="assets/logo.png" alt="Masáže Alesa" style="max-width:100%;max-height:44px;display:block;margin:0 auto">
+        <div class="pp-title-text">Dárkový poukaz</div>
+      </div>` : ''}
+      <div class="pp-radek${stin}" style="top:${s.radky.pro};left:${s.box.left};right:${s.box.right}">Pro: <span class="pb-blank">&nbsp;</span></div>
+      <div class="pp-radek${stin}" style="top:${s.radky.hodnota};left:${s.box.left};right:${s.box.right}">Hodnota: <span class="pb-blank">&nbsp;</span></div>
+      <div class="pp-radek${stin}" style="top:${s.radky.platnost};left:${s.box.left};right:${s.box.right}">Platnost: <span class="pb-blank">&nbsp;</span></div>
+    </div>`;
+  document.getElementById('pbKarty').innerHTML = karta + karta + karta;
 }
 
 // ── ZÁKAZNÍCI / KLIENTKY ── Od Fáze 6D čte a zapisuje výhradně

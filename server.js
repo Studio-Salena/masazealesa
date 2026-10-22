@@ -752,16 +752,6 @@ function vygenerovatKuponKod() {
   return kod;
 }
 
-// Vygeneruje EAN-13 čárový kód pro tisk na poukaz (prefix 20-29 = vyhrazeno GS1 pro vlastní/interní použití)
-function vygenerovatEan() {
-  let zaklad = '20';
-  for (let i = 0; i < 10; i++) zaklad += Math.floor(Math.random() * 10);
-  let soucet = 0;
-  for (let i = 0; i < 12; i++) soucet += Number(zaklad[i]) * (i % 2 === 0 ? 1 : 3);
-  const kontrolni = (10 - (soucet % 10)) % 10;
-  return zaklad + kontrolni;
-}
-
 function casNaMinuty(cas) { const [h, m] = cas.split(':').map(Number); return h * 60 + m; }
 function minutyNaCas(min) { const h = Math.floor(min / 60), m = min % 60; return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0'); }
 
@@ -1201,7 +1191,7 @@ app.post('/api/rezervace', async (req, res) => {
     let poukazPoznamka = '';
     if (poukaz_kod && poukaz_kod.trim()) {
       const { rows: [poukaz] } = await client.query(
-        'SELECT * FROM poukazy WHERE kod = $1 OR ean = $1', [poukaz_kod.trim()]
+        'SELECT * FROM poukazy WHERE kod = $1', [poukaz_kod.trim()]
       );
       if (!poukaz) {
         poukazPoznamka = ` Pozor: zadaný poukaz "${poukaz_kod.trim()}" nebyl nalezen — ověřit ručně.`;
@@ -1922,9 +1912,9 @@ app.post('/api/admin/poukazy', async (req, res) => {
     const klientkaId = await najitNeboVytvoritKlientku(client, { jmeno: kupujici_jmeno, telefon: kupujici_telefon, email: kupujici_email });
 
     const { rows: [poukaz] } = await client.query(
-      `INSERT INTO poukazy (kod, ean, hodnota, zustatek, platnost_do, zakoupeno_kde, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, konkretni_masaz, stav, klientka_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'aktivni',$12) RETURNING *`,
-      [vygenerovatKod(), vygenerovatEan(), hodnota, hodnota, platnostDo.toISOString().slice(0, 10), zakoupeno_kde || 'osobne', kupujici_jmeno || null, kupujici_email || null, kupujici_telefon || null, pro_koho || null, konkretniMasaz, klientkaId]
+      `INSERT INTO poukazy (kod, hodnota, zustatek, platnost_do, zakoupeno_kde, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, konkretni_masaz, stav, klientka_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'aktivni',$11) RETURNING *`,
+      [vygenerovatKod(), hodnota, hodnota, platnostDo.toISOString().slice(0, 10), zakoupeno_kde || 'osobne', kupujici_jmeno || null, kupujici_email || null, kupujici_telefon || null, pro_koho || null, konkretniMasaz, klientkaId]
     );
     await client.query('COMMIT');
     res.json({ ok: true, poukaz });
@@ -2097,9 +2087,9 @@ app.patch('/api/admin/poukazy/zadosti/:id/stav', async (req, res) => {
       platnostDo.setFullYear(platnostDo.getFullYear() + 1);
       const klientkaId = await najitNeboVytvoritKlientku(client, { jmeno: zadost.kupujici_jmeno, telefon: zadost.kupujici_telefon, email: zadost.kupujici_email });
       const { rows: [poukaz] } = await client.query(
-        `INSERT INTO poukazy (kod, ean, hodnota, zustatek, platnost_do, zakoupeno_kde, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, konkretni_masaz, zpusob_platby, stav, klientka_id)
-         VALUES ($1,$2,$3,$4,$5,'web',$6,$7,$8,$9,$10,$11,'aktivni',$12) RETURNING *`,
-        [vygenerovatKod(), vygenerovatEan(), zadost.hodnota, zadost.hodnota, platnostDo.toISOString().slice(0, 10), zadost.kupujici_jmeno, zadost.kupujici_email, zadost.kupujici_telefon, zadost.pro_koho, zadost.konkretni_masaz, zadost.zpusob_platby, klientkaId]
+        `INSERT INTO poukazy (kod, hodnota, zustatek, platnost_do, zakoupeno_kde, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, konkretni_masaz, zpusob_platby, stav, klientka_id)
+         VALUES ($1,$2,$3,$4,'web',$5,$6,$7,$8,$9,$10,'aktivni',$11) RETURNING *`,
+        [vygenerovatKod(), zadost.hodnota, zadost.hodnota, platnostDo.toISOString().slice(0, 10), zadost.kupujici_jmeno, zadost.kupujici_email, zadost.kupujici_telefon, zadost.pro_koho, zadost.konkretni_masaz, zadost.zpusob_platby, klientkaId]
       );
       await client.query('COMMIT');
       return res.json({ ok: true, poukaz });
