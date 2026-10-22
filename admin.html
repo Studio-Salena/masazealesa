@@ -364,6 +364,18 @@ tr:hover td{background:#fffaf5}
         <div class="stat-card"><div class="stat-label">Plně využité</div><div class="stat-value" id="poukazyVyuzite">—</div></div>
       </div>
       <div class="table-wrap">
+        <div class="table-header"><h3>🖼️ Vlastní vzhled poukazu</h3></div>
+        <div style="padding:16px;display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+          <img id="ppNahledVlastni" src="assets/poukaz.jpg" alt="Náhled vlastního vzhledu poukazu" style="width:160px;border-radius:8px;border:1px solid var(--tan-light);object-fit:cover;aspect-ratio:795/532">
+          <div style="display:flex;flex-direction:column;gap:8px;min-width:220px">
+            <p style="font-size:0.82rem;color:var(--text-light);margin:0">Nahraj vlastní obrázek na pozadí poukazu — zvol pak v tisku šablonu "🖼️ Vlastní".</p>
+            <input type="file" id="ppSouborVlastni" accept="image/*" onchange="nahratObrazekPoukazuVlastni()">
+            <button class="btn btn-outline btn-sm" onclick="vratitVychoziObrazekPoukazuVlastni()">Vrátit výchozí obrázek</button>
+            <div id="ppObrazekVlastniMsg"></div>
+          </div>
+        </div>
+      </div>
+      <div class="table-wrap">
         <div class="table-header">
           <h3>🏷️ Varianty poukazů (částka a platnost)</h3>
           <button class="btn btn-primary btn-sm" onclick="openModal('modalNovyTypPoukazu')">+ Přidat variantu</button>
@@ -648,6 +660,7 @@ tr:hover td{background:#fffaf5}
       <select id="ppSablona" onchange="zmenitSablonuPoukazu()">
         <option value="klasicky">🌸 Klasický</option>
         <option value="vanocni">🎄 Vánoční</option>
+        <option value="vlastni">🖼️ Vlastní</option>
       </select>
     </div>
     <div class="poukaz-print-card" id="poukazPrintCard"></div>
@@ -666,6 +679,7 @@ tr:hover td{background:#fffaf5}
       <select id="pbSablona" onchange="vykreslitPrazdnePoukazy()">
         <option value="klasicky">🌸 Klasický</option>
         <option value="vanocni">🎄 Vánoční</option>
+        <option value="vlastni">🖼️ Vlastní</option>
       </select>
     </div>
     <p class="no-print" style="font-size:0.85rem;color:var(--text-light);margin:0 0 10px">Na jednu stránku A4 se vytisknou 3 prázdné poukazy — údaje (pro koho, hodnota, platnost) na ně pak doplníš ručně.</p>
@@ -1740,6 +1754,7 @@ async function smazatRezervaci(id) {
 // ── POUKAZY ──
 let posledniPoukazy = [];
 async function loadPoukazy() {
+  document.getElementById('ppNahledVlastni').src = await ziskatObrazekPoukazu('vlastni');
   try {
     const seznam = await adminFetch(API + '/admin/poukazy').then(r => r.json());
     posledniPoukazy = seznam;
@@ -1968,28 +1983,49 @@ const POUKAZ_SABLONY = {
     logoBox: { top: '8%', left: '32%', right: '15%' },
     box: { left: '32%', right: '15%' },
     radky: { pro: '34%', hodnota: '44%', platnost: '54%', kod: '64%' }
+  },
+  vlastni: {
+    obrazek: null, // doplní se za běhu z nastavení (poukaz_obrazek_vlastni) — viz ziskatObrazekPoukazu()
+    pomer: '795/532',
+    logo: false,
+    stin: true,
+    box: { left: '10%', right: '10%' },
+    radky: { pro: '53%', hodnota: '60%', platnost: '67%', kod: '74%' }
   }
 };
+
+// Vrátí URL obrázku pro zvolenou šablonu — u "vlastni" se stahuje z admin
+// nastavení (nahrává se přes #ppSouborVlastni), jinak je to napevno v POUKAZ_SABLONY.
+async function ziskatObrazekPoukazu(klic) {
+  if (klic !== 'vlastni') return POUKAZ_SABLONY[klic].obrazek;
+  try {
+    const nastaveni = await adminFetch(API + '/admin/nastaveni').then(r => r.json());
+    const polozka = nastaveni.find(n => n.klic === 'poukaz_obrazek_vlastni');
+    return (polozka && polozka.hodnota) || 'assets/poukaz.jpg';
+  } catch (e) { return 'assets/poukaz.jpg'; }
+}
 
 let aktualniPoukazId = null;
 
 // Grafický náhled poukazu k tisku — přes zvolenou šablonu pozadí se dopíšou skutečné údaje
-function zobrazitPoukaz(id) {
+async function zobrazitPoukaz(id) {
   aktualniPoukazId = id;
   document.getElementById('ppSablona').value = localStorage.getItem('poukazSablona') || 'klasicky';
-  vykreslitNahledPoukazu();
+  await vykreslitNahledPoukazu();
   openModal('modalPoukazTisk');
 }
-function zmenitSablonuPoukazu() {
+async function zmenitSablonuPoukazu() {
   localStorage.setItem('poukazSablona', document.getElementById('ppSablona').value);
-  vykreslitNahledPoukazu();
+  await vykreslitNahledPoukazu();
 }
-function vykreslitNahledPoukazu() {
+async function vykreslitNahledPoukazu() {
   const p = posledniPoukazy.find(x => x.id === aktualniPoukazId);
   if (!p) return;
-  const s = POUKAZ_SABLONY[document.getElementById('ppSablona').value];
+  const klic = document.getElementById('ppSablona').value;
+  const s = POUKAZ_SABLONY[klic];
+  const obrazek = await ziskatObrazekPoukazu(klic);
   const card = document.getElementById('poukazPrintCard');
-  card.style.backgroundImage = `url('${s.obrazek}')`;
+  card.style.backgroundImage = `url('${obrazek}')`;
   card.style.aspectRatio = s.pomer;
   const stin = s.stin ? ' pp-text-shadow' : '';
   card.innerHTML = `
@@ -2006,18 +2042,20 @@ function vykreslitNahledPoukazu() {
 
 // Prázdné (nevyplněné) poukazy k ručnímu dopsání — 3 kopie stejné šablony na
 // jednu A4 stránku (žádná konkrétní poukazová data, žádný čárový kód).
-function otevritPrazdnePoukazy() {
+async function otevritPrazdnePoukazy() {
   document.getElementById('pbSablona').value = localStorage.getItem('poukazSablona') || 'klasicky';
   // vynutit A4 bez ohledu na to, v jakém formátu se naposledy tiskly slevové kupóny
   document.getElementById('khPageFormat').textContent = '@page{size:A4;margin:10mm}';
-  vykreslitPrazdnePoukazy();
+  await vykreslitPrazdnePoukazy();
   openModal('modalPoukazBlankTisk');
 }
-function vykreslitPrazdnePoukazy() {
-  const s = POUKAZ_SABLONY[document.getElementById('pbSablona').value];
+async function vykreslitPrazdnePoukazy() {
+  const klic = document.getElementById('pbSablona').value;
+  const s = POUKAZ_SABLONY[klic];
+  const obrazek = await ziskatObrazekPoukazu(klic);
   const stin = s.stin ? ' pp-text-shadow' : '';
   const karta = `
-    <div class="poukaz-print-card" style="background-image:url('${s.obrazek}');aspect-ratio:${s.pomer}">
+    <div class="poukaz-print-card" style="background-image:url('${obrazek}');aspect-ratio:${s.pomer}">
       ${s.logo ? `<div class="pp-logo-overlay${stin}" style="top:${s.logoBox.top};left:${s.logoBox.left};right:${s.logoBox.right}">
         <img src="assets/logo.png" alt="Masáže Alesa" style="max-width:100%;max-height:44px;display:block;margin:0 auto">
         <div class="pp-title-text">Dárkový poukaz</div>
@@ -2028,6 +2066,47 @@ function vykreslitPrazdnePoukazy() {
       <div class="pp-radek${stin}" style="top:${s.radky.kod};left:${s.box.left};right:${s.box.right}">Kód: <span class="pb-blank">&nbsp;</span></div>
     </div>`;
   document.getElementById('pbKarty').innerHTML = karta + karta + karta;
+}
+async function nahratObrazekPoukazuVlastni() {
+  const input = document.getElementById('ppSouborVlastni');
+  const msg = document.getElementById('ppObrazekVlastniMsg');
+  const soubor = input.files[0];
+  if (!soubor) return;
+  msg.innerHTML = '<span style="color:var(--text-light)">Zpracovávám obrázek…</span>';
+  try {
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          const maxSirka = 1200;
+          const meritko = Math.min(1, maxSirka / img.width);
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.round(img.width * meritko);
+          canvas.height = Math.round(img.height * meritko);
+          canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+          resolve(canvas.toDataURL('image/jpeg', 0.82));
+        };
+        img.onerror = reject;
+        img.src = reader.result;
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(soubor);
+    });
+    const res = await adminFetch(API + '/admin/nastaveni/poukaz_obrazek_vlastni', { method: 'PUT', body: JSON.stringify({ hodnota: dataUrl }) });
+    if (!res.ok) { msg.innerHTML = '<span style="color:#c0392b">Nahrání se nepodařilo.</span>'; return; }
+    document.getElementById('ppNahledVlastni').src = dataUrl;
+    msg.innerHTML = '<span style="color:var(--tan)">✅ Nový obrázek uložen.</span>';
+    input.value = '';
+  } catch (e) {
+    msg.innerHTML = '<span style="color:#c0392b">Zpracování obrázku se nepodařilo.</span>';
+  }
+}
+async function vratitVychoziObrazekPoukazuVlastni() {
+  if (!confirm('Vrátit výchozí obrázek poukazu?')) return;
+  await adminFetch(API + '/admin/nastaveni/poukaz_obrazek_vlastni', { method: 'DELETE' });
+  document.getElementById('ppNahledVlastni').src = 'assets/poukaz.jpg';
+  document.getElementById('ppObrazekVlastniMsg').innerHTML = '';
 }
 
 // ── ZÁKAZNÍCI / KLIENTKY ── Od Fáze 6D čte a zapisuje výhradně
