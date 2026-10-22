@@ -2555,6 +2555,22 @@ app.post('/api/admin/slevove-kupony/vygenerovat', async (req, res) => {
   }
 });
 
+// "Vydáno" je čistě manuální evidence majitelky (fyzicky předala/napsala kód
+// na kupón) — nezávislá na "použito" (to se nastavuje jen při uplatnění u
+// prodeje). Jednoduchý toggle: nastavit/zrušit časové razítko.
+app.patch('/api/admin/slevove-kupony/:id/vydano', async (req, res) => {
+  try {
+    const { rows: [kupon] } = await db.query('SELECT vydano_kdy FROM slevove_kupony WHERE id = $1', [req.params.id]);
+    if (!kupon) return res.status(404).json({ chyba: 'Kupón nebyl nalezen.' });
+    const nove = kupon.vydano_kdy ? null : new Date();
+    const { rows: [aktualizovany] } = await db.query(
+      'UPDATE slevove_kupony SET vydano_kdy = $1 WHERE id = $2 RETURNING *',
+      [nove, req.params.id]
+    );
+    res.json({ ok: true, kupon: aktualizovany });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
 // Nic jiného na slevove_kupony neodkazuje (na rozdíl od dárkových poukazů a
 // jejich platební historie) — smazání je tedy vždy bezpečné, bez ohledu na to,
 // jestli byl kupón použitý.

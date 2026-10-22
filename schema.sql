@@ -227,6 +227,7 @@ create table if not exists slevove_kupony (
   nazev_akce text not null,
   sleva_castka numeric not null,
   pouzito_kdy timestamptz, -- NULL = ještě nepoužitý
+  vydano_kdy timestamptz, -- NULL = ještě fyzicky nevydaný (ruční evidence majitelky)
   vytvoreno timestamptz not null default now()
 );
 
