@@ -18,7 +18,11 @@ types.setTypeParser(1082, val => val);
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+// Výchozí limit (100kb) by nestačil na nahrání obrázku kupónu jako base64
+// přes /api/admin/nastaveni (viz admin.html, nahrávání grafiky kupónu) —
+// obrázek se před odesláním zmenšuje/komprimuje v prohlížeči, 3mb je bezpečná
+// rezerva nad tím, ne provozní limit, který by se měl běžně vyčerpávat.
+app.use(express.json({ limit: '3mb' }));
 
 // Databáze běží na jiném serveru než backend (Supabase), proto vždy přes SSL.
 // Pozor: DATABASE_URL nesmí obsahovat "sslmode=..." — knihovna pg by si ho sama
@@ -2549,6 +2553,17 @@ app.post('/api/admin/slevove-kupony/vygenerovat', async (req, res) => {
   } finally {
     client.release();
   }
+});
+
+// Nic jiného na slevove_kupony neodkazuje (na rozdíl od dárkových poukazů a
+// jejich platební historie) — smazání je tedy vždy bezpečné, bez ohledu na to,
+// jestli byl kupón použitý.
+app.delete('/api/admin/slevove-kupony/:id', async (req, res) => {
+  try {
+    const { rowCount } = await db.query('DELETE FROM slevove_kupony WHERE id = $1', [req.params.id]);
+    if (!rowCount) return res.status(404).json({ chyba: 'Kupón nebyl nalezen.' });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
 // -- Produkty a sklad (Fáze 9E) --

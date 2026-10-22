@@ -185,6 +185,8 @@ tr:hover td{background:#fffaf5}
   body *{visibility:hidden}
   #poukazPrintCard,#poukazPrintCard *{visibility:visible}
   #poukazPrintCard{position:fixed;top:20px;left:50%;transform:translateX(-50%);width:420px;box-shadow:none}
+  #ktKarta,#ktKarta *{visibility:visible}
+  #ktKarta{position:fixed;top:20px;left:50%;transform:translateX(-50%);width:500px;box-shadow:none}
   .no-print{display:none!important}
 }
 </style>
@@ -527,6 +529,18 @@ tr:hover td{background:#fffaf5}
         <div class="stat-card"><div class="stat-label">Vygenerováno</div><div class="stat-value" id="kpCelkem">—</div></div>
         <div class="stat-card"><div class="stat-label">Použito</div><div class="stat-value" id="kpPouzito">—</div></div>
         <div class="stat-card"><div class="stat-label">Zbývá</div><div class="stat-value stat-green" id="kpZbyva">—</div></div>
+      </div>
+      <div class="table-wrap">
+        <div class="table-header"><h3>🖼️ Grafika kupónu k tisku</h3></div>
+        <div style="padding:16px;display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
+          <img id="kgNahledObrazku" src="assets/kupon.jpg" alt="Náhled grafiky kupónu" style="max-width:260px;width:100%;border-radius:8px;border:1px solid var(--tan-light)">
+          <div style="flex:1;min-width:220px">
+            <p style="font-size:0.82rem;color:var(--text-light);margin-top:0">Obrázek si můžeš kdykoliv sama vyměnit — appka ho pak použije jako podklad pro tisk, kód kupónu se vykreslí do pruhu dole.</p>
+            <input type="file" id="kgSouborObrazku" accept="image/*" onchange="nahratObrazekKuponu()">
+            <div id="kgObrazekMsg" style="font-size:0.82rem;margin-top:6px"></div>
+            <button class="btn btn-outline btn-sm" style="margin-top:8px" onclick="vratitVychoziObrazekKuponu()">Vrátit výchozí obrázek</button>
+          </div>
+        </div>
       </div>
       <div class="table-wrap">
         <div class="table-header"><h3>📋 Seznam kupónů</h3></div>
@@ -966,6 +980,23 @@ tr:hover td{background:#fffaf5}
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal('modalVygenerovatKupony')">Zavřít</button>
       <button class="btn btn-primary" id="kgGenerovatBtn" onclick="vygenerovatKupony()">Vygenerovat</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Náhled/tisk slevového kupónu -->
+<div class="modal-overlay" id="modalKuponTisk">
+  <div class="modal" style="max-width:560px">
+    <h3 class="no-print">Náhled kupónu</h3>
+    <div id="ktKarta" style="position:relative;width:100%;border-radius:8px;overflow:hidden;border:1px solid var(--tan-light)">
+      <img id="ktObrazek" src="" alt="Grafika kupónu" style="width:100%;display:block">
+      <div style="background:var(--terracotta);color:#fff;text-align:center;padding:12px;font-family:'Cormorant',serif;font-size:1.4rem;letter-spacing:0.05em">
+        Kód: <strong id="ktKod"></strong>
+      </div>
+    </div>
+    <div class="modal-footer no-print">
+      <button class="btn btn-outline" onclick="closeModal('modalKuponTisk')">Zavřít</button>
+      <button class="btn btn-primary" onclick="window.print()">🖨️ Vytisknout</button>
     </div>
   </div>
 </div>
@@ -2774,7 +2805,15 @@ async function otevritHistoriiProduktu(id) {
 
 // ── SLEVOVÉ KUPÓNY ───────────────────────────────────────────────────────
 let posledniKupony = [];
+async function ziskatObrazekKuponu() {
+  try {
+    const nastaveni = await adminFetch(API + '/admin/nastaveni').then(r => r.json());
+    const polozka = nastaveni.find(n => n.klic === 'kupon_obrazek');
+    return (polozka && polozka.hodnota) || 'assets/kupon.jpg';
+  } catch (e) { return 'assets/kupon.jpg'; }
+}
 async function loadKupony() {
+  document.getElementById('kgNahledObrazku').src = await ziskatObrazekKuponu();
   try {
     posledniKupony = await adminFetch(API + '/admin/slevove-kupony').then(r => r.json());
     const pouzito = posledniKupony.filter(k => k.pouzito_kdy).length;
@@ -2783,12 +2822,16 @@ async function loadKupony() {
     document.getElementById('kpZbyva').textContent = posledniKupony.length - pouzito;
     if (!posledniKupony.length) { document.getElementById('kuponyTable').innerHTML = '<div class="empty">Zatím žádné vygenerované kupóny</div>'; return; }
     document.getElementById('kuponyTable').innerHTML = `
-      <table><thead><tr><th>Kód</th><th>Akce</th><th>Sleva</th><th>Stav</th></tr></thead>
+      <table><thead><tr><th>Kód</th><th>Akce</th><th>Sleva</th><th>Stav</th><th></th></tr></thead>
       <tbody>${posledniKupony.map(k => `<tr>
         <td><code style="background:var(--cream);padding:2px 6px;border-radius:4px">${escapeHtml(k.kod)}</code></td>
         <td>${escapeHtml(k.nazev_akce)}</td>
         <td>${Number(k.sleva_castka).toLocaleString('cs-CZ')} Kč</td>
         <td>${k.pouzito_kdy ? '<span class="badge badge-zruseno">✔️ Použito ' + new Date(k.pouzito_kdy).toLocaleDateString('cs-CZ') + '</span>' : '<span class="badge badge-ok">Nepoužito</span>'}</td>
+        <td style="display:flex;gap:4px">
+          <button class="btn btn-outline btn-sm" onclick="tisknoutKupon(${k.id})" title="Zobrazit / vytisknout">🖨️</button>
+          <button class="btn btn-red btn-sm" onclick="smazatKupon(${k.id})" title="Smazat">🗑️</button>
+        </td>
       </tr>`).join('')}</tbody></table>`;
   } catch (e) { document.getElementById('kuponyTable').innerHTML = '<div class="error-msg">Chyba načítání.</div>'; }
 }
@@ -2819,6 +2862,63 @@ async function vygenerovatKupony() {
     `;
     loadKupony();
   } catch (e) { msg.innerHTML = '<div class="error-msg">Nejde se připojit k serveru.</div>'; }
+}
+async function smazatKupon(id) {
+  if (!confirm('Smazat tento kupón?')) return;
+  const res = await adminFetch(API + '/admin/slevove-kupony/' + id, { method: 'DELETE' });
+  if (!res.ok) { const data = await res.json().catch(() => ({})); alert(data.chyba || 'Smazání se nepodařilo.'); return; }
+  loadKupony();
+}
+async function tisknoutKupon(id) {
+  const k = posledniKupony.find(k => k.id === id);
+  if (!k) return;
+  document.getElementById('ktObrazek').src = await ziskatObrazekKuponu();
+  document.getElementById('ktKod').textContent = k.kod;
+  openModal('modalKuponTisk');
+}
+// Obrázek se před odesláním vždy zmenší/zkomprimuje v prohlížeči (canvas) —
+// appka ho ukládá jako base64 do stávající tabulky "nastaveni" (klíč
+// kupon_obrazek), žádná nová DB struktura ani soubor na serveru netřeba.
+async function nahratObrazekKuponu() {
+  const input = document.getElementById('kgSouborObrazku');
+  const msg = document.getElementById('kgObrazekMsg');
+  const soubor = input.files[0];
+  if (!soubor) return;
+  msg.innerHTML = '<span style="color:var(--text-light)">Zpracovávám obrázek…</span>';
+  try {
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          const maxSirka = 1200;
+          const meritko = Math.min(1, maxSirka / img.width);
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.round(img.width * meritko);
+          canvas.height = Math.round(img.height * meritko);
+          canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+          resolve(canvas.toDataURL('image/jpeg', 0.82));
+        };
+        img.onerror = reject;
+        img.src = reader.result;
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(soubor);
+    });
+    const res = await adminFetch(API + '/admin/nastaveni/kupon_obrazek', { method: 'PUT', body: JSON.stringify({ hodnota: dataUrl }) });
+    if (!res.ok) { msg.innerHTML = '<span style="color:#c0392b">Nahrání se nepodařilo.</span>'; return; }
+    document.getElementById('kgNahledObrazku').src = dataUrl;
+    msg.innerHTML = '<span style="color:var(--tan)">✅ Nový obrázek uložen.</span>';
+    input.value = '';
+  } catch (e) {
+    msg.innerHTML = '<span style="color:#c0392b">Zpracování obrázku se nepodařilo.</span>';
+  }
+}
+async function vratitVychoziObrazekKuponu() {
+  if (!confirm('Vrátit výchozí obrázek kupónu?')) return;
+  await adminFetch(API + '/admin/nastaveni/kupon_obrazek', { method: 'DELETE' });
+  document.getElementById('kgNahledObrazku').src = 'assets/kupon.jpg';
+  document.getElementById('kgObrazekMsg').innerHTML = '';
 }
 
 // ── ÚČETNICTVÍ (Fáze 3B) — 4 oddělené přehledy, ať jedno číslo nemusí
