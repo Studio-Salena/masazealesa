@@ -187,6 +187,8 @@ tr:hover td{background:#fffaf5}
   #poukazPrintCard{position:fixed;top:20px;left:50%;transform:translateX(-50%);width:420px;box-shadow:none}
   #ktKarta,#ktKarta *{visibility:visible}
   #ktKarta{position:fixed;top:20px;left:50%;transform:translateX(-50%);width:500px;box-shadow:none}
+  #khKarty,#khKarty *{visibility:visible}
+  #khKarty{position:fixed;top:10px;left:10px;right:10px;display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
   .no-print{display:none!important}
 }
 </style>
@@ -522,6 +524,7 @@ tr:hover td{background:#fffaf5}
         <div class="page-title">🎟️ Slevové kupóny</div>
         <div class="table-actions">
           <button class="btn btn-primary" onclick="otevritVygenerovatKupony()">+ Vygenerovat kupóny</button>
+          <button class="btn btn-outline" onclick="otevritHromadnyTiskKuponu()">🖨️ Vytisknout nepoužité</button>
           <button class="refresh-btn" onclick="loadKupony()">↻ Obnovit</button>
         </div>
       </div>
@@ -996,6 +999,19 @@ tr:hover td{background:#fffaf5}
     </div>
     <div class="modal-footer no-print">
       <button class="btn btn-outline" onclick="closeModal('modalKuponTisk')">Zavřít</button>
+      <button class="btn btn-primary" onclick="window.print()">🖨️ Vytisknout</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Hromadný tisk nepoužitých kupónů -->
+<div class="modal-overlay" id="modalKuponyHromadnyTisk">
+  <div class="modal" style="max-width:700px">
+    <h3 class="no-print">Hromadný tisk nepoužitých kupónů</h3>
+    <p class="no-print" id="khPocetInfo" style="font-size:0.82rem;color:var(--text-light)"></p>
+    <div id="khKarty" style="display:grid;grid-template-columns:repeat(2,1fr);gap:14px;max-height:60vh;overflow-y:auto"></div>
+    <div class="modal-footer no-print">
+      <button class="btn btn-outline" onclick="closeModal('modalKuponyHromadnyTisk')">Zavřít</button>
       <button class="btn btn-primary" onclick="window.print()">🖨️ Vytisknout</button>
     </div>
   </div>
@@ -2875,6 +2891,26 @@ async function tisknoutKupon(id) {
   document.getElementById('ktObrazek').src = await ziskatObrazekKuponu();
   document.getElementById('ktKod').textContent = k.kod;
   openModal('modalKuponTisk');
+}
+// Hromadný tisk — vždy jen nepoužité kupóny (použitý se tisknout nemá smysl).
+// Stejný obrázek se použije na všechny kartičky (prohlížeč ho stáhne jednou
+// a dál jen opakuje z cache).
+async function otevritHromadnyTiskKuponu() {
+  const nepouzite = posledniKupony.filter(k => !k.pouzito_kdy);
+  const info = document.getElementById('khPocetInfo');
+  const karty = document.getElementById('khKarty');
+  if (!nepouzite.length) { karty.innerHTML = ''; info.textContent = 'Žádné nepoužité kupóny k vytištění.'; openModal('modalKuponyHromadnyTisk'); return; }
+  info.textContent = 'K vytištění: ' + nepouzite.length + ' kupónů';
+  const obrazek = await ziskatObrazekKuponu();
+  karty.innerHTML = nepouzite.map(k => `
+    <div style="position:relative;border-radius:8px;overflow:hidden;border:1px solid var(--tan-light)">
+      <img src="${obrazek}" alt="Grafika kupónu" style="width:100%;display:block">
+      <div style="background:var(--terracotta);color:#fff;text-align:center;padding:8px;font-family:'Cormorant',serif;font-size:1.05rem;letter-spacing:0.04em">
+        Kód: <strong>${escapeHtml(k.kod)}</strong>
+      </div>
+    </div>
+  `).join('');
+  openModal('modalKuponyHromadnyTisk');
 }
 // Obrázek se před odesláním vždy zmenší/zkomprimuje v prohlížeči (canvas) —
 // appka ho ukládá jako base64 do stávající tabulky "nastaveni" (klíč
