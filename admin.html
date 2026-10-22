@@ -1958,7 +1958,7 @@ const POUKAZ_SABLONY = {
     logo: false,
     stin: true,
     box: { left: '10%', right: '10%' },
-    radky: { pro: '53%', hodnota: '60%', platnost: '67%' }
+    radky: { pro: '53%', hodnota: '60%', platnost: '67%', kod: '74%' }
   },
   vanocni: {
     obrazek: 'assets/vanocni-poukaz.jpg',
@@ -1967,7 +1967,7 @@ const POUKAZ_SABLONY = {
     stin: true,
     logoBox: { top: '8%', left: '32%', right: '15%' },
     box: { left: '32%', right: '15%' },
-    radky: { pro: '34%', hodnota: '44%', platnost: '54%' }
+    radky: { pro: '34%', hodnota: '44%', platnost: '54%', kod: '64%' }
   }
 };
 
@@ -2000,6 +2000,7 @@ function vykreslitNahledPoukazu() {
     <div class="pp-radek${stin}" style="top:${s.radky.pro};left:${s.box.left};right:${s.box.right}">Pro: <strong>${escapeHtml(p.pro_koho) || escapeHtml(p.kupujici_jmeno) || ''}</strong></div>
     <div class="pp-radek${stin}" style="top:${s.radky.hodnota};left:${s.box.left};right:${s.box.right}">${p.konkretni_masaz ? `Masáž: <strong>${escapeHtml(p.konkretni_masaz)}</strong>` : `Hodnota: <strong>${Number(p.hodnota).toLocaleString('cs-CZ')} Kč</strong>`}</div>
     <div class="pp-radek${stin}" style="top:${s.radky.platnost};left:${s.box.left};right:${s.box.right}">Platnost: <strong>${new Date(p.platnost_do).toLocaleDateString('cs-CZ')}</strong></div>
+    <div class="pp-radek${stin}" style="top:${s.radky.kod};left:${s.box.left};right:${s.box.right}">Kód: <strong>${escapeHtml(p.kod)}</strong></div>
   `;
 }
 
@@ -2024,6 +2025,7 @@ function vykreslitPrazdnePoukazy() {
       <div class="pp-radek${stin}" style="top:${s.radky.pro};left:${s.box.left};right:${s.box.right}">Pro: <span class="pb-blank">&nbsp;</span></div>
       <div class="pp-radek${stin}" style="top:${s.radky.hodnota};left:${s.box.left};right:${s.box.right}">Hodnota: <span class="pb-blank">&nbsp;</span></div>
       <div class="pp-radek${stin}" style="top:${s.radky.platnost};left:${s.box.left};right:${s.box.right}">Platnost: <span class="pb-blank">&nbsp;</span></div>
+      <div class="pp-radek${stin}" style="top:${s.radky.kod};left:${s.box.left};right:${s.box.right}">Kód: <span class="pb-blank">&nbsp;</span></div>
     </div>`;
   document.getElementById('pbKarty').innerHTML = karta + karta + karta;
 }
