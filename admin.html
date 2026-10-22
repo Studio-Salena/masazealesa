@@ -188,10 +188,11 @@ tr:hover td{background:#fffaf5}
   #ktKarta,#ktKarta *{visibility:visible}
   #ktKarta{position:fixed;top:20px;left:50%;transform:translateX(-50%);width:500px;box-shadow:none}
   #khKarty,#khKarty *{visibility:visible}
-  #khKarty{position:fixed;top:10px;left:10px;right:10px;display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
+  #khKarty{position:fixed;top:10px;left:10px;right:10px;display:grid;gap:14px}
   .no-print{display:none!important}
 }
 </style>
+<style id="khPageFormat">@page{size:A4;margin:10mm}</style>
 </head>
 <body>
 
@@ -1009,6 +1010,10 @@ tr:hover td{background:#fffaf5}
   <div class="modal" style="max-width:700px">
     <h3 class="no-print">Hromadný tisk nepoužitých kupónů</h3>
     <p class="no-print" id="khPocetInfo" style="font-size:0.82rem;color:var(--text-light)"></p>
+    <div class="no-print" style="display:flex;gap:16px;margin-bottom:10px;font-size:0.85rem">
+      <label><input type="radio" name="khFormat" value="A4" checked onchange="zmenitFormatTiskuKuponu()"> A4 (2 na řádek)</label>
+      <label><input type="radio" name="khFormat" value="A3" onchange="zmenitFormatTiskuKuponu()"> A3 (3 na řádek)</label>
+    </div>
     <div id="khKarty" style="display:grid;grid-template-columns:repeat(2,1fr);gap:14px;max-height:60vh;overflow-y:auto"></div>
     <div class="modal-footer no-print">
       <button class="btn btn-outline" onclick="closeModal('modalKuponyHromadnyTisk')">Zavřít</button>
@@ -2899,7 +2904,8 @@ async function otevritHromadnyTiskKuponu() {
   const nepouzite = posledniKupony.filter(k => !k.pouzito_kdy);
   const info = document.getElementById('khPocetInfo');
   const karty = document.getElementById('khKarty');
-  if (!nepouzite.length) { karty.innerHTML = ''; info.textContent = 'Žádné nepoužité kupóny k vytištění.'; openModal('modalKuponyHromadnyTisk'); return; }
+  document.querySelector('input[name="khFormat"][value="A4"]').checked = true;
+  if (!nepouzite.length) { karty.innerHTML = ''; info.textContent = 'Žádné nepoužité kupóny k vytištění.'; openModal('modalKuponyHromadnyTisk'); zmenitFormatTiskuKuponu(); return; }
   info.textContent = 'K vytištění: ' + nepouzite.length + ' kupónů';
   const obrazek = await ziskatObrazekKuponu();
   karty.innerHTML = nepouzite.map(k => `
@@ -2911,6 +2917,15 @@ async function otevritHromadnyTiskKuponu() {
     </div>
   `).join('');
   openModal('modalKuponyHromadnyTisk');
+  zmenitFormatTiskuKuponu();
+}
+// Mění jak náhled na obrazovce, tak @page pravidlo pro skutečný tisk — A3 má
+// víc místa, tak se vejde víc kartiček na řádek.
+function zmenitFormatTiskuKuponu() {
+  const format = document.querySelector('input[name="khFormat"]:checked').value;
+  const sloupce = format === 'A3' ? 3 : 2;
+  document.getElementById('khKarty').style.gridTemplateColumns = 'repeat(' + sloupce + ',1fr)';
+  document.getElementById('khPageFormat').textContent = '@page{size:' + format + ';margin:10mm}';
 }
 // Obrázek se před odesláním vždy zmenší/zkomprimuje v prohlížeči (canvas) —
 // appka ho ukládá jako base64 do stávající tabulky "nastaveni" (klíč
