@@ -36,6 +36,7 @@ db.on('error', (err) => console.error('Neočekávaná chyba databázového spoje
 
 const ADMIN_HESLO = process.env.ADMIN_HESLO;
 const CRON_KLIC = process.env.CRON_KLIC; // sdílené heslo pro denní úlohu (připomínky, žádosti o recenzi) i pro retenční cron (Fáze 7G.3)
+const EMAIL_MAJITELKY = 'info@masazealesa.cz'; // kam chodí upozornění na novou rezervaci / žádost o poukaz z webu
 
 // Fáze 7G.3 — bezpečnostní limit na jedno spuštění POST /api/admin/retence/apply,
 // počítáno jako SOUČET všech skutečně anonymizovaných objektů (klientky +
@@ -1241,6 +1242,25 @@ app.post('/api/rezervace', async (req, res) => {
         });
     }
 
+    // Upozornění majitelce na novou rezervaci z webu — nezávislé na potvrzovacím
+    // e-mailu zákaznici výš, posílá se vždy (i bez vyplněného e-mailu zákaznice).
+    odeslatEmail(EMAIL_MAJITELKY, 'Nová rezervace – ' + jmeno, emailSablona(`
+      <h2>Nová rezervace z webu</h2>
+      <table class="rez-detail" width="100%" cellpadding="0" cellspacing="0">
+        <tr><td>
+          <strong>Jméno:</strong> ${jmeno}<br>
+          <strong>Telefon:</strong> ${telefon}<br>
+          <strong>E-mail:</strong> ${email || '—'}<br>
+          <strong>Masáž:</strong> ${nazevMasaze}<br>
+          <strong>Datum:</strong> ${formatDatumCz(datum)}<br>
+          <strong>Čas:</strong> ${cas_od}–${cas_do}
+          ${celaPoznamka ? '<br><strong>Poznámka:</strong> ' + celaPoznamka : ''}
+        </td></tr>
+      </table>
+    `)).then(uspech => {
+      if (!uspech) console.error('Upozornění majitelce na rezervaci ' + rezervace.id + ' se nepodařilo odeslat.');
+    });
+
     res.json({ ok: true, rezervace });
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch {}
@@ -1297,6 +1317,25 @@ app.post('/api/poukazy/zadost', async (req, res) => {
       [hodnotaCislo, kupujici_jmeno, kupujici_email, kupujici_telefon || null, pro_koho || null, vzkaz || null, konkretni_masaz || null, zpusob_platby]
     );
     res.json({ ok: true, zadost });
+
+    // Upozornění majitelce na novou žádost o poukaz z webu.
+    odeslatEmail(EMAIL_MAJITELKY, 'Nová žádost o poukaz – ' + kupujici_jmeno, emailSablona(`
+      <h2>Nová žádost o dárkový poukaz z webu</h2>
+      <table class="rez-detail" width="100%" cellpadding="0" cellspacing="0">
+        <tr><td>
+          <strong>Jméno:</strong> ${kupujici_jmeno}<br>
+          <strong>E-mail:</strong> ${kupujici_email}<br>
+          <strong>Telefon:</strong> ${kupujici_telefon || '—'}<br>
+          ${konkretni_masaz ? '<strong>Konkrétní masáž:</strong> ' + konkretni_masaz + '<br>' : '<strong>Hodnota:</strong> ' + hodnotaCislo + ' Kč<br>'}
+          <strong>Pro koho:</strong> ${pro_koho || '—'}<br>
+          <strong>Vzkaz:</strong> ${vzkaz || '—'}<br>
+          <strong>Způsob platby:</strong> ${zpusob_platby}
+        </td></tr>
+      </table>
+      <p>Vyřiď v administraci v záložce Dárkové poukazy → Žádosti o poukaz z webu.</p>
+    `)).then(uspech => {
+      if (!uspech) console.error('Upozornění majitelce na žádost o poukaz ' + zadost.id + ' se nepodařilo odeslat.');
+    });
   } catch (e) { console.error('POST /api/poukazy/zadost selhalo:', e); res.status(500).json({ chyba: 'Interní chyba serveru.' }); }
 });
 
