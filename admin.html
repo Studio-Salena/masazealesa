@@ -151,12 +151,14 @@ tr:hover td{background:#fffaf5}
 .poukaz-print-card{
   position:relative;
   width:100%;
-  background-size:cover;
-  background-position:center;
   background-color:var(--cream);
   border-radius:14px;
   overflow:hidden;
 }
+/* Pozadí poukazu je skutečný <img>, ne CSS background-image — ten prohlížeče
+   při tisku bez zapnutí "grafiky na pozadí" vynechávají a vytisknul by se jen
+   text ležící nad ním (viz hlášená chyba). <img> se tiskne vždy spolehlivě. */
+.pp-bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0}
 .pp-text-shadow{text-shadow:0 0 4px rgba(255,255,255,0.9), 0 0 8px rgba(255,255,255,0.7)}
 .pp-logo-overlay{position:absolute;text-align:center;line-height:1.15}
 .pp-title-text{font-size:0.62rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--gold);font-weight:700;margin-top:1px}
@@ -2030,10 +2032,10 @@ async function vykreslitNahledPoukazu() {
   const s = POUKAZ_SABLONY[klic];
   const obrazek = await ziskatObrazekPoukazu(klic);
   const card = document.getElementById('poukazPrintCard');
-  card.style.backgroundImage = obrazek ? `url('${obrazek}')` : 'none';
   card.style.aspectRatio = s.pomer;
   const stin = s.stin ? ' pp-text-shadow' : '';
   card.innerHTML = `
+    ${obrazek ? `<img class="pp-bg" src="${obrazek}" alt="">` : ''}
     ${s.logo ? `<div class="pp-logo-overlay${stin}" style="top:${s.logoBox.top};left:${s.logoBox.left};right:${s.logoBox.right}">
       <img src="assets/logo.png" alt="Masáže Alesa" style="max-width:100%;max-height:44px;display:block;margin:0 auto">
       <div class="pp-title-text">Dárkový poukaz</div>
@@ -2060,7 +2062,8 @@ async function vykreslitPrazdnePoukazy() {
   const obrazek = await ziskatObrazekPoukazu(klic);
   const stin = s.stin ? ' pp-text-shadow' : '';
   const karta = `
-    <div class="poukaz-print-card" style="background-image:${obrazek ? `url('${obrazek}')` : 'none'};aspect-ratio:${s.pomer}">
+    <div class="poukaz-print-card" style="aspect-ratio:${s.pomer}">
+      ${obrazek ? `<img class="pp-bg" src="${obrazek}" alt="">` : ''}
       ${s.logo ? `<div class="pp-logo-overlay${stin}" style="top:${s.logoBox.top};left:${s.logoBox.left};right:${s.logoBox.right}">
         <img src="assets/logo.png" alt="Masáže Alesa" style="max-width:100%;max-height:44px;display:block;margin:0 auto">
         <div class="pp-title-text">Dárkový poukaz</div>
