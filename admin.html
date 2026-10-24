@@ -368,22 +368,58 @@ tr:hover td{background:#fffaf5}
       <div class="table-wrap">
         <div class="table-header"><h3>🖼️ Vzhled poukazu</h3></div>
         <div style="padding:16px;display:flex;gap:28px;flex-wrap:wrap">
-          <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
-            <img id="ppNahled_klasicky" alt="Náhled klasického vzhledu" style="width:160px;aspect-ratio:795/532;border-radius:8px;border:1px solid var(--tan-light);object-fit:cover;background:var(--cream)">
-            <div style="display:flex;flex-direction:column;gap:8px;min-width:220px">
+          <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
+            <div class="poukaz-print-card" id="ppVzorek_klasicky" style="width:220px;aspect-ratio:795/532;flex-shrink:0"></div>
+            <div style="display:flex;flex-direction:column;gap:8px;min-width:240px">
               <strong style="font-size:0.85rem">🌸 Klasický</strong>
               <input type="file" id="ppSoubor_klasicky" accept="image/*" onchange="nahratObrazekPoukazu('klasicky')">
               <button class="btn btn-outline btn-sm" onclick="vratitVychoziObrazekPoukazu('klasicky')">Vrátit výchozí obrázek</button>
               <div id="ppObrazekMsg_klasicky"></div>
+              <details>
+                <summary style="cursor:pointer;color:var(--brown);font-size:0.82rem;font-weight:600">⚙️ Upravit pozice textu</summary>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;max-width:280px">
+                  <div class="form-group" style="margin-bottom:0"><label style="font-size:0.72rem">Pro (% shora)</label><input type="number" id="ppPoz_klasicky_pro" min="0" max="100" oninput="vykreslitVzorek('klasicky')"></div>
+                  <div class="form-group" style="margin-bottom:0"><label style="font-size:0.72rem">Hodnota (% shora)</label><input type="number" id="ppPoz_klasicky_hodnota" min="0" max="100" oninput="vykreslitVzorek('klasicky')"></div>
+                  <div class="form-group" style="margin-bottom:0"><label style="font-size:0.72rem">Platnost (% shora)</label><input type="number" id="ppPoz_klasicky_platnost" min="0" max="100" oninput="vykreslitVzorek('klasicky')"></div>
+                  <div class="form-group" style="margin-bottom:0"><label style="font-size:0.72rem">Kód (% shora)</label><input type="number" id="ppPoz_klasicky_kod" min="0" max="100" oninput="vykreslitVzorek('klasicky')"></div>
+                  <div class="form-group" style="margin-bottom:0"><label style="font-size:0.72rem">Okraj zleva (%)</label><input type="number" id="ppPoz_klasicky_left" min="0" max="100" oninput="vykreslitVzorek('klasicky')"></div>
+                  <div class="form-group" style="margin-bottom:0"><label style="font-size:0.72rem">Okraj zprava (%)</label><input type="number" id="ppPoz_klasicky_right" min="0" max="100" oninput="vykreslitVzorek('klasicky')"></div>
+                </div>
+                <div style="display:flex;gap:8px;margin-top:8px">
+                  <button class="btn btn-primary btn-sm" onclick="ulozitPoziceTextu('klasicky')">Uložit pozice</button>
+                  <button class="btn btn-outline btn-sm" onclick="resetovatPoziceTextu('klasicky')">Výchozí</button>
+                </div>
+                <div id="ppPozMsg_klasicky" style="font-size:0.8rem;margin-top:6px"></div>
+              </details>
             </div>
           </div>
-          <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
-            <img id="ppNahled_vanocni" alt="Náhled vánočního vzhledu" style="width:160px;aspect-ratio:1024/559;border-radius:8px;border:1px solid var(--tan-light);object-fit:cover;background:var(--cream)">
-            <div style="display:flex;flex-direction:column;gap:8px;min-width:220px">
+          <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
+            <div class="poukaz-print-card" id="ppVzorek_vanocni" style="width:220px;aspect-ratio:1024/559;flex-shrink:0"></div>
+            <div style="display:flex;flex-direction:column;gap:8px;min-width:240px">
               <strong style="font-size:0.85rem">🎄 Vánoční</strong>
               <input type="file" id="ppSoubor_vanocni" accept="image/*" onchange="nahratObrazekPoukazu('vanocni')">
               <button class="btn btn-outline btn-sm" onclick="vratitVychoziObrazekPoukazu('vanocni')">Vrátit výchozí obrázek</button>
               <div id="ppObrazekMsg_vanocni"></div>
+              <details>
+                <summary style="cursor:pointer;color:var(--brown);font-size:0.82rem;font-weight:600">⚙️ Upravit pozice textu</summary>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;max-width:280px">
+                  <div class="form-group" style="margin-bottom:0"><label style="font-size:0.72rem">Pro (% shora)</label><input type="number" id="ppPoz_vanocni_pro" min="0" max="100" oninput="vykreslitVzorek('vanocni')"></div>
+                  <div class="form-group" style="margin-bottom:0"><label style="font-size:0.72rem">Hodnota (% shora)</label><input type="number" id="ppPoz_vanocni_hodnota" min="0" max="100" oninput="vykreslitVzorek('vanocni')"></div>
+                  <div class="form-group" style="margin-bottom:0"><label style="font-size:0.72rem">Platnost (% shora)</label><input type="number" id="ppPoz_vanocni_platnost" min="0" max="100" oninput="vykreslitVzorek('vanocni')"></div>
+                  <div class="form-group" style="margin-bottom:0"><label style="font-size:0.72rem">Kód (% shora)</label><input type="number" id="ppPoz_vanocni_kod" min="0" max="100" oninput="vykreslitVzorek('vanocni')"></div>
+                  <div class="form-group" style="margin-bottom:0"><label style="font-size:0.72rem">Okraj zleva (%)</label><input type="number" id="ppPoz_vanocni_left" min="0" max="100" oninput="vykreslitVzorek('vanocni')"></div>
+                  <div class="form-group" style="margin-bottom:0"><label style="font-size:0.72rem">Okraj zprava (%)</label><input type="number" id="ppPoz_vanocni_right" min="0" max="100" oninput="vykreslitVzorek('vanocni')"></div>
+                  <div class="form-group" style="margin-bottom:0"><label style="font-size:0.72rem">Logo shora (%)</label><input type="number" id="ppPoz_vanocni_logoTop" min="0" max="100" oninput="vykreslitVzorek('vanocni')"></div>
+                  <div class="form-group" style="margin-bottom:0"></div>
+                  <div class="form-group" style="margin-bottom:0"><label style="font-size:0.72rem">Logo zleva (%)</label><input type="number" id="ppPoz_vanocni_logoLeft" min="0" max="100" oninput="vykreslitVzorek('vanocni')"></div>
+                  <div class="form-group" style="margin-bottom:0"><label style="font-size:0.72rem">Logo zprava (%)</label><input type="number" id="ppPoz_vanocni_logoRight" min="0" max="100" oninput="vykreslitVzorek('vanocni')"></div>
+                </div>
+                <div style="display:flex;gap:8px;margin-top:8px">
+                  <button class="btn btn-primary btn-sm" onclick="ulozitPoziceTextu('vanocni')">Uložit pozice</button>
+                  <button class="btn btn-outline btn-sm" onclick="resetovatPoziceTextu('vanocni')">Výchozí</button>
+                </div>
+                <div id="ppPozMsg_vanocni" style="font-size:0.8rem;margin-top:6px"></div>
+              </details>
             </div>
           </div>
         </div>
@@ -1775,8 +1811,8 @@ async function smazatRezervaci(id) {
 // ── POUKAZY ──
 let posledniPoukazy = [];
 async function loadPoukazy() {
-  document.getElementById('ppNahled_klasicky').src = (await ziskatObrazekPoukazu('klasicky')) || '';
-  document.getElementById('ppNahled_vanocni').src = await ziskatObrazekPoukazu('vanocni');
+  await inicializovatVzorek('klasicky');
+  await inicializovatVzorek('vanocni');
   try {
     const seznam = await adminFetch(API + '/admin/poukazy').then(r => r.json());
     posledniPoukazy = seznam;
@@ -2023,6 +2059,41 @@ async function ziskatObrazekPoukazu(klic) {
   return POUKAZ_VYCHOZI_OBRAZEK[klic];
 }
 
+// Výchozí pozice textu — vytažené z POUKAZ_SABLONY jako čistá čísla (bez "%"),
+// ať se dají rovnou nacpat do number inputů v panelu "Upravit pozice textu".
+function vychoziPoziceTextu(klic) {
+  const s = POUKAZ_SABLONY[klic];
+  const p = {
+    left: parseFloat(s.box.left), right: parseFloat(s.box.right),
+    pro: parseFloat(s.radky.pro), hodnota: parseFloat(s.radky.hodnota),
+    platnost: parseFloat(s.radky.platnost), kod: parseFloat(s.radky.kod)
+  };
+  if (s.logo) { p.logoTop = parseFloat(s.logoBox.top); p.logoLeft = parseFloat(s.logoBox.left); p.logoRight = parseFloat(s.logoBox.right); }
+  return p;
+}
+// Pozice uložené majitelkou v admin nastavení (poukaz_pozice_<klic>), jinak výchozí.
+async function ziskatPoziceTextu(klic) {
+  try {
+    const nastaveni = await adminFetch(API + '/admin/nastaveni').then(r => r.json());
+    const polozka = nastaveni.find(n => n.klic === 'poukaz_pozice_' + klic);
+    if (polozka && polozka.hodnota) return JSON.parse(polozka.hodnota);
+  } catch (e) { /* spadne na výchozí */ }
+  return vychoziPoziceTextu(klic);
+}
+// Sloučí tvar šablony (poměr stran/logo/stín z POUKAZ_SABLONY) s pozicemi
+// (výchozí nebo admin-upravenými) do jednoho objektu — stejný tvar, jaký dřív
+// vracelo přímo POUKAZ_SABLONY[klic], ať zbytek vykreslovacího kódu beze změny.
+async function sablonaSPozicemi(klic) {
+  const sablona = POUKAZ_SABLONY[klic];
+  const pozice = await ziskatPoziceTextu(klic);
+  return {
+    ...sablona,
+    box: { left: pozice.left + '%', right: pozice.right + '%' },
+    radky: { pro: pozice.pro + '%', hodnota: pozice.hodnota + '%', platnost: pozice.platnost + '%', kod: pozice.kod + '%' },
+    logoBox: sablona.logo ? { top: pozice.logoTop + '%', left: pozice.logoLeft + '%', right: pozice.logoRight + '%' } : undefined
+  };
+}
+
 let aktualniPoukazId = null;
 
 // Grafický náhled poukazu k tisku — přes zvolenou šablonu pozadí se dopíšou skutečné údaje
@@ -2040,7 +2111,7 @@ async function vykreslitNahledPoukazu() {
   const p = posledniPoukazy.find(x => x.id === aktualniPoukazId);
   if (!p) return;
   const klic = document.getElementById('ppSablona').value;
-  const s = POUKAZ_SABLONY[klic];
+  const s = await sablonaSPozicemi(klic);
   const obrazek = await ziskatObrazekPoukazu(klic);
   const card = document.getElementById('poukazPrintCard');
   card.style.aspectRatio = s.pomer;
@@ -2068,7 +2139,7 @@ async function otevritPrazdnePoukazy() {
 }
 async function vykreslitPrazdnePoukazy() {
   const klic = document.getElementById('pbSablona').value;
-  const s = POUKAZ_SABLONY[klic];
+  const s = await sablonaSPozicemi(klic);
   const obrazek = await ziskatObrazekPoukazu(klic);
   const stin = s.stin ? ' pp-text-shadow' : '';
   const karta = `
@@ -2112,7 +2183,8 @@ async function nahratObrazekPoukazu(klic) {
     });
     const res = await adminFetch(API + '/admin/nastaveni/poukaz_obrazek_' + klic, { method: 'PUT', body: JSON.stringify({ hodnota: dataUrl }) });
     if (!res.ok) { msg.innerHTML = '<span style="color:#c0392b">Nahrání se nepodařilo.</span>'; return; }
-    document.getElementById('ppNahled_' + klic).src = dataUrl;
+    document.getElementById('ppVzorek_' + klic).dataset.obrazek = dataUrl;
+    vykreslitVzorek(klic);
     msg.innerHTML = '<span style="color:var(--tan)">✅ Nový obrázek uložen.</span>';
     input.value = '';
   } catch (e) {
@@ -2122,8 +2194,67 @@ async function nahratObrazekPoukazu(klic) {
 async function vratitVychoziObrazekPoukazu(klic) {
   if (!confirm('Vrátit výchozí obrázek poukazu?')) return;
   await adminFetch(API + '/admin/nastaveni/poukaz_obrazek_' + klic, { method: 'DELETE' });
-  document.getElementById('ppNahled_' + klic).src = POUKAZ_VYCHOZI_OBRAZEK[klic] || '';
+  document.getElementById('ppVzorek_' + klic).dataset.obrazek = POUKAZ_VYCHOZI_OBRAZEK[klic] || '';
+  vykreslitVzorek(klic);
   document.getElementById('ppObrazekMsg_' + klic).innerHTML = '';
+}
+
+// Vzorová kartička v panelu "Vzhled poukazu" — stejný styl jako skutečný tisk,
+// ale s ukázkovým textem, ať majitelka při doladění pozic (number inputy níž)
+// hned vidí, jak to bude vypadat na jejím vlastním obrázku.
+function vykreslitVzorek(klic) {
+  const sablona = POUKAZ_SABLONY[klic];
+  const stin = sablona.stin ? ' pp-text-shadow' : '';
+  const vzorek = document.getElementById('ppVzorek_' + klic);
+  const obrazek = vzorek.dataset.obrazek || '';
+  const ziskat = nazev => document.getElementById('ppPoz_' + klic + '_' + nazev).value + '%';
+  const left = ziskat('left'), right = ziskat('right');
+  let logoHtml = '';
+  if (sablona.logo) {
+    logoHtml = `<div class="pp-logo-overlay${stin}" style="top:${ziskat('logoTop')};left:${ziskat('logoLeft')};right:${ziskat('logoRight')}">
+      <img src="assets/logo.png" alt="Masáže Alesa" style="max-width:100%;max-height:30px;display:block;margin:0 auto">
+    </div>`;
+  }
+  vzorek.innerHTML = `
+    ${obrazek ? `<img class="pp-bg" src="${obrazek}" alt="">` : ''}
+    ${logoHtml}
+    <div class="pp-radek${stin}" style="top:${ziskat('pro')};left:${left};right:${right}">Pro: <strong>Jana Nováková</strong></div>
+    <div class="pp-radek${stin}" style="top:${ziskat('hodnota')};left:${left};right:${right}">Hodnota: <strong>500 Kč</strong></div>
+    <div class="pp-radek${stin}" style="top:${ziskat('platnost')};left:${left};right:${right}">Platnost: <strong>24.10.2027</strong></div>
+    <div class="pp-radek${stin}" style="top:${ziskat('kod')};left:${left};right:${right}">Kód: <strong>ALESA-2026-ABC123</strong></div>
+  `;
+}
+// Naplní number inputy aktuálními (uloženými nebo výchozími) pozicemi a obrázek
+// do vzorku — voláno při načtení stránky Poukazy a po "Vrátit výchozí pozice".
+async function inicializovatVzorek(klic) {
+  const obrazek = await ziskatObrazekPoukazu(klic);
+  const pozice = await ziskatPoziceTextu(klic);
+  document.getElementById('ppVzorek_' + klic).dataset.obrazek = obrazek || '';
+  ['left', 'right', 'pro', 'hodnota', 'platnost', 'kod'].forEach(nazev => {
+    document.getElementById('ppPoz_' + klic + '_' + nazev).value = pozice[nazev];
+  });
+  if (POUKAZ_SABLONY[klic].logo) {
+    ['logoTop', 'logoLeft', 'logoRight'].forEach(nazev => {
+      document.getElementById('ppPoz_' + klic + '_' + nazev).value = pozice[nazev];
+    });
+  }
+  vykreslitVzorek(klic);
+}
+async function ulozitPoziceTextu(klic) {
+  const msg = document.getElementById('ppPozMsg_' + klic);
+  const ziskat = nazev => Number(document.getElementById('ppPoz_' + klic + '_' + nazev).value);
+  const pozice = { left: ziskat('left'), right: ziskat('right'), pro: ziskat('pro'), hodnota: ziskat('hodnota'), platnost: ziskat('platnost'), kod: ziskat('kod') };
+  if (POUKAZ_SABLONY[klic].logo) { pozice.logoTop = ziskat('logoTop'); pozice.logoLeft = ziskat('logoLeft'); pozice.logoRight = ziskat('logoRight'); }
+  try {
+    const res = await adminFetch(API + '/admin/nastaveni/poukaz_pozice_' + klic, { method: 'PUT', body: JSON.stringify({ hodnota: JSON.stringify(pozice) }) });
+    msg.innerHTML = res.ok ? '<span style="color:var(--tan)">✅ Pozice uloženy.</span>' : '<span style="color:#c0392b">Uložení se nepodařilo.</span>';
+  } catch (e) { msg.innerHTML = '<span style="color:#c0392b">Nejde se připojit k serveru.</span>'; }
+}
+async function resetovatPoziceTextu(klic) {
+  if (!confirm('Vrátit výchozí pozice textu?')) return;
+  await adminFetch(API + '/admin/nastaveni/poukaz_pozice_' + klic, { method: 'DELETE' });
+  await inicializovatVzorek(klic);
+  document.getElementById('ppPozMsg_' + klic).innerHTML = '';
 }
 
 // Uložení kartičky poukazu jako PNG obrázek (ne přes tisk/PDF) — tisk do PDF
