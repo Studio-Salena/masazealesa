@@ -737,11 +737,15 @@ function vyzadovatAdmina(req, res, next) {
   return res.status(401).json({ chyba: 'Neplatné heslo' });
 }
 
-function vygenerovatKod() {
+// "prodej" (poukaz skutečně koupený, web nebo osobně) má v kódu navíc rok
+// (ALESA-2026-XXXXXX), "dar" (např. do tomboly, bez přijatých peněz) zůstává
+// ve starém formátu ALESA-XXXXXX — ať je účel vidět na první pohled přímo
+// z kódu, nezávisle na políčku ucel v databázi.
+function vygenerovatKod(ucel) {
   const znaky = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let kod = 'ALESA-';
-  for (let i = 0; i < 6; i++) kod += znaky[Math.floor(Math.random() * znaky.length)];
-  return kod;
+  let nahodnaCast = '';
+  for (let i = 0; i < 6; i++) nahodnaCast += znaky[Math.floor(Math.random() * znaky.length)];
+  return ucel === 'prodej' ? `ALESA-${new Date().getFullYear()}-${nahodnaCast}` : `ALESA-${nahodnaCast}`;
 }
 
 // Kódy slevových kupónů (Fáze: "slevové kupóny") — záměrně jiný prefix než
@@ -1939,8 +1943,9 @@ app.get('/api/admin/poukazy', async (req, res) => {
 // na konkrétní masáž (cenik_id) — pak se hodnota poukazu vezme přímo z ceníku,
 // místo aby se vždycky vynucovala první/vybraná peněžní varianta.
 app.post('/api/admin/poukazy', async (req, res) => {
-  const { poukaz_typ_id, cenik_id, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, zakoupeno_kde } = req.body || {};
+  const { poukaz_typ_id, cenik_id, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, zakoupeno_kde, ucel } = req.body || {};
   if (!poukaz_typ_id && !cenik_id) return res.status(400).json({ chyba: 'Vyberte variantu poukazu nebo konkrétní masáž.' });
+  const ucelPoukazu = ucel === 'dar' ? 'dar' : 'prodej'; // výchozí "prodej", "dar" jen na výslovnou volbu v adminu
   const client = await db.connect();
   try {
     await client.query('BEGIN');
@@ -1965,9 +1970,9 @@ app.post('/api/admin/poukazy', async (req, res) => {
     const klientkaId = await najitNeboVytvoritKlientku(client, { jmeno: kupujici_jmeno, telefon: kupujici_telefon, email: kupujici_email });
 
     const { rows: [poukaz] } = await client.query(
-      `INSERT INTO poukazy (kod, hodnota, zustatek, platnost_do, zakoupeno_kde, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, konkretni_masaz, stav, klientka_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'aktivni',$11) RETURNING *`,
-      [vygenerovatKod(), hodnota, hodnota, platnostDo.toISOString().slice(0, 10), zakoupeno_kde || 'osobne', kupujici_jmeno || null, kupujici_email || null, kupujici_telefon || null, pro_koho || null, konkretniMasaz, klientkaId]
+      `INSERT INTO poukazy (kod, hodnota, zustatek, platnost_do, zakoupeno_kde, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, konkretni_masaz, stav, klientka_id, ucel)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'aktivni',$11,$12) RETURNING *`,
+      [vygenerovatKod(ucelPoukazu), hodnota, hodnota, platnostDo.toISOString().slice(0, 10), zakoupeno_kde || 'osobne', kupujici_jmeno || null, kupujici_email || null, kupujici_telefon || null, pro_koho || null, konkretniMasaz, klientkaId, ucelPoukazu]
     );
     await client.query('COMMIT');
     res.json({ ok: true, poukaz });
@@ -2143,10 +2148,12 @@ app.patch('/api/admin/poukazy/zadosti/:id/stav', async (req, res) => {
       const platnostDo = new Date();
       platnostDo.setMonth(platnostDo.getMonth() + (zadost.platnost_mesicu || 12));
       const klientkaId = await najitNeboVytvoritKlientku(client, { jmeno: zadost.kupujici_jmeno, telefon: zadost.kupujici_telefon, email: zadost.kupujici_email });
+      // Žádost z webu je vždy skutečný prodej (nikdy dar/tombola — ty se
+      // zadávají jen přímo v administraci), proto natvrdo ucel='prodej'.
       const { rows: [poukaz] } = await client.query(
-        `INSERT INTO poukazy (kod, hodnota, zustatek, platnost_do, zakoupeno_kde, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, konkretni_masaz, zpusob_platby, stav, klientka_id)
-         VALUES ($1,$2,$3,$4,'web',$5,$6,$7,$8,$9,$10,'aktivni',$11) RETURNING *`,
-        [vygenerovatKod(), zadost.hodnota, zadost.hodnota, platnostDo.toISOString().slice(0, 10), zadost.kupujici_jmeno, zadost.kupujici_email, zadost.kupujici_telefon, zadost.pro_koho, zadost.konkretni_masaz, zadost.zpusob_platby, klientkaId]
+        `INSERT INTO poukazy (kod, hodnota, zustatek, platnost_do, zakoupeno_kde, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, konkretni_masaz, zpusob_platby, stav, klientka_id, ucel)
+         VALUES ($1,$2,$3,$4,'web',$5,$6,$7,$8,$9,$10,'aktivni',$11,'prodej') RETURNING *`,
+        [vygenerovatKod('prodej'), zadost.hodnota, zadost.hodnota, platnostDo.toISOString().slice(0, 10), zadost.kupujici_jmeno, zadost.kupujici_email, zadost.kupujici_telefon, zadost.pro_koho, zadost.konkretni_masaz, zadost.zpusob_platby, klientkaId]
       );
       await client.query('COMMIT');
       return res.json({ ok: true, poukaz });
@@ -2790,7 +2797,7 @@ app.get('/api/admin/ucetnictvi', async (req, res) => {
     const [rez, prod, pouk, plat, prodProd] = await Promise.all([
       db.query("SELECT cena, datum FROM rezervace WHERE stav IN ('potvrzena', 'dokoncena')"),
       db.query('SELECT cena, vytvoreno FROM prodeje'),
-      db.query('SELECT id, hodnota, vytvoreno FROM poukazy'),
+      db.query("SELECT id, hodnota, vytvoreno FROM poukazy WHERE ucel = 'prodej'"),
       db.query('SELECT id, rezervace_id, castka, typ, zpusob_platby, vytvoreno FROM platby'),
       db.query('SELECT id, nazev, mnozstvi, cena_celkem, vytvoreno FROM prodeje_produktu')
     ]);

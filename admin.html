@@ -720,6 +720,13 @@ tr:hover td{background:#fffaf5}
     <div class="form-group"><label>Zakoupeno</label>
       <select id="npKde"><option value="osobne">Osobně v salonu</option><option value="web">Přes web</option></select>
     </div>
+    <div class="form-group">
+      <label>Účel poukazu</label>
+      <select id="npUcel">
+        <option value="prodej">🛍️ K prodeji (zaplacený, počítá se do tržeb)</option>
+        <option value="dar">🎁 K daru (např. tombola — bez peněz, do tržeb se nepočítá)</option>
+      </select>
+    </div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal('modalNovyPoukaz')">Zrušit</button>
       <button class="btn btn-primary" onclick="vydatPoukaz()">Vydat poukaz</button>
@@ -1785,9 +1792,10 @@ async function loadPoukazy() {
     if (!seznam.length) { document.getElementById('poukazyTable').innerHTML = '<div class="empty">Zatím žádné vydané poukazy</div>'; }
     else {
       document.getElementById('poukazyTable').innerHTML = `
-        <table><thead><tr><th>Kód</th><th>Hodnota</th><th>Zůstatek</th><th>Platnost do</th><th>Kupující</th><th>Stav</th><th>Akce</th></tr></thead>
+        <table><thead><tr><th>Kód</th><th>Účel</th><th>Hodnota</th><th>Zůstatek</th><th>Platnost do</th><th>Kupující</th><th>Stav</th><th>Akce</th></tr></thead>
         <tbody>${seznam.map(p => { const stav = poukazZobrazenyStav(p); const badgeTrida = { aktivni: 'badge-ok', castecne_vyuzity: 'badge-cekajici', prosly: 'badge-zruseno', pouzity: 'badge-zruseno', zruseny: 'badge-zruseno' }[stav.klic] || ''; return `<tr>
           <td><code style="background:var(--cream);padding:2px 6px;border-radius:4px">${escapeHtml(p.kod)}</code></td>
+          <td>${p.ucel === 'dar' ? '<span class="badge badge-cekajici">🎁 Dar</span>' : '<span class="badge badge-ok">🛍️ Prodej</span>'}</td>
           <td><strong>${Number(p.hodnota).toLocaleString('cs-CZ')} Kč</strong>${p.konkretni_masaz ? `<br><small style="color:var(--text-light)">🧖 ${escapeHtml(p.konkretni_masaz)}</small>` : ''}</td>
           <td>${Number(p.zustatek).toLocaleString('cs-CZ')} Kč</td>
           <td>${new Date(p.platnost_do).toLocaleDateString('cs-CZ')}</td>
@@ -1899,10 +1907,11 @@ async function vydatPoukaz() {
   const kupujici_telefon = document.getElementById('npTelefon').value;
   const pro_koho = document.getElementById('npProKoho').value;
   const zakoupeno_kde = document.getElementById('npKde').value;
+  const ucel = document.getElementById('npUcel').value;
   const msg = document.getElementById('novyPoukazMsg');
   if (!vybrano) { msg.innerHTML = '<div class="error-msg">Vyberte variantu poukazu nebo konkrétní masáž.</div>'; return; }
   const [druh, id] = vybrano.split(':');
-  const body = { kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, zakoupeno_kde };
+  const body = { kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, zakoupeno_kde, ucel };
   if (druh === 'masaz') body.cenik_id = id; else body.poukaz_typ_id = id;
   try {
     const res = await adminFetch(API + '/admin/poukazy', { method: 'POST', body: JSON.stringify(body) });

@@ -163,6 +163,7 @@ create table if not exists poukazy (
   stav text not null default 'aktivni', -- aktivni | castecne_vyuzity | pouzity | zruseny
   -- "prošlý" se nikde neukládá jako stav — dopočítává se za běhu z platnost_do,
   -- ať je vždy aktuální bez nutnosti plánované úlohy, která by stav přepínala.
+  ucel text not null default 'prodej', -- prodej (skutečně zaplacený, počítá se do tržeb) | dar (např. tombola, žádné peníze — do tržeb se nepočítá)
   vytvoreno timestamptz not null default now(),
   klientka_id integer, -- Fáze 6D: vazba na klientky(id), nullable — poukaz bez kupujici_telefon
     -- zůstává klientka_id NULL (nelze bezpečně určit), kupujici_* pole ZŮSTÁVAJÍ jako snímek
