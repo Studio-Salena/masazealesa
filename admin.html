@@ -2651,8 +2651,16 @@ async function loadProdejna() {
           <div class="form-grid-2">
             <div class="form-group"><label>Cena (Kč)</label><input type="number" id="prodejCena"></div>
             <div class="form-group"><label>Platba</label>
-              <select id="prodejPlatba"><option value="hotove">Hotově</option><option value="qr">QR kód</option></select>
+              <select id="prodejPlatba" onchange="prepnoutPoukazPole()"><option value="hotove">Hotově</option><option value="qr">QR kód</option><option value="poukaz">Poukazem</option></select>
             </div>
+          </div>
+          <div class="form-group" id="prodejPoukazWrap" style="display:none">
+            <label>Kód poukazu</label>
+            <div style="display:flex;gap:8px">
+              <input type="text" id="prodejPoukazKod" placeholder="např. ALESA-2026-ABC123" style="flex:1">
+              <button type="button" class="btn btn-outline btn-sm" onclick="overitPoukazProdej()">Ověřit</button>
+            </div>
+            <div id="prodejPoukazInfo" style="font-size:0.82rem;margin-top:4px"></div>
           </div>
           <div class="form-group">
             <label>Kód slevového kupónu (nepovinné)</label>
@@ -2684,7 +2692,7 @@ async function loadProdejna() {
         <td>${new Date(p.vytvoreno).toLocaleDateString('cs-CZ')} ${new Date(p.vytvoreno).toLocaleTimeString('cs-CZ',{hour:'2-digit',minute:'2-digit'})}</td>
         <td>${escapeHtml(p.masaz)}</td>
         <td><strong>${Number(p.cena).toLocaleString('cs-CZ')} Kč</strong></td>
-        <td>${p.zpusob_platby === 'qr' ? 'QR kód' : 'Hotově'}</td>
+        <td>${ { qr: 'QR kód', poukaz: 'Poukazem' }[p.zpusob_platby] || 'Hotově' }</td>
         <td><button class="btn btn-red btn-sm" onclick="smazatProdej(${p.id})">🗑️</button></td>
       </tr>`).join('')}</tbody></table>`;
   } catch (e) { document.getElementById('prodejnaTable').innerHTML = '<div class="error-msg">Chyba načítání.</div>'; }
@@ -2697,6 +2705,37 @@ function otevritProdej(id, nazev, cena) {
   document.getElementById('prodejCena').value = cena;
   document.getElementById('prodejKupon').value = '';
   document.getElementById('prodejKuponInfo').innerHTML = '';
+  document.getElementById('prodejPlatba').value = 'hotove';
+  document.getElementById('prodejPoukazWrap').style.display = 'none';
+  document.getElementById('prodejPoukazKod').value = '';
+  document.getElementById('prodejPoukazInfo').innerHTML = '';
+}
+function prepnoutPoukazPole() {
+  const zobrazit = document.getElementById('prodejPlatba').value === 'poukaz';
+  document.getElementById('prodejPoukazWrap').style.display = zobrazit ? 'block' : 'none';
+  if (!zobrazit) { document.getElementById('prodejPoukazKod').value = ''; document.getElementById('prodejPoukazInfo').innerHTML = ''; }
+}
+// Jen náhled PŘED potvrzením prodeje (z už načteného posledniPoukazy, stejně
+// jako najitPoukaz() u "Uplatnit poukaz") — nic nemění, nespotřebovává.
+// Skutečné odečtení zůstatku dělá až potvrditProdej(), atomicky se zápisem
+// prodeje (viz POST /api/admin/prodejna).
+function overitPoukazProdej() {
+  const kod = document.getElementById('prodejPoukazKod').value.trim();
+  const info = document.getElementById('prodejPoukazInfo');
+  if (!kod) { info.innerHTML = ''; return; }
+  const p = posledniPoukazy.find(x => x.kod && x.kod.toLowerCase() === kod.toLowerCase());
+  if (!p) { info.innerHTML = '<span style="color:#c0392b">❌ Poukaz s tímto kódem nebyl nalezen.</span>'; return; }
+  const stav = poukazZobrazenyStav(p);
+  if (stav.klic !== 'aktivni' && stav.klic !== 'castecne_vyuzity') {
+    info.innerHTML = '<span style="color:#c0392b">❌ ' + stav.text + ' — nelze uplatnit.</span>';
+    return;
+  }
+  const cena = Number(document.getElementById('prodejCena').value) || 0;
+  if (cena > Number(p.zustatek)) {
+    info.innerHTML = '<span style="color:#c0392b">⚠️ Zůstatek na poukazu je jen ' + Number(p.zustatek).toLocaleString('cs-CZ') + ' Kč, nepokryje celou cenu ' + cena.toLocaleString('cs-CZ') + ' Kč — snižte cenu, nebo zbytek řešte jako samostatný prodej.</span>';
+    return;
+  }
+  info.innerHTML = '<span style="color:var(--tan)">✅ Platný poukaz — zůstatek ' + Number(p.zustatek).toLocaleString('cs-CZ') + ' Kč, pokryje celou cenu.</span>';
 }
 // Jen náhled slevy PŘED potvrzením prodeje — nic nemění na serveru, kupón se
 // nespotřebovává. Skutečné spotřebování dělá až potvrditProdej() níž, atomicky
@@ -2721,12 +2760,14 @@ async function potvrditProdej() {
   const cena = document.getElementById('prodejCena').value;
   const zpusob_platby = document.getElementById('prodejPlatba').value;
   const kupon_kod = document.getElementById('prodejKupon').value.trim();
+  const poukaz_kod = document.getElementById('prodejPoukazKod').value.trim();
   const msg = document.getElementById('prodejMsg');
   if (!cena) { msg.innerHTML = '<div class="error-msg">Zadejte cenu.</div>'; return; }
+  if (zpusob_platby === 'poukaz' && !poukaz_kod) { msg.innerHTML = '<div class="error-msg">Zadejte prosím kód poukazu.</div>'; return; }
   try {
-    const res = await adminFetch(API + '/admin/prodejna', { method: 'POST', body: JSON.stringify({ masaz, cena, zpusob_platby, kupon_kod: kupon_kod || undefined }) });
+    const res = await adminFetch(API + '/admin/prodejna', { method: 'POST', body: JSON.stringify({ masaz, cena, zpusob_platby, kupon_kod: kupon_kod || undefined, poukaz_kod: poukaz_kod || undefined }) });
     const data = await res.json();
-    if (res.ok) { document.getElementById('prodejForm').style.display = 'none'; loadProdejna(); loadKupony(); }
+    if (res.ok) { document.getElementById('prodejForm').style.display = 'none'; loadProdejna(); loadKupony(); if (zpusob_platby === 'poukaz') loadPoukazy(); }
     else msg.innerHTML = '<div class="error-msg">' + (data.chyba || 'Nepodařilo se zapsat prodej.') + '</div>';
   } catch (e) { msg.innerHTML = '<div class="error-msg">Nejde se připojit k serveru — backend ještě neběží nebo není doplněná jeho adresa v proměnné API.</div>'; }
 }

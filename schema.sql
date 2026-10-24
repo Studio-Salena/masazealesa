@@ -126,8 +126,11 @@ create table if not exists prodeje (
   id serial primary key,
   masaz text not null,
   cena numeric not null,
-  zpusob_platby text not null default 'hotove', -- hotove | qr
+  zpusob_platby text not null default 'hotove', -- hotove | qr | poukaz
   poznamka text,
+  poukaz_id integer, -- vyplněno jen při platbě poukazem; FK na poukazy(id) přidána
+    -- až níž (tabulka "poukazy" vzniká až POZDĚJI — stejný princip jako u
+    -- platby.poukaz_id, viz komentář u FK bloku níž)
   vytvoreno timestamptz not null default now()
 );
 
@@ -216,6 +219,8 @@ alter table rezervace add constraint rezervace_klientka_id_fkey
 alter table poukazy add constraint poukazy_klientka_id_fkey
   foreign key (klientka_id) references klientky(id) on delete set null;
 alter table platby add constraint platby_poukaz_id_fkey
+  foreign key (poukaz_id) references poukazy(id) on delete set null;
+alter table prodeje add constraint prodeje_poukaz_id_fkey
   foreign key (poukaz_id) references poukazy(id) on delete set null;
 
 -- Jednorázové slevové kupóny na konkrétní marketingovou akci (např. "100 Kč
