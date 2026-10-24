@@ -1871,7 +1871,7 @@ async function loadPoukazyZadosti() {
       <table><thead><tr><th>Datum</th><th>Hodnota</th><th>Kupující</th><th>Pro koho</th><th>Platba</th><th>Stav</th><th>Akce</th></tr></thead>
       <tbody>${seznam.map(z => `<tr>
         <td>${new Date(z.vytvoreno).toLocaleDateString('cs-CZ')}</td>
-        <td><strong>${Number(z.hodnota).toLocaleString('cs-CZ')} Kč</strong>${z.konkretni_masaz ? `<br><small style="color:var(--text-light)">🧖 ${escapeHtml(z.konkretni_masaz)}</small>` : ''}</td>
+        <td><strong>${Number(z.hodnota).toLocaleString('cs-CZ')} Kč</strong>${z.konkretni_masaz ? `<br><small style="color:var(--text-light)">🧖 ${escapeHtml(z.konkretni_masaz)}</small>` : `<br><small style="color:var(--text-light)">platnost ${z.platnost_mesicu || 12} měsíců</small>`}</td>
         <td>${escapeHtml(z.kupujici_jmeno)}<br><small>${escapeHtml(z.kupujici_email)}${z.kupujici_telefon ? ' | ' + escapeHtml(z.kupujici_telefon) : ''}</small></td>
         <td>${escapeHtml(z.pro_koho) || '—'}</td>
         <td>${platbaLabel[z.zpusob_platby] || '—'}</td>

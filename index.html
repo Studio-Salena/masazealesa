@@ -2324,16 +2324,17 @@ async function nacistTypyPoukazu() {
     var res = await fetch(API + '/poukazy/typy');
     var typy = await res.json();
     var html = typy.map(function(t) {
-      return '<button type="button" class="rez-slot-btn" onclick="pkVybratHodnotu(' + t.hodnota + ',this)">' + Number(t.hodnota).toLocaleString('cs-CZ') + ' Kč</button>';
+      return '<button type="button" class="rez-slot-btn" onclick="pkVybratHodnotu(' + t.id + ',' + t.hodnota + ',this)">' + Number(t.hodnota).toLocaleString('cs-CZ') + ' Kč</button>';
     }).join('');
     html += '<button type="button" class="rez-slot-btn" onclick="pkVybratKonkretni(this)">Konkrétní masáž</button>';
     wrap.innerHTML = html;
 
     var popis = document.getElementById('pkPopisVarianty');
     if (popis && typy.length) {
-      var castky = typy.map(function(t) { return Number(t.hodnota).toLocaleString('cs-CZ'); });
-      var castkyText = castky.length > 1 ? castky.slice(0, -1).join(', ') + ' nebo ' + castky[castky.length - 1] : castky[0];
-      popis.textContent = 'V hodnotě ' + castkyText + ' Kč, případně na konkrétní masáž. Platnost ' + typy[0].platnost_mesicu + ' měsíců od zakoupení. Zaplatíte QR kódem, převodem nebo při osobním převzetí.';
+      var castkyText = typy.map(function(t) {
+        return Number(t.hodnota).toLocaleString('cs-CZ') + ' Kč (platnost ' + t.platnost_mesicu + ' měsíců)';
+      }).join(', ');
+      popis.textContent = 'Vyberte hodnotu: ' + castkyText + ', případně konkrétní masáž (platnost 12 měsíců). Zaplatíte při osobním převzetí v salonu.';
     }
   } catch (e) {
     wrap.innerHTML = '<button type="button" class="rez-slot-btn" onclick="pkVybratKonkretni(this)">Konkrétní masáž</button>';
@@ -2614,6 +2615,7 @@ document.addEventListener('DOMContentLoaded', vykreslitUkazkuPoukazu);
 
 // ── ŽÁDOST O POUKAZ ──
 var pkVybranaHodnota = null;
+var pkVybranyTypId = null; // id vybrané varianty poukazy_typy — podle ní se při schválení počítá platnost
 var pkVybranyKonkretniMasaz = null;
 var pkVybranyZpusobPlatby = null;
 var PK_UCET_IBAN = 'CZ6708000000003181537133';
@@ -2623,8 +2625,9 @@ function pkOznacitTlacitko(skupinaId, btn) {
   document.querySelectorAll('#' + skupinaId + ' .rez-slot-btn').forEach(function(b) { b.classList.remove('selected'); });
   if (btn) btn.classList.add('selected');
 }
-function pkVybratHodnotu(hodnota, btn) {
+function pkVybratHodnotu(typId, hodnota, btn) {
   pkVybranaHodnota = hodnota;
+  pkVybranyTypId = typId;
   pkVybranyKonkretniMasaz = null;
   pkOznacitTlacitko('pkHodnotaSlots', btn);
   document.getElementById('pkMasazWrap').style.display = 'none';
@@ -2632,6 +2635,7 @@ function pkVybratHodnotu(hodnota, btn) {
 }
 function pkVybratKonkretni(btn) {
   pkVybranaHodnota = null;
+  pkVybranyTypId = null;
   pkVybranyKonkretniMasaz = null;
   pkOznacitTlacitko('pkHodnotaSlots', btn);
   document.getElementById('pkMasazWrap').style.display = 'block';
@@ -2641,6 +2645,7 @@ function pkVybratKonkretni(btn) {
 function pkMasazZmenena() {
   var vybraneId = document.getElementById('pkMasazSelect').value;
   var masaz = cenikData.filter(function(c) { return String(c.id) === vybraneId; })[0];
+  pkVybranyTypId = null;
   if (masaz) {
     pkVybranaHodnota = masaz.cena;
     pkVybranyKonkretniMasaz = masaz.skupina + ' – ' + masaz.varianta;
@@ -2719,7 +2724,7 @@ async function pkOdeslat() {
     var res = await fetch(API + '/poukazy/zadost', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ hodnota: pkVybranaHodnota, kupujici_jmeno: jmeno, kupujici_email: email, kupujici_telefon: telefon, pro_koho: proKoho, vzkaz: vzkaz, konkretni_masaz: pkVybranyKonkretniMasaz, zpusob_platby: pkVybranyZpusobPlatby })
+      body: JSON.stringify({ hodnota: pkVybranaHodnota, poukaz_typ_id: pkVybranyTypId, kupujici_jmeno: jmeno, kupujici_email: email, kupujici_telefon: telefon, pro_koho: proKoho, vzkaz: vzkaz, konkretni_masaz: pkVybranyKonkretniMasaz, zpusob_platby: pkVybranyZpusobPlatby })
     });
     var vysledek = await res.json();
     if (!res.ok) { zprava.textContent = vysledek.chyba || 'Žádost se nepodařilo odeslat.'; zprava.className = 'form-msg err'; return; }
@@ -2734,6 +2739,7 @@ async function pkOdeslat() {
     pkOznacitTlacitko('pkHodnotaSlots', null);
     pkOznacitTlacitko('pkPlatbaSlots', null);
     pkVybranaHodnota = null;
+    pkVybranyTypId = null;
     pkVybranyKonkretniMasaz = null;
     pkVybranyZpusobPlatby = null;
     pkRenderPlatbaBox();

@@ -242,6 +242,7 @@ create table if not exists poukazy_zadosti (
   vzkaz text,
   konkretni_masaz text, -- nepovinné: pokud si nezvolili částku, ale konkrétní masáž
   zpusob_platby text, -- qr | prevodem | pri_prevzeti
+  platnost_mesicu integer, -- snímek z poukazy_typy.platnost_mesicu v době žádosti; NULL = konkrétní masáž (při schválení se použije 12)
   stav text not null default 'nova', -- nova | vyrizena | zamitnuta
   vytvoreno timestamptz not null default now()
 );

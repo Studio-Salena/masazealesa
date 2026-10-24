@@ -1273,14 +1273,26 @@ app.post('/api/rezervace', async (req, res) => {
 
 // Žádost o dárkový poukaz z webového formuláře
 app.post('/api/poukazy/zadost', async (req, res) => {
-  const { hodnota, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, vzkaz, konkretni_masaz, zpusob_platby } = req.body || {};
+  const { hodnota, poukaz_typ_id, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, vzkaz, konkretni_masaz, zpusob_platby } = req.body || {};
   if (hodnota === undefined || hodnota === null || hodnota === '' || !kupujici_jmeno || !kupujici_email) {
     return res.status(400).json({ chyba: 'Vyplňte prosím hodnotu poukazu, jméno a e-mail.' });
   }
   // hodnota zadosti se při schválení stává i skutečným zůstatkem reálného
   // poukazu (viz PATCH .../zadosti/:id/stav) — finite/kladné/omezené číslo
   // je tu přímá ochrana finanční integrity, ne jen vstupní hygiena (8E.1/8E.2).
-  const hodnotaCislo = Number(hodnota);
+  let hodnotaCislo = Number(hodnota);
+  // Platnost poukazu se má řídit vybranou variantou (poukazy_typy), ne napevno
+  // danými 12 měsíci — proto se tu podle poukaz_typ_id dohledá a uloží jako
+  // snímek (platnost_mesicu), stejně jako "hodnota" je snímek, ne živý odkaz.
+  // Pokud je typ_id zadané, hodnota z něj má přednost před tím, co poslal klient
+  // (ochrana proti neshodě hodnota/varianta).
+  let platnostMesicu = null;
+  if (poukaz_typ_id !== undefined && poukaz_typ_id !== null && poukaz_typ_id !== '') {
+    const { rows: [typ] } = await db.query('SELECT hodnota, platnost_mesicu FROM poukazy_typy WHERE id = $1', [poukaz_typ_id]);
+    if (!typ) return res.status(404).json({ chyba: 'Tato varianta poukazu nebyla nalezena.' });
+    hodnotaCislo = Number(typ.hodnota);
+    platnostMesicu = typ.platnost_mesicu;
+  }
   if (!Number.isFinite(hodnotaCislo) || hodnotaCislo <= 0 || hodnotaCislo > 10000) {
     return res.status(400).json({ chyba: 'Zadejte prosím platnou hodnotu poukazu.' });
   }
@@ -1312,9 +1324,9 @@ app.post('/api/poukazy/zadost', async (req, res) => {
   }
   try {
     const { rows: [zadost] } = await db.query(
-      `INSERT INTO poukazy_zadosti (hodnota, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, vzkaz, konkretni_masaz, zpusob_platby, stav)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'nova') RETURNING *`,
-      [hodnotaCislo, kupujici_jmeno, kupujici_email, kupujici_telefon || null, pro_koho || null, vzkaz || null, konkretni_masaz || null, zpusob_platby]
+      `INSERT INTO poukazy_zadosti (hodnota, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, vzkaz, konkretni_masaz, zpusob_platby, platnost_mesicu, stav)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'nova') RETURNING *`,
+      [hodnotaCislo, kupujici_jmeno, kupujici_email, kupujici_telefon || null, pro_koho || null, vzkaz || null, konkretni_masaz || null, zpusob_platby, platnostMesicu]
     );
     res.json({ ok: true, zadost });
 
@@ -1326,7 +1338,7 @@ app.post('/api/poukazy/zadost', async (req, res) => {
           <strong>Jméno:</strong> ${kupujici_jmeno}<br>
           <strong>E-mail:</strong> ${kupujici_email}<br>
           <strong>Telefon:</strong> ${kupujici_telefon || '—'}<br>
-          ${konkretni_masaz ? '<strong>Konkrétní masáž:</strong> ' + konkretni_masaz + '<br>' : '<strong>Hodnota:</strong> ' + hodnotaCislo + ' Kč<br>'}
+          ${konkretni_masaz ? '<strong>Konkrétní masáž:</strong> ' + konkretni_masaz + '<br>' : '<strong>Hodnota:</strong> ' + hodnotaCislo + ' Kč (platnost ' + (platnostMesicu || 12) + ' měsíců)<br>'}
           <strong>Pro koho:</strong> ${pro_koho || '—'}<br>
           <strong>Vzkaz:</strong> ${vzkaz || '—'}<br>
           <strong>Způsob platby:</strong> ${zpusob_platby}
@@ -2124,8 +2136,12 @@ app.patch('/api/admin/poukazy/zadosti/:id/stav', async (req, res) => {
     await client.query('UPDATE poukazy_zadosti SET stav = $1 WHERE id = $2', [stav, req.params.id]);
 
     if (stav === 'vyrizena') {
+      // platnost_mesicu je snímek z poukazy_typy v době žádosti (viz POST
+      // /api/poukazy/zadost) — NULL jen u žádostí na konkrétní masáž (nebo u
+      // starších žádostí z doby před touto opravou), kde platí stejných 12
+      // měsíců jako u poukazu na konkrétní masáž vydaného přímo v administraci.
       const platnostDo = new Date();
-      platnostDo.setFullYear(platnostDo.getFullYear() + 1);
+      platnostDo.setMonth(platnostDo.getMonth() + (zadost.platnost_mesicu || 12));
       const klientkaId = await najitNeboVytvoritKlientku(client, { jmeno: zadost.kupujici_jmeno, telefon: zadost.kupujici_telefon, email: zadost.kupujici_email });
       const { rows: [poukaz] } = await client.query(
         `INSERT INTO poukazy (kod, hodnota, zustatek, platnost_do, zakoupeno_kde, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, konkretni_masaz, zpusob_platby, stav, klientka_id)
