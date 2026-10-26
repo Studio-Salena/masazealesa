@@ -1709,13 +1709,30 @@ app.patch('/api/admin/rezervace/:id/platba', async (req, res) => {
       return res.status(400).json({ chyba: `Nelze vrátit víc, než je uhrazeno (uhrazeno ${aktualniUhrazeno} Kč).` });
     }
 
+    // Vratka "jako poukaz" nevyplácí žádnou hotovost — místo toho vznikne nový
+    // dárkový poukaz na vrácenou částku, který si klientka může kdykoliv
+    // uplatnit. ucel='vratka' (ne 'prodej'/'dar'): nejde o novou tržbu ani dar,
+    // takže se nepočítá ani do prodeje poukazů, ani do hotovostních vratek v
+    // účetnictví (viz GET /api/admin/ucetnictvi).
+    let novyPoukaz = null;
+    if (druh === 'vratka' && zpusob_platby === 'poukaz') {
+      const platnostDo = new Date();
+      platnostDo.setMonth(platnostDo.getMonth() + 12);
+      const { rows: [poukaz] } = await client.query(
+        `INSERT INTO poukazy (kod, hodnota, zustatek, platnost_do, zakoupeno_kde, kupujici_jmeno, kupujici_email, kupujici_telefon, stav, klientka_id, ucel)
+         VALUES ($1,$2,$2,$3,'vratka',$4,$5,$6,'aktivni',$7,'vratka') RETURNING *`,
+        [vygenerovatKod('vratka'), castkaNum, platnostDo.toISOString().slice(0, 10), r.jmeno, r.email, r.telefon, r.klientka_id]
+      );
+      novyPoukaz = poukaz;
+    }
+
     await client.query(
       `INSERT INTO platby (rezervace_id, castka, typ, zpusob_platby) VALUES ($1,$2,$3,$4)`,
       [req.params.id, druh === 'vratka' ? -castkaNum : castkaNum, druh, zpusob_platby]
     );
     const aktualizovana = await prepocitatSouhrnRezervace(client, req.params.id);
     await client.query('COMMIT');
-    res.json({ ok: true, rezervace: aktualizovana });
+    res.json({ ok: true, rezervace: aktualizovana, poukaz: novyPoukaz });
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch {}
     res.status(500).json({ chyba: e.message });
@@ -2063,6 +2080,12 @@ app.post('/api/admin/poukazy/:id/uplatnit', async (req, res) => {
       `UPDATE poukazy SET zustatek = $1, stav = $2, uzavreno_kdy = CASE WHEN $2 = 'pouzity' THEN now() ELSE NULL END WHERE id = $3 RETURNING *`,
       [novyZustatek, novyStav, req.params.id]
     );
+    // Historie čerpání (viz poukazy_historie v schema.sql) — zapisuje se VŽDY,
+    // i bez návázání na rezervaci, ať je tahle částka v budoucnu dohledatelná.
+    await client.query(
+      `INSERT INTO poukazy_historie (poukaz_id, castka, rezervace_id) VALUES ($1,$2,$3)`,
+      [req.params.id, castka, rezervaceId]
+    );
     await client.query('COMMIT');
     res.json({ ok: true, poukaz: aktualizovany, rezervace: aktualizovanaRezervace });
   } catch (e) {
@@ -2071,6 +2094,25 @@ app.post('/api/admin/poukazy/:id/uplatnit', async (req, res) => {
   } finally {
     client.release();
   }
+});
+
+// Historie čerpání konkrétního poukazu (jen pro čtení) — pro zobrazení v
+// adminu. Spojuje poukazy_historie s rezervací/prodejem, ke kterému čerpání
+// patřilo (pokud k nějakému patřilo — viz komentář u poukazy_historie výš).
+app.get('/api/admin/poukazy/:id/historie', async (req, res) => {
+  try {
+    const { rows } = await db.query(
+      `SELECT h.*, r.jmeno AS rezervace_jmeno, r.datum AS rezervace_datum, r.masaz AS rezervace_masaz,
+              p.masaz AS prodej_masaz
+       FROM poukazy_historie h
+       LEFT JOIN rezervace r ON r.id = h.rezervace_id
+       LEFT JOIN prodeje p ON p.id = h.prodej_id
+       WHERE h.poukaz_id = $1
+       ORDER BY h.vytvoreno ASC`,
+      [req.params.id]
+    );
+    res.json(rows);
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
 // Smazání jen bez jakékoliv stopy použití (jinak by se nenávratně ztratila
@@ -2567,6 +2609,12 @@ app.post('/api/admin/prodejna', async (req, res) => {
       'INSERT INTO prodeje (masaz, cena, zpusob_platby, poznamka, poukaz_id) VALUES ($1,$2,$3,$4,$5) RETURNING *',
       [masaz, cenaNum, zpusob_platby || 'hotove', poznamka || null, poukazId]
     );
+    if (poukazId) {
+      await client.query(
+        `INSERT INTO poukazy_historie (poukaz_id, castka, prodej_id) VALUES ($1,$2,$3)`,
+        [poukazId, cenaNum, prodej.id]
+      );
+    }
     await client.query('COMMIT');
     res.json({ ok: true, prodej });
   } catch (e) {
@@ -2857,8 +2905,11 @@ app.get('/api/admin/ucetnictvi', async (req, res) => {
       .map(p => ({ ...p, den: p.vytvoreno.toISOString().slice(0, 10) }))
       .filter(p => vObdobi(p.den));
 
-    // D) Vratky
-    const vratkyFiltr = platbyFiltr.filter(p => p.typ === 'vratka');
+    // D) Vratky — bez vratek "jako poukaz" (zpusob_platby='poukaz'): tam
+    // nejde žádná hotovost z pokladny, místo toho vznikl nový poukaz (viz
+    // PATCH /api/admin/rezervace/:id/platba) se svým vlastním ucel='vratka',
+    // který se nepočítá ani do prodejPoukazu výš.
+    const vratkyFiltr = platbyFiltr.filter(p => p.typ === 'vratka' && p.zpusob_platby !== 'poukaz');
 
     // E) Prodej produktů
     const produktyFiltr = produktyPolozky.filter(p => vObdobi(p.datum));

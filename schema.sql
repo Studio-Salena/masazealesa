@@ -156,7 +156,7 @@ create table if not exists poukazy (
   hodnota numeric not null,
   zustatek numeric not null,
   platnost_do date not null,
-  zakoupeno_kde text not null default 'web', -- web | osobne
+  zakoupeno_kde text not null default 'web', -- web | osobne | vratka (vznikl jako vratka platby za rezervaci)
   kupujici_jmeno text,
   kupujici_email text,
   kupujici_telefon text,
@@ -166,7 +166,7 @@ create table if not exists poukazy (
   stav text not null default 'aktivni', -- aktivni | castecne_vyuzity | pouzity | zruseny
   -- "prošlý" se nikde neukládá jako stav — dopočítává se za běhu z platnost_do,
   -- ať je vždy aktuální bez nutnosti plánované úlohy, která by stav přepínala.
-  ucel text not null default 'prodej', -- prodej (skutečně zaplacený, počítá se do tržeb) | dar (např. tombola, žádné peníze — do tržeb se nepočítá)
+  ucel text not null default 'prodej', -- prodej (skutečně zaplacený, počítá se do tržeb) | dar (např. tombola, žádné peníze — do tržeb se nepočítá) | vratka (vznikl jako vratka platby za rezervaci — taky se do tržeb nepočítá)
   vytvoreno timestamptz not null default now(),
   klientka_id integer, -- Fáze 6D: vazba na klientky(id), nullable — poukaz bez kupujici_telefon
     -- zůstává klientka_id NULL (nelze bezpečně určit), kupujici_* pole ZŮSTÁVAJÍ jako snímek
@@ -222,6 +222,21 @@ alter table platby add constraint platby_poukaz_id_fkey
   foreign key (poukaz_id) references poukazy(id) on delete set null;
 alter table prodeje add constraint prodeje_poukaz_id_fkey
   foreign key (poukaz_id) references poukazy(id) on delete set null;
+
+-- Audit stopa čerpání dárkových poukazů (append-only) — zaznamenává KAŽDÉ
+-- snížení zůstatku, ať je navázané na rezervaci, prodej na místě, nebo žádné
+-- z obou (dřív se tenhle poslední případ nikam nezapisoval — poukaz šel
+-- uplatnit bez návázání na cokoliv a jediná stopa byl nižší zůstatek, bez
+-- data/částky/důvodu). "poukazy" i "rezervace"/"prodeje" už existují výš,
+-- takže FK jde rovnou inline, bez odkladu přes ALTER TABLE.
+create table if not exists poukazy_historie (
+  id serial primary key,
+  poukaz_id integer not null references poukazy(id) on delete cascade,
+  castka numeric not null, -- vždy kladná = čerpaná částka
+  rezervace_id integer references rezervace(id) on delete set null,
+  prodej_id integer references prodeje(id) on delete set null,
+  vytvoreno timestamptz not null default now()
+);
 
 -- Jednorázové slevové kupóny na konkrétní marketingovou akci (např. "100 Kč
 -- sleva na první masáž") — záměrně ODDĚLENO od dárkových poukazů (jiný účel:
