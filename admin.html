@@ -2940,9 +2940,10 @@ async function potvrditProdej() {
   } catch (e) { msg.innerHTML = '<div class="error-msg">Nejde se připojit k serveru — backend ještě neběží nebo není doplněná jeho adresa v proměnné API.</div>'; }
 }
 async function smazatProdej(id) {
-  if (!confirm('Smazat tento záznam o prodeji?')) return;
+  if (!confirm('Smazat tento záznam o prodeji? Pokud byl zaplacen (i částečně) poukazem, vrátí se mu zůstatek.')) return;
   await adminFetch(API + '/admin/prodejna/' + id, { method: 'DELETE' });
   loadProdejna();
+  loadPoukazy();
 }
 
 // ── PRODUKTY A SKLAD (Fáze 9E) ──────────────────────────────────────────

@@ -2651,11 +2651,38 @@ app.post('/api/admin/prodejna', async (req, res) => {
   }
 });
 
+// Smazání prodeje v jedné transakci s navrácením zůstatku na poukaz (pokud byl
+// prodej zaplacen nebo částečně zaplacen poukazem) — jinak by smazáním omylem
+// zapsaného prodeje ty peníze z poukazu beze stopy zmizely, i když se služba
+// fakticky neuskutečnila. Zrušený poukaz (stav='zruseny') zůstává zrušený —
+// navrácení zůstatku ho samo o sobě znovu neotevírá.
 app.delete('/api/admin/prodejna/:id', async (req, res) => {
+  const client = await db.connect();
   try {
-    await db.query('DELETE FROM prodeje WHERE id = $1', [req.params.id]);
+    await client.query('BEGIN');
+    const { rows: [prodej] } = await client.query('SELECT * FROM prodeje WHERE id = $1 FOR UPDATE', [req.params.id]);
+    if (!prodej) { await client.query('ROLLBACK'); return res.status(404).json({ chyba: 'Prodej nebyl nalezen.' }); }
+    if (prodej.poukaz_id && Number(prodej.poukaz_castka) > 0) {
+      const { rows: [poukaz] } = await client.query('SELECT * FROM poukazy WHERE id = $1 FOR UPDATE', [prodej.poukaz_id]);
+      if (poukaz) {
+        const novyZustatek = Math.min(Number(poukaz.hodnota), Number(poukaz.zustatek) + Number(prodej.poukaz_castka));
+        const novyStav = poukaz.stav === 'zruseny' ? 'zruseny' : (novyZustatek >= Number(poukaz.hodnota) ? 'aktivni' : 'castecne_vyuzity');
+        await client.query(
+          `UPDATE poukazy SET zustatek = $1, stav = $2, uzavreno_kdy = CASE WHEN $2 = 'zruseny' THEN uzavreno_kdy ELSE NULL END WHERE id = $3`,
+          [novyZustatek, novyStav, poukaz.id]
+        );
+      }
+      await client.query('DELETE FROM poukazy_historie WHERE prodej_id = $1', [req.params.id]);
+    }
+    await client.query('DELETE FROM prodeje WHERE id = $1', [req.params.id]);
+    await client.query('COMMIT');
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ chyba: e.message }); }
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch {}
+    res.status(500).json({ chyba: e.message });
+  } finally {
+    client.release();
+  }
 });
 
 // -- Slevové kupóny (jednorázové, na konkrétní marketingovou akci) --
