@@ -2600,22 +2600,22 @@ app.post('/api/admin/prodejna', async (req, res) => {
     // Platba dárkovým poukazem — stejná pravidla jako POST .../poukazy/:id/uplatnit
     // (nalezen, nezrušený, nevyčerpaný, neprošlý), jen bez volitelného navázání
     // na rezervaci (žádná tu není) a bez zápisu do "platby" (ten deník je svázán
-    // jen s rezervacemi — viz FK rezervace_id). Poukaz musí pokrýt celou cenu;
-    // pro nižší zůstatek stačí v ceně prodeje zadat jen tu částku.
+    // jen s rezervacemi — viz FK rezervace_id). Poukaz nemusí pokrýt celou cenu
+    // (hodnota poukazu bývá nižší než cena masáže) — strhne se z něj nejvýš
+    // jeho zůstatek, zbytek ceny platí vybraný zpusob_platby (hotove/qr).
     let poukazId = null;
-    if (zpusob_platby === 'poukaz') {
-      if (!poukaz_kod || !poukaz_kod.trim()) { await client.query('ROLLBACK'); return res.status(400).json({ chyba: 'Zadejte prosím kód poukazu.' }); }
+    let poukazCastka = null;
+    let zbytek = cenaNum;
+    if (poukaz_kod && poukaz_kod.trim()) {
       const { rows: [poukaz] } = await client.query('SELECT * FROM poukazy WHERE upper(kod) = upper($1) FOR UPDATE', [poukaz_kod.trim()]);
       if (!poukaz) { await client.query('ROLLBACK'); return res.status(404).json({ chyba: 'Poukaz s tímto kódem nebyl nalezen.' }); }
       if (poukaz.stav === 'zruseny') { await client.query('ROLLBACK'); return res.status(400).json({ chyba: 'Poukaz je zrušený, nelze ho uplatnit.' }); }
       if (poukaz.stav === 'pouzity' || Number(poukaz.zustatek) <= 0) { await client.query('ROLLBACK'); return res.status(400).json({ chyba: 'Poukaz je už plně vyčerpaný.' }); }
       const dnesIso = new Date().toISOString().slice(0, 10);
       if (poukaz.platnost_do < dnesIso) { await client.query('ROLLBACK'); return res.status(400).json({ chyba: `Poukaz je prošlý (platnost do ${formatDatumCz(poukaz.platnost_do)}).` }); }
-      if (cenaNum > Number(poukaz.zustatek)) {
-        await client.query('ROLLBACK');
-        return res.status(400).json({ chyba: `Zůstatek na poukazu (${poukaz.zustatek} Kč) nepokryje celou cenu — snižte prosím cenu na zůstatek, nebo doplatek zadejte jako samostatný prodej.` });
-      }
-      const novyZustatek = Number(poukaz.zustatek) - cenaNum;
+      poukazCastka = Math.min(cenaNum, Number(poukaz.zustatek));
+      zbytek = cenaNum - poukazCastka;
+      const novyZustatek = Number(poukaz.zustatek) - poukazCastka;
       const novyStav = novyZustatek <= 0 ? 'pouzity' : 'castecne_vyuzity';
       await client.query(
         `UPDATE poukazy SET zustatek = $1, stav = $2, uzavreno_kdy = CASE WHEN $2 = 'pouzity' THEN now() ELSE NULL END WHERE id = $3`,
@@ -2623,15 +2623,22 @@ app.post('/api/admin/prodejna', async (req, res) => {
       );
       poukazId = poukaz.id;
     }
+    // Zbytek ceny (po odečtení poukazu, pokud byl zadaný) musí mít platný
+    // způsob platby — bez poukazu je tohle prostě celá cena jako dřív.
+    if (zbytek > 0 && poukazId && !['hotove', 'qr'].includes(zpusob_platby)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ chyba: 'Vyberte prosím způsob platby pro zbytek ceny.' });
+    }
+    const zpusobPlatbyFinal = poukazId && zbytek <= 0 ? 'poukaz' : (zpusob_platby || 'hotove');
 
     const { rows: [prodej] } = await client.query(
-      'INSERT INTO prodeje (masaz, cena, zpusob_platby, poznamka, poukaz_id) VALUES ($1,$2,$3,$4,$5) RETURNING *',
-      [masaz, cenaNum, zpusob_platby || 'hotove', poznamka || null, poukazId]
+      'INSERT INTO prodeje (masaz, cena, zpusob_platby, poznamka, poukaz_id, poukaz_castka) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [masaz, cenaNum, zpusobPlatbyFinal, poznamka || null, poukazId, poukazCastka]
     );
     if (poukazId) {
       await client.query(
         `INSERT INTO poukazy_historie (poukaz_id, castka, prodej_id) VALUES ($1,$2,$3)`,
-        [poukazId, cenaNum, prodej.id]
+        [poukazId, poukazCastka, prodej.id]
       );
     }
     await client.query('COMMIT');
@@ -2892,13 +2899,22 @@ app.get('/api/admin/ucetnictvi', async (req, res) => {
 
     const [rez, prod, pouk, plat, prodProd] = await Promise.all([
       db.query("SELECT cena, datum FROM rezervace WHERE stav IN ('potvrzena', 'dokoncena')"),
-      db.query('SELECT cena, zpusob_platby, vytvoreno FROM prodeje'),
+      db.query('SELECT cena, zpusob_platby, poukaz_castka, vytvoreno FROM prodeje'),
       db.query("SELECT id, hodnota, vytvoreno FROM poukazy WHERE ucel = 'prodej'"),
       db.query('SELECT id, rezervace_id, castka, typ, zpusob_platby, vytvoreno FROM platby'),
       db.query('SELECT id, nazev, mnozstvi, cena_celkem, vytvoreno FROM prodeje_produktu')
     ]);
 
-    const prodejnaPolozky = prod.rows.map(p => ({ castka: Number(p.cena) || 0, datum: p.vytvoreno.toISOString().slice(0, 10), zpusob_platby: p.zpusob_platby }));
+    const prodejnaPolozky = prod.rows.map(p => ({
+      castka: Number(p.cena) || 0,
+      // Jen skutečně přijatá hotovost/QR — část kryta poukazem (viz
+      // poukaz_castka) byla jako hotovost přijata už dřív, při prodeji
+      // samotného poukazu (stejný princip jako u vyloučení zpusob_platby
+      // 'poukaz' z deníku plateb níž).
+      hotovostCastka: (Number(p.cena) || 0) - (Number(p.poukaz_castka) || 0),
+      datum: p.vytvoreno.toISOString().slice(0, 10),
+      zpusob_platby: p.zpusob_platby
+    }));
     const produktyPolozky = prodProd.rows.map(p => ({ ...p, castka: Number(p.cena_celkem) || 0, datum: p.vytvoreno.toISOString().slice(0, 10) }));
 
     // A) Tržby za služby (rezervace podle data masáže + prodejna podle data prodeje)
@@ -2915,7 +2931,7 @@ app.get('/api/admin/ucetnictvi', async (req, res) => {
       .filter(p => vObdobi(p.den));
     const prijatePlatbyPolozky = [
       ...platbyFiltr.filter(p => p.zpusob_platby !== 'poukaz').map(p => ({ castka: Number(p.castka), datum: p.den })),
-      ...prodejnaPolozky.filter(p => vObdobi(p.datum) && p.zpusob_platby !== 'poukaz'),
+      ...prodejnaPolozky.filter(p => vObdobi(p.datum) && p.zpusob_platby !== 'poukaz').map(p => ({ castka: p.hotovostCastka, datum: p.datum })),
       ...produktyPolozky.filter(p => vObdobi(p.datum))
     ];
 

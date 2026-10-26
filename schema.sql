@@ -131,6 +131,8 @@ create table if not exists prodeje (
   poukaz_id integer, -- vyplněno jen při platbě poukazem; FK na poukazy(id) přidána
     -- až níž (tabulka "poukazy" vzniká až POZDĚJI — stejný princip jako u
     -- platby.poukaz_id, viz komentář u FK bloku níž)
+  poukaz_castka numeric, -- kolik z "cena" bylo kryto poukazem (může být míň než
+    -- cena — poukaz nemusí pokrýt celou částku, zbytek platí zpusob_platby)
   vytvoreno timestamptz not null default now()
 );
 
