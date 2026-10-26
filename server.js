@@ -748,6 +748,27 @@ function vygenerovatKod(ucel) {
   return ucel === 'prodej' ? `ALESA-${new Date().getFullYear()}-${nahodnaCast}` : `ALESA-${nahodnaCast}`;
 }
 
+// Jediné místo, kde vzniká nový řádek v "poukazy" — ruční vydání v adminu,
+// schválení žádosti z webu i vratka platby za rezervaci (ucel='vratka') jím
+// všechny tři procházejí. Dřív každé z míst samo počítalo platnost_do a
+// skládalo INSERT, což je přesně to, co způsobilo bug, kdy webové žádosti
+// měly platnost napevno na 12 měsíců bez ohledu na vybranou variantu (viz
+// platnost_mesicu u poukazy_zadosti) — další podobná nesrovnalost by se teď
+// musela objevit tady, na jednom místě, ne nezávisle v každé kopii zvlášť.
+async function vytvoritPoukaz(client, {
+  hodnota, platnostMesicu, zakoupenoKde, kupujiciJmeno, kupujiciEmail, kupujiciTelefon,
+  proKoho = null, konkretniMasaz = null, zpusobPlatby = null, klientkaId = null, ucel
+}) {
+  const platnostDo = new Date();
+  platnostDo.setMonth(platnostDo.getMonth() + platnostMesicu);
+  const { rows: [poukaz] } = await client.query(
+    `INSERT INTO poukazy (kod, hodnota, zustatek, platnost_do, zakoupeno_kde, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, konkretni_masaz, zpusob_platby, stav, klientka_id, ucel)
+     VALUES ($1,$2,$2,$3,$4,$5,$6,$7,$8,$9,$10,'aktivni',$11,$12) RETURNING *`,
+    [vygenerovatKod(ucel), hodnota, platnostDo.toISOString().slice(0, 10), zakoupenoKde, kupujiciJmeno || null, kupujiciEmail || null, kupujiciTelefon || null, proKoho, konkretniMasaz, zpusobPlatby, klientkaId, ucel]
+  );
+  return poukaz;
+}
+
 // Kódy slevových kupónů (Fáze: "slevové kupóny") — záměrně jiný prefix než
 // dárkové poukazy (ALESA-...), ať jde na první pohled poznat, o co jde.
 function vygenerovatKuponKod() {
@@ -1716,14 +1737,11 @@ app.patch('/api/admin/rezervace/:id/platba', async (req, res) => {
     // účetnictví (viz GET /api/admin/ucetnictvi).
     let novyPoukaz = null;
     if (druh === 'vratka' && zpusob_platby === 'poukaz') {
-      const platnostDo = new Date();
-      platnostDo.setMonth(platnostDo.getMonth() + 12);
-      const { rows: [poukaz] } = await client.query(
-        `INSERT INTO poukazy (kod, hodnota, zustatek, platnost_do, zakoupeno_kde, kupujici_jmeno, kupujici_email, kupujici_telefon, stav, klientka_id, ucel)
-         VALUES ($1,$2,$2,$3,'vratka',$4,$5,$6,'aktivni',$7,'vratka') RETURNING *`,
-        [vygenerovatKod('vratka'), castkaNum, platnostDo.toISOString().slice(0, 10), r.jmeno, r.email, r.telefon, r.klientka_id]
-      );
-      novyPoukaz = poukaz;
+      novyPoukaz = await vytvoritPoukaz(client, {
+        hodnota: castkaNum, platnostMesicu: 12, zakoupenoKde: 'vratka',
+        kupujiciJmeno: r.jmeno, kupujiciEmail: r.email, kupujiciTelefon: r.telefon,
+        klientkaId: r.klientka_id, ucel: 'vratka'
+      });
     }
 
     await client.query(
@@ -1979,18 +1997,15 @@ app.post('/api/admin/poukazy', async (req, res) => {
       hodnota = typ.hodnota;
       platnostMesicu = typ.platnost_mesicu;
     }
-    const platnostDo = new Date();
-    platnostDo.setMonth(platnostDo.getMonth() + platnostMesicu);
-
     // Klientka (Fáze 6D) — jen pokud je vyplněný telefon; bez telefonu zůstává
     // klientka_id NULL (nelze bezpečně určit jen podle jména/e-mailu).
     const klientkaId = await najitNeboVytvoritKlientku(client, { jmeno: kupujici_jmeno, telefon: kupujici_telefon, email: kupujici_email });
 
-    const { rows: [poukaz] } = await client.query(
-      `INSERT INTO poukazy (kod, hodnota, zustatek, platnost_do, zakoupeno_kde, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, konkretni_masaz, stav, klientka_id, ucel)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'aktivni',$11,$12) RETURNING *`,
-      [vygenerovatKod(ucelPoukazu), hodnota, hodnota, platnostDo.toISOString().slice(0, 10), zakoupeno_kde || 'osobne', kupujici_jmeno || null, kupujici_email || null, kupujici_telefon || null, pro_koho || null, konkretniMasaz, klientkaId, ucelPoukazu]
-    );
+    const poukaz = await vytvoritPoukaz(client, {
+      hodnota, platnostMesicu, zakoupenoKde: zakoupeno_kde || 'osobne',
+      kupujiciJmeno: kupujici_jmeno, kupujiciEmail: kupujici_email, kupujiciTelefon: kupujici_telefon,
+      proKoho: pro_koho || null, konkretniMasaz, klientkaId, ucel: ucelPoukazu
+    });
     await client.query('COMMIT');
     res.json({ ok: true, poukaz });
   } catch (e) {
@@ -2187,16 +2202,15 @@ app.patch('/api/admin/poukazy/zadosti/:id/stav', async (req, res) => {
       // /api/poukazy/zadost) — NULL jen u žádostí na konkrétní masáž (nebo u
       // starších žádostí z doby před touto opravou), kde platí stejných 12
       // měsíců jako u poukazu na konkrétní masáž vydaného přímo v administraci.
-      const platnostDo = new Date();
-      platnostDo.setMonth(platnostDo.getMonth() + (zadost.platnost_mesicu || 12));
       const klientkaId = await najitNeboVytvoritKlientku(client, { jmeno: zadost.kupujici_jmeno, telefon: zadost.kupujici_telefon, email: zadost.kupujici_email });
       // Žádost z webu je vždy skutečný prodej (nikdy dar/tombola — ty se
       // zadávají jen přímo v administraci), proto natvrdo ucel='prodej'.
-      const { rows: [poukaz] } = await client.query(
-        `INSERT INTO poukazy (kod, hodnota, zustatek, platnost_do, zakoupeno_kde, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, konkretni_masaz, zpusob_platby, stav, klientka_id, ucel)
-         VALUES ($1,$2,$3,$4,'web',$5,$6,$7,$8,$9,$10,'aktivni',$11,'prodej') RETURNING *`,
-        [vygenerovatKod('prodej'), zadost.hodnota, zadost.hodnota, platnostDo.toISOString().slice(0, 10), zadost.kupujici_jmeno, zadost.kupujici_email, zadost.kupujici_telefon, zadost.pro_koho, zadost.konkretni_masaz, zadost.zpusob_platby, klientkaId]
-      );
+      const poukaz = await vytvoritPoukaz(client, {
+        hodnota: zadost.hodnota, platnostMesicu: zadost.platnost_mesicu || 12, zakoupenoKde: 'web',
+        kupujiciJmeno: zadost.kupujici_jmeno, kupujiciEmail: zadost.kupujici_email, kupujiciTelefon: zadost.kupujici_telefon,
+        proKoho: zadost.pro_koho, konkretniMasaz: zadost.konkretni_masaz, zpusobPlatby: zadost.zpusob_platby,
+        klientkaId, ucel: 'prodej'
+      });
       await client.query('COMMIT');
       return res.json({ ok: true, poukaz });
     }
@@ -2547,7 +2561,12 @@ app.delete('/api/admin/cenik/:id', async (req, res) => {
 // -- Prodejna (masáže prodané osobně na místě) --
 app.get('/api/admin/prodejna', async (req, res) => {
   try {
-    const { rows } = await db.query('SELECT * FROM prodeje ORDER BY vytvoreno DESC');
+    const { rows } = await db.query(
+      `SELECT pr.*, p.kod AS poukaz_kod
+       FROM prodeje pr
+       LEFT JOIN poukazy p ON p.id = pr.poukaz_id
+       ORDER BY pr.vytvoreno DESC`
+    );
     res.json(rows);
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
