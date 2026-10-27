@@ -2598,15 +2598,30 @@ async function ziskatObrazekUkazky(klic) {
   ukazkaObrazkyCache[klic] = obrazek;
   return obrazek;
 }
+// Skutečný poměr stran nahraného obrázku místo napevno daného UKAZKA_SABLONY[klic].pomer
+// — majitelka si může nahrát vlastní fotku jiného tvaru, než předpokládá šablona
+// (stejná oprava jako zjistitPomerObrazku v adminu, viz tam komentář).
+var ukazkaPomeryCache = {};
+function zjistitPomerObrazkuUkazky(url) {
+  if (!url) return Promise.resolve(null);
+  if (url in ukazkaPomeryCache) return Promise.resolve(ukazkaPomeryCache[url]);
+  return new Promise(function(resolve) {
+    var img = new Image();
+    img.onload = function() { var p = img.naturalWidth + '/' + img.naturalHeight; ukazkaPomeryCache[url] = p; resolve(p); };
+    img.onerror = function() { resolve(null); };
+    img.src = url;
+  });
+}
 async function vykreslitUkazkuPoukazu() {
   var el = document.getElementById('poukazUkazka');
   if (!el) return;
   var klic = ukazkaAktivniSablona;
   var s = UKAZKA_SABLONY[klic];
   var obrazek = await ziskatObrazekUkazky(klic);
+  var pomer = (await zjistitPomerObrazkuUkazky(obrazek)) || s.pomer;
   if (ukazkaAktivniSablona !== klic) return; // mezitím přepnuto na jinou šablonu, zahodit zastaralou odpověď
   el.style.backgroundImage = obrazek ? "url('" + obrazek + "')" : 'none';
-  el.style.aspectRatio = s.pomer;
+  el.style.aspectRatio = pomer;
   // Bez pevného bílého podkladu jde jen o jemný textový stín, aby text nezmizel v obrázku
   var bezPodkladu = !s.podklad;
   var radekStyl = bezPodkladu ? 'background:none;padding:0;box-shadow:none;text-shadow:0 0 4px rgba(255,255,255,.95),0 0 7px rgba(255,255,255,.85);' : '';

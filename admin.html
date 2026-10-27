@@ -2098,6 +2098,24 @@ async function ziskatObrazekPoukazu(klic) {
   return POUKAZ_VYCHOZI_OBRAZEK[klic];
 }
 
+// Skutečný poměr stran konkrétního obrázku (ne napevno daný z POUKAZ_SABLONY).
+// Majitelka si může nahrát vlastní fotku jiného tvaru, než má výchozí šablona
+// (viz Fáze audit 2026-10-27 — vánoční nahraný obrázek 1200×800 vs. šablonou
+// předpokládaných 1024×559 vypadal kvůli nesedícímu poměru zmenšený/oříznutý).
+// Kartička proto vždy použije poměr skutečně zobrazeného obrázku; s.pomer z
+// POUKAZ_SABLONY zůstává jen jako záložní tvar, když obrázek vůbec není.
+const _pomerObrazkuCache = new Map();
+function zjistitPomerObrazku(url) {
+  if (!url) return Promise.resolve(null);
+  if (_pomerObrazkuCache.has(url)) return Promise.resolve(_pomerObrazkuCache.get(url));
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => { const p = img.naturalWidth + '/' + img.naturalHeight; _pomerObrazkuCache.set(url, p); resolve(p); };
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+}
+
 // Výchozí pozice textu — vytažené z POUKAZ_SABLONY jako čistá čísla (bez "%"),
 // ať se dají rovnou nacpat do number inputů v panelu "Upravit pozice textu".
 function vychoziPoziceTextu(klic) {
@@ -2153,7 +2171,7 @@ async function vykreslitNahledPoukazu() {
   const s = await sablonaSPozicemi(klic);
   const obrazek = await ziskatObrazekPoukazu(klic);
   const card = document.getElementById('poukazPrintCard');
-  card.style.aspectRatio = s.pomer;
+  card.style.aspectRatio = (await zjistitPomerObrazku(obrazek)) || s.pomer;
   const stin = s.stin ? ' pp-text-shadow' : '';
   card.innerHTML = `
     ${obrazek ? `<img class="pp-bg" src="${obrazek}" alt="">` : ''}
@@ -2180,9 +2198,10 @@ async function vykreslitPrazdnePoukazy() {
   const klic = document.getElementById('pbSablona').value;
   const s = await sablonaSPozicemi(klic);
   const obrazek = await ziskatObrazekPoukazu(klic);
+  const pomer = (await zjistitPomerObrazku(obrazek)) || s.pomer;
   const stin = s.stin ? ' pp-text-shadow' : '';
   const karta = `
-    <div class="poukaz-print-card" style="aspect-ratio:${s.pomer}">
+    <div class="poukaz-print-card" style="aspect-ratio:${pomer}">
       ${obrazek ? `<img class="pp-bg" src="${obrazek}" alt="">` : ''}
       ${s.logo ? `<div class="pp-logo-overlay${stin}" style="top:${s.logoBox.top};left:${s.logoBox.left};right:${s.logoBox.right}">
         <img src="assets/logo.png" alt="Masáže Alesa" style="max-width:100%;max-height:44px;display:block;margin:0 auto">
@@ -2223,7 +2242,7 @@ async function nahratObrazekPoukazu(klic) {
     const res = await adminFetch(API + '/admin/nastaveni/poukaz_obrazek_' + klic, { method: 'PUT', body: JSON.stringify({ hodnota: dataUrl }) });
     if (!res.ok) { msg.innerHTML = '<span style="color:#c0392b">Nahrání se nepodařilo.</span>'; return; }
     document.getElementById('ppVzorek_' + klic).dataset.obrazek = dataUrl;
-    vykreslitVzorek(klic);
+    await vykreslitVzorek(klic);
     msg.innerHTML = '<span style="color:var(--tan)">✅ Nový obrázek uložen.</span>';
     input.value = '';
   } catch (e) {
@@ -2234,18 +2253,19 @@ async function vratitVychoziObrazekPoukazu(klic) {
   if (!confirm('Vrátit výchozí obrázek poukazu?')) return;
   await adminFetch(API + '/admin/nastaveni/poukaz_obrazek_' + klic, { method: 'DELETE' });
   document.getElementById('ppVzorek_' + klic).dataset.obrazek = POUKAZ_VYCHOZI_OBRAZEK[klic] || '';
-  vykreslitVzorek(klic);
+  await vykreslitVzorek(klic);
   document.getElementById('ppObrazekMsg_' + klic).innerHTML = '';
 }
 
 // Vzorová kartička v panelu "Vzhled poukazu" — stejný styl jako skutečný tisk,
 // ale s ukázkovým textem, ať majitelka při doladění pozic (number inputy níž)
 // hned vidí, jak to bude vypadat na jejím vlastním obrázku.
-function vykreslitVzorek(klic) {
+async function vykreslitVzorek(klic) {
   const sablona = POUKAZ_SABLONY[klic];
   const stin = sablona.stin ? ' pp-text-shadow' : '';
   const vzorek = document.getElementById('ppVzorek_' + klic);
   const obrazek = vzorek.dataset.obrazek || '';
+  vzorek.style.aspectRatio = (await zjistitPomerObrazku(obrazek)) || sablona.pomer;
   const ziskat = nazev => document.getElementById('ppPoz_' + klic + '_' + nazev).value + '%';
   const left = ziskat('left'), right = ziskat('right');
   let logoHtml = '';
@@ -2277,7 +2297,7 @@ async function inicializovatVzorek(klic) {
       document.getElementById('ppPoz_' + klic + '_' + nazev).value = pozice[nazev];
     });
   }
-  vykreslitVzorek(klic);
+  await vykreslitVzorek(klic);
 }
 async function ulozitPoziceTextu(klic) {
   const msg = document.getElementById('ppPozMsg_' + klic);
