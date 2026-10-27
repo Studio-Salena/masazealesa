@@ -2559,7 +2559,7 @@ function eanBarcodeSvg(ean13, barH) {
 }
 var UKAZKA_SABLONY = {
   klasicky: {
-    obrazek: 'assets/poukaz.jpg',
+    obrazek: null, // žádný statický výchozí — dřívější napevno daný assets/poukaz.jpg byl smazán, nahrazuje ho obrázek nahraný v adminu (viz ziskatObrazekUkazky níž)
     pomer: '795/532',
     logo: false,
     podklad: false,
@@ -2579,17 +2579,33 @@ var UKAZKA_SABLONY = {
   }
 };
 var ukazkaAktivniSablona = 'klasicky';
+var ukazkaObrazkyCache = {}; // klic -> nahraný obrázek z adminu (nebo null), ať se znovu nedotazuje při přepínání záložek
 function vybratUkazkovouSablonu(nazev, btn) {
   ukazkaAktivniSablona = nazev;
   document.querySelectorAll('#puSablonyTlacitka .pu-sablona-btn').forEach(function(b) { b.classList.remove('selected'); });
   if (btn) btn.classList.add('selected');
   vykreslitUkazkuPoukazu();
 }
-function vykreslitUkazkuPoukazu() {
+// Obrázek nahraný majitelkou v adminu (nastaveni.poukaz_obrazek_<klic>) má přednost
+// před statickým výchozím (pokud nějaký pro danou šablonu existuje).
+async function ziskatObrazekUkazky(klic) {
+  if (klic in ukazkaObrazkyCache) return ukazkaObrazkyCache[klic];
+  var obrazek = UKAZKA_SABLONY[klic].obrazek;
+  try {
+    var res = await fetch(API + '/poukazy/obrazek/' + klic);
+    if (res.ok) { var data = await res.json(); if (data.obrazek) obrazek = data.obrazek; }
+  } catch (e) { /* spadne na statický výchozí (pokud existuje) */ }
+  ukazkaObrazkyCache[klic] = obrazek;
+  return obrazek;
+}
+async function vykreslitUkazkuPoukazu() {
   var el = document.getElementById('poukazUkazka');
   if (!el) return;
-  var s = UKAZKA_SABLONY[ukazkaAktivniSablona];
-  el.style.backgroundImage = "url('" + s.obrazek + "')";
+  var klic = ukazkaAktivniSablona;
+  var s = UKAZKA_SABLONY[klic];
+  var obrazek = await ziskatObrazekUkazky(klic);
+  if (ukazkaAktivniSablona !== klic) return; // mezitím přepnuto na jinou šablonu, zahodit zastaralou odpověď
+  el.style.backgroundImage = obrazek ? "url('" + obrazek + "')" : 'none';
   el.style.aspectRatio = s.pomer;
   // Bez pevného bílého podkladu jde jen o jemný textový stín, aby text nezmizel v obrázku
   var bezPodkladu = !s.podklad;

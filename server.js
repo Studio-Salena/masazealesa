@@ -1028,6 +1028,17 @@ app.get('/api/poukazy/typy', async (req, res) => {
   } catch (e) { console.error('GET /api/poukazy/typy selhalo:', e); res.status(500).json({ chyba: 'Interní chyba serveru.' }); }
 });
 
+// Obrázek pozadí poukazu pro ukázku na webu — stejný zdroj (nastaveni.poukaz_obrazek_<klic>),
+// jaký si majitelka nahrává v adminu (viz nahratObrazekPoukazu v admin.html). Veřejné GET,
+// ale jen pro dva pevné klíče, aby šlo číst jedině tuto jednu neutrální hodnotu z nastaveni.
+app.get('/api/poukazy/obrazek/:klic', async (req, res) => {
+  if (!['klasicky', 'vanocni'].includes(req.params.klic)) return res.status(404).json({ chyba: 'Neznámá šablona.' });
+  try {
+    const { rows: [n] } = await db.query("SELECT hodnota FROM nastaveni WHERE klic = $1", ['poukaz_obrazek_' + req.params.klic]);
+    res.json({ obrazek: n ? n.hodnota : null });
+  } catch (e) { console.error('GET /api/poukazy/obrazek selhalo:', e); res.status(500).json({ chyba: 'Interní chyba serveru.' }); }
+});
+
 // Zjistí skutečnou otevírací dobu pro konkrétní datum: buď normální týdenní
 // pracovní dobu, nebo — pokud na ten den existuje "výjimka provozu" s vlastní
 // otevírací dobou — tu (ať jde nastavit třeba jeden den v měsíci s delší

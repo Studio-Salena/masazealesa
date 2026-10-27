@@ -533,6 +533,31 @@ async function main() {
     }
     console.log('✅ ochrana historie poukazů prošla (7/7 scénářů)');
 
+    {
+      // Veřejný GET /api/poukazy/obrazek/:klic — obrázek šablony poukazu pro
+      // ukázku na webu (index.html), čtený ze stejného nastaveni.poukaz_obrazek_<klic>,
+      // kam ho ukládá admin (viz nahratObrazekPoukazu v admin.html). Bez
+      // nahraného obrázku vrací null (statický výchozí řeší až samo index.html);
+      // neznámý klíč je 404, aby šlo číst jedině tyto dvě pevné hodnoty z nastaveni.
+      const KLIC = 'klasicky';
+      const NASTAVENI_KLIC = 'poukaz_obrazek_' + KLIC;
+      const bezObrazku = await fetch(API + '/poukazy/obrazek/' + KLIC).then(r => r.json());
+      assert.equal(bezObrazku.obrazek, null, 'bez nahraného obrázku má obrazek být null');
+
+      const DATA_URL = 'data:image/jpeg;base64,VGVzdG92YWNpIG9icmF6ZWs=';
+      await adminFetch('/admin/nastaveni/' + NASTAVENI_KLIC, { method: 'PUT', body: JSON.stringify({ hodnota: DATA_URL }) });
+      try {
+        const sObrazkem = await fetch(API + '/poukazy/obrazek/' + KLIC).then(r => r.json());
+        assert.equal(sObrazkem.obrazek, DATA_URL, 'po nahrání v adminu musí veřejný endpoint vrátit stejnou hodnotu');
+
+        const neznamy = await fetch(API + '/poukazy/obrazek/neco-jineho');
+        assert.equal(neznamy.status, 404, 'neznámý klíč šablony musí vracet 404');
+      } finally {
+        await adminFetch('/admin/nastaveni/' + NASTAVENI_KLIC, { method: 'DELETE' }).catch(() => {});
+      }
+      console.log('OK — GET /api/poukazy/obrazek/:klic odráží obrázek nahraný v adminu (null bez něj, 404 na neznámý klíč)');
+    }
+
     console.log('\n✅ VŠECHNY TESTY POUKAZŮ PROŠLY');
   } finally {
     // Hlavní testovací poukaz má v tuhle chvíli už platební historii (scénáře
