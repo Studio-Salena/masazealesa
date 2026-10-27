@@ -47,6 +47,7 @@ const uklidNewsletter = [];
 const uklidKlientky = new Set();
 const uklidVyjimky = [];
 const uklidCeniky = [];
+const uklidTypy = [];
 const nastaveneKlice = new Map(); // klic -> puvodni hodnota (nebo null = nebyl nastaven)
 const pracovniDobaPuvodni = new Map(); // den_v_tydnu -> puvodni radek
 
@@ -734,6 +735,233 @@ async function main() {
     ok('C) regrese: normální validní GET volne-terminy beze změny → 200, termíny vráceny');
   }
 
+  // ======================= AUDIT 2026-10-27 — DELETE /api/admin/rezervace/:id vrací zůstatek poukazu =======================
+  // Nová oprava: "platby" řádky mají na rezervace FK "on delete cascade", takže
+  // smazání rezervace dřív nechalo zůstatek uplatněného poukazu beze stopy
+  // propadnout. Žádná z existujících sad (rezervace/platby/poukazy) tohle dřív
+  // neověřovala vůbec. Pomocné funkce použijí typový poukaz (hodnota nezávislá
+  // na ceníku), ať lze zůstatek vychýlit od "hodnoty" a odhalit případné
+  // dvojí navrácení (Math.min by jinak dvojí navrácení na hranici hodnoty skrylo).
+  console.log('--- Audit: mazání rezervace s navrácením zůstatku poukazu ---');
+
+  async function vytvoritPoukazTyp(hodnota, platnostMesicu = 12) {
+    const r = await adminFetch('/admin/poukazy/typy', { method: 'POST', body: JSON.stringify({ hodnota, platnost_mesicu: platnostMesicu }) });
+    const data = await r.json();
+    assert.equal(r.status, 200, 'vytvoření typu poukazu selhalo: ' + JSON.stringify(data));
+    uklidTypy.push(data.typ.id);
+    return data.typ;
+  }
+  async function vydatPoukazTypem(typId) {
+    const r = await adminFetch('/admin/poukazy', { method: 'POST', body: JSON.stringify({ poukaz_typ_id: typId }) });
+    const data = await r.json();
+    assert.equal(r.status, 200, 'vydání poukazu podle typu selhalo: ' + JSON.stringify(data));
+    uklidPoukazy.push(data.poukaz.id);
+    return data.poukaz;
+  }
+  async function uplatnitNaRezervaci(poukazId, castka, rezervaceId) {
+    const r = await adminFetch(`/admin/poukazy/${poukazId}/uplatnit`, { method: 'POST', body: JSON.stringify({ castka, rezervace_id: rezervaceId }) });
+    const data = await r.json();
+    return { status: r.status, data };
+  }
+  async function stavPoukazu(id) {
+    const vse = await adminFetch('/admin/poukazy').then(r => r.json());
+    return vse.find(p => p.id === id);
+  }
+  async function historiePoukazu(id) {
+    return adminFetch(`/admin/poukazy/${id}/historie`).then(r => r.json());
+  }
+  async function smazatRezervaciAdmin(id) {
+    return adminFetch(`/admin/rezervace/${id}`, { method: 'DELETE' });
+  }
+
+  // A) Plná úhrada poukazem → smazání rezervace vrátí celý zůstatek a stav "aktivni"
+  {
+    const cenik = await vytvoritTestovaciCenik(60, true, 'TEST-8F-AUDIT-A');
+    const typ = await vytvoritPoukazTyp(777);
+    const poukaz = await vydatPoukazTypem(typ.id);
+    const datum = dnyDopredu(50);
+    await zajistitSirokouDobu(datum);
+    const vysledek = await verejnaRezervace({
+      datum, cas_od: '10:00', jmeno: 'TEST-8F-AUDIT-A (smazat)', telefon: novyTelefon(),
+      email: 'test-8f-audit-a@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true
+    });
+    zaznamenejVysledekRezervace(vysledek);
+    assert.equal(vysledek.status, 200, JSON.stringify(vysledek.data));
+    const rezId = vysledek.data.rezervace.id;
+
+    const uplatneni = await uplatnitNaRezervaci(poukaz.id, 777, rezId);
+    assert.equal(uplatneni.status, 200, 'A) uplatnění poukazu na rezervaci selhalo: ' + JSON.stringify(uplatneni.data));
+    const poPlatbe = await stavPoukazu(poukaz.id);
+    assert.equal(Number(poPlatbe.zustatek), 0, 'A) po plném uplatnění musí být zůstatek 0');
+    assert.equal(poPlatbe.stav, 'pouzity', 'A) po plném uplatnění musí být stav "pouzity"');
+
+    const smazani = await smazatRezervaciAdmin(rezId);
+    assert.equal(smazani.status, 200, 'A) smazání rezervace selhalo');
+    const poSmazani = await stavPoukazu(poukaz.id);
+    assert.equal(Number(poSmazani.zustatek), 777, 'A) smazání rezervace musí vrátit celý zůstatek poukazu');
+    assert.equal(poSmazani.stav, 'aktivni', 'A) poukaz se musí vrátit do stavu "aktivni"');
+    assert.equal(poSmazani.uzavreno_kdy, null, 'A) uzavreno_kdy se musí vynulovat, poukaz je znovu otevřený');
+    const historiePo = await historiePoukazu(poukaz.id);
+    assert.equal(historiePo.filter(h => h.rezervace_id === rezId).length, 0, 'A) historie čerpání pro smazanou rezervaci musí zmizet');
+    const rezervacePo = await adminFetch('/admin/rezervace').then(r => r.json());
+    assert.ok(!rezervacePo.some(r => r.id === rezId), 'A) smazaná rezervace nesmí dál existovat');
+    ok('A) smazání plně poukazem uhrazené rezervace vrátí celý zůstatek, stav "aktivni", uzavreno_kdy vynulováno, historie i rezervace zmizí');
+  }
+
+  // B) Částečná úhrada + poukaz mezitím zrušený (stav "zruseny") → smazání
+  // rezervace vrátí jen tu část zůstatku, kterou čerpala TATO rezervace (ne víc),
+  // a stav zůstane "zruseny" (navrácení samo o sobě poukaz znovu neotevírá).
+  // "Jiné" čerpání stejného poukazu (přes Rychlý prodej, nezávislé na ceně
+  // rezervace) úmyslně vychýlí zůstatek od "hodnoty" — dvojí navrácení by tak
+  // bylo vidět jako nadhodnocený zůstatek, ne skryté za Math.min ořez na hranici.
+  {
+    const cenik = await vytvoritTestovaciCenik(60, true, 'TEST-8F-AUDIT-B');
+    const typ = await vytvoritPoukazTyp(2000);
+    const poukaz = await vydatPoukazTypem(typ.id);
+
+    const prodejnaRes = await adminFetch('/admin/prodejna', {
+      method: 'POST', body: JSON.stringify({ masaz: 'TEST-8F-AUDIT-B jiné čerpání', cena: 1000, poukaz_kod: poukaz.kod })
+    });
+    const prodejnaData = await prodejnaRes.json();
+    assert.equal(prodejnaRes.status, 200, 'B) jiné čerpání poukazu přes Rychlý prodej selhalo: ' + JSON.stringify(prodejnaData));
+    const poJinemCerpani = await stavPoukazu(poukaz.id);
+    assert.equal(Number(poJinemCerpani.zustatek), 1000, 'B) po jiném čerpání (1000 z 2000) musí zůstatek být 1000');
+
+    const datum = dnyDopredu(51);
+    await zajistitSirokouDobu(datum);
+    const vysledek = await verejnaRezervace({
+      datum, cas_od: '10:00', jmeno: 'TEST-8F-AUDIT-B (smazat)', telefon: novyTelefon(),
+      email: 'test-8f-audit-b@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true
+    });
+    zaznamenejVysledekRezervace(vysledek);
+    assert.equal(vysledek.status, 200, JSON.stringify(vysledek.data));
+    const rezId = vysledek.data.rezervace.id;
+
+    const uplatneni = await uplatnitNaRezervaci(poukaz.id, 300, rezId);
+    assert.equal(uplatneni.status, 200, 'B) částečné uplatnění na rezervaci selhalo: ' + JSON.stringify(uplatneni.data));
+    const poPlatbe = await stavPoukazu(poukaz.id);
+    assert.equal(Number(poPlatbe.zustatek), 700, 'B) po dalším čerpání 300 z 1000 musí zůstatek být 700');
+
+    const zruseni = await adminFetch(`/admin/poukazy/${poukaz.id}/stav`, { method: 'PATCH', body: JSON.stringify({ stav: 'zruseny' }) });
+    assert.equal(zruseni.status, 200, 'B) zrušení poukazu selhalo');
+    const poZruseni = await stavPoukazu(poukaz.id);
+    assert.equal(poZruseni.stav, 'zruseny', 'B) poukaz musí být po PATCH .../stav zrušený');
+    const uzavrenoKdyPredSmazanim = poZruseni.uzavreno_kdy;
+    assert.ok(uzavrenoKdyPredSmazanim, 'B) zrušení musí nastavit uzavreno_kdy');
+
+    const smazani = await smazatRezervaciAdmin(rezId);
+    assert.equal(smazani.status, 200, 'B) smazání rezervace selhalo');
+    const poSmazani = await stavPoukazu(poukaz.id);
+    assert.equal(Number(poSmazani.zustatek), 1000, 'B) smazání musí vrátit jen těch 300, co čerpala tato rezervace (700+300=1000), ne víc');
+    assert.equal(poSmazani.stav, 'zruseny', 'B) zrušený poukaz musí po navrácení zůstatku zůstat zrušený');
+    assert.equal(poSmazani.uzavreno_kdy, uzavrenoKdyPredSmazanim, 'B) navrácení zůstatku nesmí měnit uzavreno_kdy u zrušeného poukazu');
+    ok('B) smazání částečně poukazem uhrazené rezervace vrátí jen tu část zůstatku, kterou čerpala ona sama; zrušený poukaz zůstává zrušený beze změny uzavreno_kdy');
+
+    // Úklid Rychlého prodeje vytvořeného jen pro tento test (nezávislý na
+    // zbytku testovaného chování — mazání poukazu by ho stejně odmítlo,
+    // dokud bude mít platební historii).
+    await adminFetch(`/admin/prodejna/${prodejnaData.prodej.id}`, { method: 'DELETE' }).catch(() => {});
+  }
+
+  // C) Sekvenční opakované smazání stejné (už smazané) rezervace je bezpečné
+  // no-op — druhé zavolání nesmí znovu navýšit zůstatek poukazu.
+  {
+    const cenik = await vytvoritTestovaciCenik(60, true, 'TEST-8F-AUDIT-C');
+    const typ = await vytvoritPoukazTyp(500);
+    const poukaz = await vydatPoukazTypem(typ.id);
+    const datum = dnyDopredu(52);
+    await zajistitSirokouDobu(datum);
+    const vysledek = await verejnaRezervace({
+      datum, cas_od: '10:00', jmeno: 'TEST-8F-AUDIT-C (smazat)', telefon: novyTelefon(),
+      email: 'test-8f-audit-c@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true
+    });
+    zaznamenejVysledekRezervace(vysledek);
+    assert.equal(vysledek.status, 200, JSON.stringify(vysledek.data));
+    const rezId = vysledek.data.rezervace.id;
+
+    const uplatneni = await uplatnitNaRezervaci(poukaz.id, 500, rezId);
+    assert.equal(uplatneni.status, 200, 'C) uplatnění poukazu selhalo: ' + JSON.stringify(uplatneni.data));
+
+    const prvni = await smazatRezervaciAdmin(rezId);
+    assert.equal(prvni.status, 200, 'C) první smazání rezervace selhalo');
+    const poPrvnim = await stavPoukazu(poukaz.id);
+    assert.equal(Number(poPrvnim.zustatek), 500, 'C) první smazání musí vrátit celý zůstatek');
+
+    const druhe = await smazatRezervaciAdmin(rezId);
+    assert.equal(druhe.status, 200, 'C) opakované smazání už neexistující rezervace nesmí vracet chybu (idempotentní no-op)');
+    const poDruhem = await stavPoukazu(poukaz.id);
+    assert.equal(Number(poDruhem.zustatek), 500, 'C) opakované smazání nesmí zůstatek navýšit podruhé (500, ne 1000)');
+    assert.equal(poDruhem.stav, 'aktivni', 'C) stav musí zůstat "aktivni" i po opakovaném smazání');
+    ok('C) opakované (sekvenční) smazání už smazané rezervace je bezpečný no-op, zůstatek poukazu se nenavýší podruhé');
+  }
+
+  // D) Souběžné (Promise.all) smazání TÉŽE rezervace dvakrát najednou — bez
+  // zámku rezervace na začátku transakce (viz komentář u DELETE
+  // /api/admin/rezervace/:id v server.js) by oba požadavky přečetly stejný
+  // součet "platby" a oba navrátily zůstatek na poukaz, takže by se částka
+  // vrátila dvakrát. "Jiné" čerpání stejného poukazu přes Rychlý prodej (jako
+  // ve scénáři B) úmyslně vychýlí zůstatek od "hodnoty" — dvojí navrácení by
+  // tak bylo vidět jako nadhodnocený zůstatek, ne skryté za Math.min ořez na
+  // hranici hodnoty. Živě ověřeno (před touto opravou): zůstatek skončil na
+  // 1300 místo správných 1000 — tenhle test to musí spolehlivě zachytit.
+  {
+    const cenik = await vytvoritTestovaciCenik(60, true, 'TEST-8F-AUDIT-D');
+    // platnost_mesicu=11 (ne 12 jako ve scénáři B) — UNIQUE(hodnota, platnost_mesicu)
+    // a cleanup typů běží až na konci main(), takže typ ze scénáře B je v tuhle
+    // chvíli ještě v DB.
+    const typ = await vytvoritPoukazTyp(2000, 11);
+    const poukaz = await vydatPoukazTypem(typ.id);
+
+    const prodejnaRes = await adminFetch('/admin/prodejna', {
+      method: 'POST', body: JSON.stringify({ masaz: 'TEST-8F-AUDIT-D jiné čerpání', cena: 1000, poukaz_kod: poukaz.kod })
+    });
+    const prodejnaData = await prodejnaRes.json();
+    assert.equal(prodejnaRes.status, 200, 'D) jiné čerpání poukazu přes Rychlý prodej selhalo: ' + JSON.stringify(prodejnaData));
+
+    const datum = dnyDopredu(53);
+    await zajistitSirokouDobu(datum);
+    const vysledek = await verejnaRezervace({
+      datum, cas_od: '10:00', jmeno: 'TEST-8F-AUDIT-D (smazat)', telefon: novyTelefon(),
+      email: 'test-8f-audit-d@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true
+    });
+    zaznamenejVysledekRezervace(vysledek);
+    assert.equal(vysledek.status, 200, JSON.stringify(vysledek.data));
+    const rezId = vysledek.data.rezervace.id;
+
+    const uplatneni = await uplatnitNaRezervaci(poukaz.id, 300, rezId);
+    assert.equal(uplatneni.status, 200, 'D) uplatnění poukazu na rezervaci selhalo: ' + JSON.stringify(uplatneni.data));
+    const poUplatneni = await stavPoukazu(poukaz.id);
+    assert.equal(Number(poUplatneni.zustatek), 700, 'D) po 1000 (jinde) + 300 (tahle rezervace) z 2000 musí být zůstatek 700');
+
+    // Dva souběžné DELETE na STEJNÉ id — žádný setTimeout/sleep: Promise.all
+    // odešle oba požadavky prakticky ve stejném okamžiku, DB round-tripy uvnitř
+    // transakce dají dost prostoru pro skutečné prokládání (stejný princip jako
+    // P0.2 "concurrent double booking" výš v tomhle souboru).
+    const [vA, vB] = await Promise.all([
+      smazatRezervaciAdmin(rezId).then(r => r.json().then(d => ({ status: r.status, data: d }))),
+      smazatRezervaciAdmin(rezId).then(r => r.json().then(d => ({ status: r.status, data: d })))
+    ]);
+    // Obě strany musí dostat bezpečnou odpověď (ok:true) — druhá strana najde
+    // rezervaci už smazanou a jen potvrdí no-op, nikdy ne chybu/500.
+    assert.equal(vA.status, 200, 'D) první strana souběžného mazání musí vrátit 200: ' + JSON.stringify(vA.data));
+    assert.equal(vB.status, 200, 'D) druhá strana souběžného mazání musí vrátit 200: ' + JSON.stringify(vB.data));
+    assert.equal(vA.data.ok, true, 'D) první strana musí vrátit ok:true');
+    assert.equal(vB.data.ok, true, 'D) druhá strana musí vrátit ok:true');
+
+    const poSmazani = await stavPoukazu(poukaz.id);
+    assert.equal(Number(poSmazani.zustatek), 1000, `D) souběžné smazání nesmí vrátit zůstatek dvakrát — čekáno 1000 (700+300), dostal jsem ${poSmazani.zustatek}`);
+
+    const platbyPo = await adminFetch(`/admin/rezervace/${rezId}/platby`).then(r => r.json());
+    assert.equal(platbyPo.length, 0, 'D) po smazání rezervace musí deník plateb pro ni být prázdný (kaskáda), ne zdvojený ani zůstat viset');
+
+    const rezervacePo = await adminFetch('/admin/rezervace').then(r => r.json());
+    assert.ok(!rezervacePo.some(r => r.id === rezId), 'D) smazaná rezervace nesmí dál existovat ani po souběžném mazání');
+
+    ok('D) souběžné (Promise.all) smazání téže rezervace dvakrát najednou vrátí zůstatek poukazu jen jednou (700+300=1000, ne 1300); deník plateb prázdný, rezervace zmizela, obě strany dostaly 200/ok:true');
+
+    await adminFetch(`/admin/prodejna/${prodejnaData.prodej.id}`, { method: 'DELETE' }).catch(() => {});
+  }
+
   console.log(`\n${vysledky.filter(v => v.stav === 'PASS').length}/${vysledky.length} scénářů (zbytek jsou vědomě dokumentované bugy, ne selhání testu).`);
 }
 
@@ -747,9 +975,10 @@ main()
     for (const id of uklidKlientky) await adminFetch('/admin/klientky/' + id, { method: 'DELETE' }).catch(() => {});
     for (const id of uklidVyjimky) await adminFetch('/admin/vyjimky/' + id, { method: 'DELETE' }).catch(() => {});
     for (const id of uklidCeniky) await adminFetch('/admin/cenik/' + id, { method: 'DELETE' }).catch(() => {});
+    for (const id of uklidTypy) await adminFetch('/admin/poukazy/typy/' + id, { method: 'DELETE' }).catch(() => {});
     await obnovNastaveni();
     await obnovPracovniDobu();
-    console.log(`(uklizeno: ${uklidRezervace.length} rezervací, ${uklidPoukazy.length} poukazů, ${uklidNewsletter.length} newsletter záznamů, ${uklidKlientky.size} klientek, ${uklidVyjimky.length} výjimek, ${uklidCeniky.length} ceníkových položek, ${nastaveneKlice.size} nastavení obnoveno, ${pracovniDobaPuvodni.size} dnů pracovní doby obnoveno)`);
+    console.log(`(uklizeno: ${uklidRezervace.length} rezervací, ${uklidPoukazy.length} poukazů, ${uklidNewsletter.length} newsletter záznamů, ${uklidKlientky.size} klientek, ${uklidVyjimky.length} výjimek, ${uklidCeniky.length} ceníkových položek, ${uklidTypy.length} typů poukazů, ${nastaveneKlice.size} nastavení obnoveno, ${pracovniDobaPuvodni.size} dnů pracovní doby obnoveno)`);
     console.log('\n=== VÝSLEDKY ===');
     vysledky.forEach(v => console.log(`[${v.stav}] ${v.popis}`));
   });

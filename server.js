@@ -1777,14 +1777,43 @@ app.get('/api/admin/rezervace/:id/platby', async (req, res) => {
 // poukazu propadly, i když se masáž fakticky neuskutečnila. Stejný princip jako
 // u DELETE /api/admin/prodejna/:id. Zrušený poukaz (stav='zruseny') zůstává
 // zrušený — navrácení zůstatku ho samo o sobě znovu neotevírá.
+//
+// "SELECT ... FOR UPDATE" na řádek rezervace MUSÍ být úplně první dotaz
+// transakce, ze dvou důvodů (audit 2026-10-27, živě reprodukováno před opravou):
+//  1) Souběžné smazání TÉŽE rezervace dvakrát najednou — bez zámku by oba
+//     požadavky přečetly stejný součet "platby" a oba navrátily zůstatek na
+//     poukaz, čímž by se peníze vrátily dvakrát. Zámek druhý požadavek zdrží,
+//     až první dopíše (smaže řádek); druhý pak svým SELECTem nic nenajde a je
+//     to bezpečný no-op (viz "if (!rezervace)" níž) — žádná další změna.
+//  2) Souběh s POST /api/admin/poukazy/:id/uplatnit, když se poukaz zrovna
+//     uplatňuje NA TUTO rezervaci — ten endpoint taky zamyká řádek rezervace
+//     (FOR UPDATE), jen až PO zámku poukazu. Kdyby smazání rezervace čekalo na
+//     tenhle zámek PO přečtení "platby" (jako dřív), mohlo by tu čerstvě
+//     vloženou platbu vůbec nezachytit a nechat ji zmizet kaskádou beze
+//     navrácení zůstatku. Díky zámku na začátku transakce smazání buď čeká,
+//     až uplatnění doběhne (a pak vidí novou platbu), nebo uplatnění čeká na
+//     smazání (a pak nad už neexistující rezervací selže se standardní 404).
+//     Obrácené pořadí zámků (poukaz→rezervace u uplatnit, rezervace→poukaz
+//     tady) může ve vzácném souběhu vyvolat uvíznutí (deadlock) — PostgreSQL
+//     ho sám detekuje a jednu stranu bezpečně odmítne (chyba/500, žádná
+//     poškozená data), nikdy ne tiché zdvojení/ztrátu částky.
 app.delete('/api/admin/rezervace/:id', async (req, res) => {
   const client = await db.connect();
   try {
     await client.query('BEGIN');
+    const { rows: [rezervace] } = await client.query('SELECT id FROM rezervace WHERE id = $1 FOR UPDATE', [req.params.id]);
+    if (!rezervace) {
+      // Už smazaná (druhým souběžným požadavkem) nebo nikdy neexistovala —
+      // bezpečný no-op, žádná změna zůstatků. Zachovává dosavadní chování
+      // (endpoint vždy vracel {ok:true}, i když nic nenašel).
+      await client.query('COMMIT');
+      return res.json({ ok: true });
+    }
     const { rows: platbyPoukazem } = await client.query(
       `SELECT poukaz_id, SUM(castka) AS castka FROM platby
        WHERE rezervace_id = $1 AND zpusob_platby = 'poukaz' AND poukaz_id IS NOT NULL
-       GROUP BY poukaz_id`,
+       GROUP BY poukaz_id
+       ORDER BY poukaz_id`,
       [req.params.id]
     );
     for (const radek of platbyPoukazem) {
