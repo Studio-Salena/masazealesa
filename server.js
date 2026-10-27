@@ -1770,11 +1770,45 @@ app.get('/api/admin/rezervace/:id/platby', async (req, res) => {
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
+// Smazání rezervace v jedné transakci s navrácením zůstatku na poukazy, které na
+// ni byly uplatněné (viz POST /api/admin/poukazy/:id/uplatnit) — "platby" řádky
+// mají na rezervace FK "on delete cascade", takže by jinak smazáním rezervace
+// zmizely beze stopy i řádky dokládající čerpání poukazu, a ty peníze by z
+// poukazu propadly, i když se masáž fakticky neuskutečnila. Stejný princip jako
+// u DELETE /api/admin/prodejna/:id. Zrušený poukaz (stav='zruseny') zůstává
+// zrušený — navrácení zůstatku ho samo o sobě znovu neotevírá.
 app.delete('/api/admin/rezervace/:id', async (req, res) => {
+  const client = await db.connect();
   try {
-    await db.query('DELETE FROM rezervace WHERE id = $1', [req.params.id]);
+    await client.query('BEGIN');
+    const { rows: platbyPoukazem } = await client.query(
+      `SELECT poukaz_id, SUM(castka) AS castka FROM platby
+       WHERE rezervace_id = $1 AND zpusob_platby = 'poukaz' AND poukaz_id IS NOT NULL
+       GROUP BY poukaz_id`,
+      [req.params.id]
+    );
+    for (const radek of platbyPoukazem) {
+      const { rows: [poukaz] } = await client.query('SELECT * FROM poukazy WHERE id = $1 FOR UPDATE', [radek.poukaz_id]);
+      if (!poukaz) continue;
+      const novyZustatek = Math.min(Number(poukaz.hodnota), Number(poukaz.zustatek) + Number(radek.castka));
+      const novyStav = poukaz.stav === 'zruseny' ? 'zruseny' : (novyZustatek >= Number(poukaz.hodnota) ? 'aktivni' : 'castecne_vyuzity');
+      await client.query(
+        `UPDATE poukazy SET zustatek = $1, stav = $2, uzavreno_kdy = CASE WHEN $2 = 'zruseny' THEN uzavreno_kdy ELSE NULL END WHERE id = $3`,
+        [novyZustatek, novyStav, poukaz.id]
+      );
+    }
+    if (platbyPoukazem.length) {
+      await client.query('DELETE FROM poukazy_historie WHERE rezervace_id = $1', [req.params.id]);
+    }
+    await client.query('DELETE FROM rezervace WHERE id = $1', [req.params.id]);
+    await client.query('COMMIT');
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ chyba: e.message }); }
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch {}
+    res.status(500).json({ chyba: e.message });
+  } finally {
+    client.release();
+  }
 });
 
 // -- Pracovní doba --
