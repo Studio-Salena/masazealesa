@@ -1421,13 +1421,20 @@ app.get('/api/newsletter/odhlasit', async (req, res) => {
 app.use('/api/admin', vyzadovatAdmina);
 
 // -- Přehled --
+// Kolik dní dopředu se poukaz počítá jako "brzy expiruje" na dashboardu —
+// konstanta stejného druhu jako jiné prahy v projektu (viz BUFFER_MINUT apod.),
+// zatím bez vlastního nastavení v "nastaveni" (lze přidat později, kdyby to
+// majitelka chtěla měnit bez zásahu do kódu).
+const POUKAZ_BRZY_EXPIRUJE_DNI = 30;
+
 app.get('/api/admin/prehled', async (req, res) => {
   try {
     const dnes = new Date().toISOString().slice(0, 10);
     const zacatekMesice = dnes.slice(0, 8) + '01';
+    const zaXDni = new Date(Date.now() + POUKAZ_BRZY_EXPIRUJE_DNI * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     const [rez, pouk, zad, prod] = await Promise.all([
       db.query('SELECT id, stav, datum, cas_od, cas_do, jmeno, masaz, cena FROM rezervace'),
-      db.query('SELECT id, stav, zustatek, platnost_do FROM poukazy'),
+      db.query('SELECT id, kod, stav, zustatek, platnost_do FROM poukazy'),
       db.query('SELECT id, stav FROM poukazy_zadosti'),
       db.query('SELECT cena, vytvoreno FROM prodeje')
     ]);
@@ -1450,6 +1457,16 @@ app.get('/api/admin/prehled', async (req, res) => {
         .filter(p => p.vytvoreno.toISOString().slice(0, 10) >= zacatekMesice)
         .reduce((s, p) => s + Number(p.cena), 0);
 
+    // Brzy expirující poukazy — skutečně aktivní (viz jePoukazSkutecneAktivni)
+    // A platnost_do spadá do příštích POUKAZ_BRZY_EXPIRUJE_DNI dní. Poukaz, co
+    // dnes expiruje, se počítá (stejná hranice ">= dnesIso" jako ve
+    // jePoukazSkutecneAktivni), ne poukaz už prošlý.
+    const poukazyBrzyExpirujiSeznam = pouk.rows
+      .filter(jePoukazSkutecneAktivni)
+      .filter(p => p.platnost_do <= zaXDni)
+      .sort((a, b) => a.platnost_do.localeCompare(b.platnost_do))
+      .map(p => ({ id: p.id, kod: p.kod, zustatek: Number(p.zustatek), platnost_do: p.platnost_do }));
+
     res.json({
       rezervaceCelkem: rez.rows.length,
       rezervaceCekajici: rez.rows.filter(r => r.stav === 'cekajici').length,
@@ -1457,6 +1474,8 @@ app.get('/api/admin/prehled', async (req, res) => {
       poukazyAktivni: pouk.rows.filter(jePoukazSkutecneAktivni).length,
       poukazyHodnota: pouk.rows.filter(jePoukazSkutecneAktivni).reduce((s, p) => s + Number(p.zustatek), 0),
       poukazyZadostiNove: zad.rows.filter(z => z.stav === 'nova').length,
+      poukazyBrzyExpirujiPocet: poukazyBrzyExpirujiSeznam.length,
+      poukazyBrzyExpiruji: poukazyBrzyExpirujiSeznam,
       dnesniProgram,
       trzbyTentoMesic
     });

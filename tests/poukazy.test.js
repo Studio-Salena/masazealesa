@@ -42,6 +42,14 @@ function posunDnu(pocetDni) {
   d.setDate(d.getDate() + pocetDni);
   return d.toISOString().slice(0, 10);
 }
+// Zrcadlová kopie filtru "brzy expiruje" z GET /admin/prehled (server.js,
+// POUKAZ_BRZY_EXPIRUJE_DNI=30) — stejný princip jako jePoukazSkutecneAktivniZrcadlo
+// výš: ověřuje hraniční chování (29/30/31 dní) bez závislosti na tom, v jakém
+// měsíci test zrovna běží (kalendářní měsíce nemají vždy 30 dní).
+function brzyExpirujeZrcadlo(p, dny = 30) {
+  const zaXDniIso = posunDnu(dny);
+  return jePoukazSkutecneAktivniZrcadlo(p) && p.platnost_do <= zaXDniIso;
+}
 
 async function zadost(telo) {
   const r = await fetch(API + '/poukazy/zadost', {
@@ -74,6 +82,13 @@ async function main() {
     assert.equal(jePoukazSkutecneAktivniZrcadlo({ stav: 'zruseny', platnost_do: posunDnu(30) }), false, 'G) zrušený poukaz není aktivní bez ohledu na platnost_do');
     console.log('OK — hraniční logika (dnes ještě platí, včera už ne, castecne_vyuzity/pouzity/zruseny nikdy) odpovídá jePoukazSkutecneAktivni() v server.js');
 
+    assert.equal(brzyExpirujeZrcadlo({ stav: 'aktivni', platnost_do: posunDnu(29) }), true, 'H) 29 dní dopředu je "brzy expiruje"');
+    assert.equal(brzyExpirujeZrcadlo({ stav: 'aktivni', platnost_do: posunDnu(30) }), true, 'I) přesně na hranici (30 dní) se ještě počítá');
+    assert.equal(brzyExpirujeZrcadlo({ stav: 'aktivni', platnost_do: posunDnu(31) }), false, 'J) 31 dní dopředu už není "brzy"');
+    assert.equal(brzyExpirujeZrcadlo({ stav: 'aktivni', platnost_do: posunDnu(-1) }), false, 'K) už prošlý poukaz není "brzy expiruje", je prostě expirovaný');
+    assert.equal(brzyExpirujeZrcadlo({ stav: 'pouzity', platnost_do: posunDnu(5) }), false, 'L) vyčerpaný poukaz se nepočítá, i kdyby byl blízko platnosti');
+    console.log('OK — hraniční logika "brzy expiruje" (29/30/31 dní, prošlé a nearivní poukazy vyloučeny) odpovídá GET /admin/prehled v server.js');
+
     const cenik = await fetch(API + '/cenik').then(r => r.json());
     const polozka = cenik.find(c => c.rezervovatelna);
     assert.ok(polozka, 'V ceníku není žádná rezervovatelná položka pro test');
@@ -100,9 +115,10 @@ async function main() {
     {
       const prehled = await adminFetch('/admin/prehled').then(r => r.json());
       assert.ok(prehled.poukazyAktivni >= 1, 'A) Dashboard nepočítá čerstvě vydaný aktivní poukaz s budoucí platností');
+      assert.ok(!prehled.poukazyBrzyExpiruji.some(p => p.id === poukazId), 'A) poukaz s 12měsíční platností nesmí být v "brzy expiruje"');
       const detail = await adminFetch(`/admin/klientky/${klientkaId1}`).then(r => r.json());
       assert.equal(detail.aktivniPoukazy, 1, 'A) CRM nepočítá aktivní poukaz s budoucí platností');
-      console.log('OK — A) aktivní poukaz s budoucí platností: dashboard i CRM ho správně počítají jako aktivní');
+      console.log('OK — A) aktivní poukaz s budoucí platností: dashboard i CRM ho správně počítají jako aktivní, dashboard ho nepočítá mezi brzy expirujícími');
     }
 
     // 2) Nejde uplatnit víc, než je zůstatek
@@ -217,6 +233,7 @@ async function main() {
       const prehledPo = await adminFetch('/admin/prehled').then(r => r.json());
       assert.equal(prehledPo.poukazyAktivni, prehledPred.poukazyAktivni, 'C) dashboard nesmí expirovaný poukaz počítat jako aktivní');
       assert.equal(prehledPo.poukazyHodnota, prehledPred.poukazyHodnota, 'C) dashboard nesmí zahrnout hodnotu expirovaného poukazu');
+      assert.ok(!prehledPo.poukazyBrzyExpiruji.some(p => p.id === poukazC.poukaz.id), 'C) už expirovaný poukaz nesmí být v "brzy expiruje" (je prošlý, ne brzy expirující)');
 
       const detailC = await adminFetch(`/admin/klientky/${poukazC.poukaz.klientka_id}`).then(r => r.json());
       assert.equal(detailC.aktivniPoukazy, 0, 'C) CRM nesmí expirovaný poukaz počítat jako aktivní');

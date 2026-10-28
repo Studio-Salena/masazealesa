@@ -67,6 +67,8 @@ body{font-family:'Nunito',sans-serif;background:var(--cream);color:var(--text);m
 .stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px}
 .stat-card{background:#fff;border-radius:16px;padding:18px;border:1px solid var(--tan-light);transition:all 0.2s;cursor:default}
 .stat-card:hover{box-shadow:0 4px 20px rgba(92,58,30,0.1);transform:translateY(-2px)}
+.stat-card-click{cursor:pointer}
+.stat-card-click:hover{border-color:var(--tan)}
 .stat-label{font-size:0.7rem;color:var(--text-light);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px}
 .stat-value{font-size:1.8rem;font-weight:700;color:var(--brown);font-family:'Cormorant',serif}
 .stat-green{color:var(--sage)!important}
@@ -259,17 +261,18 @@ tr:hover td{background:#fffaf5}
     <div class="page active" id="page-prehled">
       <div class="page-header"><div class="page-title">📊 Přehled</div></div>
       <div class="stats-grid">
-        <div class="stat-card"><div class="stat-label">Rezervace celkem</div><div class="stat-value" id="stCelkem">—</div></div>
-        <div class="stat-card"><div class="stat-label">Čekající rezervace</div><div class="stat-value stat-orange" id="stCekajici">—</div></div>
-        <div class="stat-card"><div class="stat-label">Budoucí rezervace</div><div class="stat-value stat-green" id="stVolne">—</div></div>
-        <div class="stat-card"><div class="stat-label">Aktivní poukazy</div><div class="stat-value" id="stPoukazy">—</div></div>
+        <div class="stat-card stat-card-click" onclick="prehledJdiNa('rezervace','vse')"><div class="stat-label">Rezervace celkem</div><div class="stat-value" id="stCelkem">—</div></div>
+        <div class="stat-card stat-card-click" onclick="prehledJdiNa('rezervace','cekajici')"><div class="stat-label">Čekající rezervace</div><div class="stat-value stat-orange" id="stCekajici">—</div></div>
+        <div class="stat-card stat-card-click" onclick="prehledJdiNa('rezervace','vse')"><div class="stat-label">Budoucí rezervace</div><div class="stat-value stat-green" id="stVolne">—</div></div>
+        <div class="stat-card stat-card-click" onclick="prehledJdiNa('poukazy')"><div class="stat-label">Aktivní poukazy</div><div class="stat-value" id="stPoukazy">—</div></div>
       </div>
-      <div class="stats-grid" style="grid-template-columns:repeat(2,1fr)">
-        <div class="stat-card"><div class="stat-label">Hodnota aktivních poukazů</div><div class="stat-value" id="stPoukazyHodnota">—</div></div>
-        <div class="stat-card"><div class="stat-label">Nové žádosti o poukaz</div><div class="stat-value stat-orange" id="stZadosti">—</div></div>
+      <div class="stats-grid" style="grid-template-columns:repeat(3,1fr)">
+        <div class="stat-card stat-card-click" onclick="prehledJdiNa('poukazy')"><div class="stat-label">Hodnota aktivních poukazů</div><div class="stat-value" id="stPoukazyHodnota">—</div></div>
+        <div class="stat-card stat-card-click" onclick="prehledJdiNa('poukazy','zadosti')"><div class="stat-label">Nové žádosti o poukaz</div><div class="stat-value stat-orange" id="stZadosti">—</div></div>
+        <div class="stat-card stat-card-click" onclick="prehledJdiNa('poukazy','expiruji')"><div class="stat-label">Poukazy brzy expirují</div><div class="stat-value stat-orange" id="stPoukazyExpiruji">—</div></div>
       </div>
       <div class="stats-grid" style="grid-template-columns:1fr">
-        <div class="stat-card"><div class="stat-label">Tržby za dokončené služby tento měsíc</div><div class="stat-value stat-green" id="stTrzbyMesic">—</div></div>
+        <div class="stat-card stat-card-click" onclick="prehledJdiNa('ucetnictvi')"><div class="stat-label">Tržby za dokončené služby tento měsíc</div><div class="stat-value stat-green" id="stTrzbyMesic">—</div></div>
       </div>
       <div class="table-wrap">
         <div class="table-header"><h3>📅 Dnešní program</h3></div>
@@ -1293,6 +1296,7 @@ async function loadPrehled() {
     document.getElementById('stPoukazy').textContent = d.poukazyAktivni;
     document.getElementById('stPoukazyHodnota').textContent = Number(d.poukazyHodnota).toLocaleString('cs-CZ') + ' Kč';
     document.getElementById('stZadosti').textContent = d.poukazyZadostiNove;
+    document.getElementById('stPoukazyExpiruji').textContent = d.poukazyBrzyExpirujiPocet ?? 0;
     document.getElementById('stTrzbyMesic').textContent = Number(d.trzbyTentoMesic).toLocaleString('cs-CZ') + ' Kč';
     vykreslitDnesniProgram(d.dnesniProgram || []);
     const rezBadge = document.getElementById('navBadgeRez');
@@ -1302,6 +1306,23 @@ async function loadPrehled() {
     if (d.poukazyZadostiNove > 0) { poukBadge.textContent = d.poukazyZadostiNove; poukBadge.style.display = 'inline-block'; }
     else poukBadge.style.display = 'none';
   } catch (e) { /* tichá chyba na přehledu */ }
+}
+
+// Proklik z dlaždic na Přehledu rovnou do cílové sekce — případně i s
+// aplikovaným filtrem/scrollem, ne jen na celou sekci naslepo. Znovupoužívá
+// showPage()/filtrovatRez()/loadPoukazy() — žádná nová filtrovací logika.
+async function prehledJdiNa(stranka, akce) {
+  const navEl = document.querySelector(`.nav-item[onclick^="showPage('${stranka}'"]`);
+  showPage(stranka, navEl);
+  if (stranka === 'rezervace') {
+    await loadRezervace();
+    const pill = akce && document.querySelector(`#page-rezervace .pill[onclick^="filtrovatRez('${akce}'"]`);
+    if (pill) filtrovatRez(akce, pill);
+  } else if (stranka === 'poukazy') {
+    await loadPoukazy();
+    const cilId = akce === 'zadosti' ? 'poukazyZadostiTable' : akce === 'expiruji' ? 'poukazyTable' : null;
+    if (cilId) document.getElementById(cilId).scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
 }
 
 // Klikatelný seznam dnešních rezervací na dashboardu — detail se otevírá přes
