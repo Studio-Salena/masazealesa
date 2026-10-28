@@ -248,6 +248,7 @@ tr:hover td{background:#fffaf5}
     <div class="nav-item" onclick="showPage('produkty',this)"><span class="icon">📦</span> Produkty <span class="nav-badge" id="navBadgeProdukty" style="display:none">0</span></div>
     <div class="nav-item" onclick="showPage('kupony',this)"><span class="icon">🎟️</span> Slevové kupóny</div>
     <div class="nav-item" onclick="showPage('ucetnictvi',this)"><span class="icon">📈</span> Účetnictví</div>
+    <div class="nav-item" onclick="showPage('statistiky',this)"><span class="icon">📊</span> Statistiky</div>
     <div class="nav-label">GDPR</div>
     <div class="nav-item" onclick="showPage('retence',this)"><span class="icon">🗂️</span> Retence</div>
     <div class="sidebar-footer">
@@ -700,6 +701,44 @@ tr:hover td{background:#fffaf5}
       <div class="table-wrap">
         <div class="table-header"><h3>📦 E) Prodej produktů — podle dnů</h3></div>
         <div id="ucetProdejProduktuDny"><div class="loading">Načítám...</div></div>
+      </div>
+    </div>
+
+    <!-- STATISTIKY -->
+    <div class="page" id="page-statistiky">
+      <div class="page-header">
+        <div class="page-title">📊 Statistiky</div>
+        <div class="table-actions">
+          <button class="btn btn-csv" onclick="exportCsvStatistiky()" style="background:linear-gradient(135deg,#27ae60,#1e8449);color:#fff">⬇ CSV</button>
+          <button class="refresh-btn" onclick="loadStatistiky()">↻ Obnovit</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <div style="padding:14px 16px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <label style="font-size:0.82rem;color:var(--text-light)">Období od</label>
+          <input type="date" id="statOd" style="border:1px solid var(--tan-light);border-radius:6px;padding:6px 8px">
+          <label style="font-size:0.82rem;color:var(--text-light)">do</label>
+          <input type="date" id="statDo" style="border:1px solid var(--tan-light);border-radius:6px;padding:6px 8px">
+          <button class="btn btn-primary btn-sm" onclick="loadStatistiky()">Zobrazit</button>
+          <button class="btn btn-outline btn-sm" onclick="document.getElementById('statOd').value='';document.getElementById('statDo').value='';loadStatistiky()">Celé období</button>
+        </div>
+      </div>
+      <p style="padding:0 4px;font-size:0.78rem;color:var(--text-light)"><strong>Tržby podle měsíců</strong> počítají stejně jako Účetnictví (A) — potvrzené i dokončené rezervace podle data masáže + prodejna. <strong>Počet masáží</strong>, <strong>nejžádanější masáže</strong> a <strong>průměrná cena</strong> už počítají jen z <strong>dokončených</strong> — skutečně odvedené, ne jen objednané. <strong>Míra zrušení/nedostavení</strong> je ze všech rezervací v období bez ohledu na aktuální stav (včetně zatím nerozhodnutých budoucích).</p>
+      <div class="stats-grid" style="grid-template-columns:repeat(4,1fr)">
+        <div class="stat-card"><div class="stat-label">🌸 Dokončené masáže</div><div class="stat-value" id="statPocetDokoncenych">—</div></div>
+        <div class="stat-card"><div class="stat-label">💰 Průměrná cena masáže</div><div class="stat-value stat-green" id="statPrumernaUtrata">—</div></div>
+        <div class="stat-card"><div class="stat-label">❌ Zrušeno</div><div class="stat-value stat-orange" id="statPodilZrusenych">—</div></div>
+        <div class="stat-card"><div class="stat-label">🚫 Nedostavila se</div><div class="stat-value stat-orange" id="statPodilNedostavenaSe">—</div></div>
+      </div>
+      <div class="form-grid-2">
+        <div class="table-wrap">
+          <div class="table-header"><h3>📅 Tržby podle měsíců</h3></div>
+          <div id="statTrzbyMesice"><div class="loading">Načítám...</div></div>
+        </div>
+        <div class="table-wrap">
+          <div class="table-header"><h3>🧖 Nejžádanější masáže (dokončené)</h3></div>
+          <div id="statNejzadanejsi"><div class="loading">Načítám...</div></div>
+        </div>
       </div>
     </div>
 
@@ -1224,6 +1263,7 @@ function showPage(name, el) {
   if (name === 'kupony') loadKupony();
   if (name === 'masaze') loadProdejna();
   if (name === 'ucetnictvi') loadUcetnictvi();
+  if (name === 'statistiky') loadStatistiky();
   if (name === 'retence') loadRetenceNastaveni();
   document.getElementById('sidebar').classList.remove('open');
 }
@@ -3553,6 +3593,50 @@ function exportCsvUcetnictvi() {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = 'prijate-platby-masaze-alesa.csv';
+  a.click();
+}
+
+// ── STATISTIKY (Rozvoj administrace, bod 4) — provozní čísla a trend v čase,
+// viz GET /api/admin/statistiky. Tržby podle měsíců záměrně počítají stejně
+// jako Účetnictví (A), zbytek jen z dokončených — viz komentář v server.js.
+let posledniStatistiky = null;
+async function loadStatistiky() {
+  try {
+    const od = document.getElementById('statOd').value;
+    const doDat = document.getElementById('statDo').value;
+    const params = new URLSearchParams();
+    if (od) params.set('od', od);
+    if (doDat) params.set('do', doDat);
+    const d = await adminFetch(API + '/admin/statistiky' + (params.toString() ? '?' + params.toString() : '')).then(r => r.json());
+    posledniStatistiky = d;
+
+    document.getElementById('statPocetDokoncenych').textContent = d.pocetDokoncenychMasazi;
+    document.getElementById('statPrumernaUtrata').textContent = d.prumernaUtrata === null ? '—' : Math.round(d.prumernaUtrata).toLocaleString('cs-CZ') + ' Kč';
+    const z = d.zruseni;
+    document.getElementById('statPodilZrusenych').textContent = z.podilZrusenych === null ? '—' : Math.round(z.podilZrusenych * 100) + ' % (' + z.pocetZrusenych + '/' + z.pocetCelkem + ')';
+    document.getElementById('statPodilNedostavenaSe').textContent = z.podilNedostavenaSe === null ? '—' : Math.round(z.podilNedostavenaSe * 100) + ' % (' + z.pocetNedostavenaSe + '/' + z.pocetCelkem + ')';
+
+    document.getElementById('statTrzbyMesice').innerHTML = !d.trzbyPoMesicich.length ? '<div class="empty">Zatím žádné tržby v tomto období</div>' : `
+      <table><thead><tr><th>Měsíc</th><th>Tržba</th></tr></thead>
+      <tbody>${d.trzbyPoMesicich.slice().reverse().map(m => `<tr><td>${m.mesic}</td><td><strong>${Math.round(m.castka).toLocaleString('cs-CZ')} Kč</strong></td></tr>`).join('')}</tbody></table>`;
+
+    document.getElementById('statNejzadanejsi').innerHTML = !d.nejzadanejsiMasaze.length ? '<div class="empty">Zatím žádné dokončené masáže v tomto období</div>' : `
+      <table><thead><tr><th>Masáž</th><th>Počet</th><th>Tržba</th></tr></thead>
+      <tbody>${d.nejzadanejsiMasaze.map(m => `<tr><td>${escapeHtml(m.masaz)}</td><td>${m.pocet}</td><td>${Math.round(m.trzba).toLocaleString('cs-CZ')} Kč</td></tr>`).join('')}</tbody></table>`;
+  } catch (e) {
+    document.getElementById('statTrzbyMesice').innerHTML = '<div class="error-msg">Chyba načítání.</div>';
+  }
+}
+function exportCsvStatistiky() {
+  if (!posledniStatistiky) return;
+  let csv = 'Mesic;Trzba\n';
+  posledniStatistiky.trzbyPoMesicich.forEach(m => { csv += `${m.mesic};${Math.round(m.castka)}\n`; });
+  csv += '\nMasaz;Pocet;Trzba\n';
+  posledniStatistiky.nejzadanejsiMasaze.forEach(m => { csv += `${m.masaz};${m.pocet};${Math.round(m.trzba)}\n`; });
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'statistiky-masaze-alesa.csv';
   a.click();
 }
 

@@ -3154,6 +3154,70 @@ app.get('/api/admin/ucetnictvi', async (req, res) => {
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
+// -- Statistiky (Rozvoj administrace, bod 4): trend v čase a provozní čísla,
+// která /admin/ucetnictvi neřeší (to je účetní přehled peněz, ne provozu).
+// "trzbyPoMesicich" schválně použije STEJNÁ pravidla jako kategorie A výš
+// (stav potvrzena+dokoncena podle data masáže + prodejna) — ať v aplikaci
+// nevznikne druhá, nekonzistentní definice "tržby". Zbytek (počet, oblíbenost,
+// průměrná cena) už vychází jen z "dokoncena" — skutečně odvedené masáže, ne
+// jen objednané (budoucí "potvrzena" by to zkreslovalo).
+app.get('/api/admin/statistiky', async (req, res) => {
+  try {
+    const { od, do: doParam } = req.query;
+    const vObdobi = iso => (!od || iso >= od) && (!doParam || iso <= doParam);
+
+    const [rez, prod] = await Promise.all([
+      db.query('SELECT stav, datum, cena, masaz FROM rezervace'),
+      db.query('SELECT cena, vytvoreno FROM prodeje')
+    ]);
+    const rezVObdobi = rez.rows.filter(r => vObdobi(r.datum));
+    const prodejnaVObdobi = prod.rows
+      .map(p => ({ castka: Number(p.cena) || 0, datum: p.vytvoreno.toISOString().slice(0, 10) }))
+      .filter(p => vObdobi(p.datum));
+
+    const mapaMesice = {};
+    rezVObdobi.filter(r => r.stav === 'potvrzena' || r.stav === 'dokoncena')
+      .forEach(r => { const m = r.datum.slice(0, 7); mapaMesice[m] = (mapaMesice[m] || 0) + (Number(r.cena) || 0); });
+    prodejnaVObdobi.forEach(p => { const m = p.datum.slice(0, 7); mapaMesice[m] = (mapaMesice[m] || 0) + p.castka; });
+    const trzbyPoMesicich = Object.entries(mapaMesice).sort((a, b) => a[0].localeCompare(b[0])).map(([mesic, castka]) => ({ mesic, castka }));
+
+    const dokoncene = rezVObdobi.filter(r => r.stav === 'dokoncena');
+    const pocetDokoncenychMasazi = dokoncene.length;
+
+    const mapaMasaze = {};
+    dokoncene.forEach(r => {
+      const k = r.masaz || '(bez názvu)';
+      if (!mapaMasaze[k]) mapaMasaze[k] = { masaz: k, pocet: 0, trzba: 0 };
+      mapaMasaze[k].pocet++;
+      mapaMasaze[k].trzba += Number(r.cena) || 0;
+    });
+    const nejzadanejsiMasaze = Object.values(mapaMasaze).sort((a, b) => b.pocet - a.pocet).slice(0, 10);
+
+    const trzbaDokoncene = dokoncene.reduce((s, r) => s + (Number(r.cena) || 0), 0);
+    const prumernaUtrata = pocetDokoncenychMasazi > 0 ? Math.round(trzbaDokoncene / pocetDokoncenychMasazi) : null;
+
+    // Míra zrušení/nedostavení — jmenovatel je VŠECHNY rezervace v období bez
+    // ohledu na aktuální stav (včetně "cekajici", tedy i budoucí, zatím
+    // nerozhodnuté) — jednoduchá, ale majitelka s tím musí počítat při čtení.
+    const pocetCelkem = rezVObdobi.length;
+    const pocetZrusenych = rezVObdobi.filter(r => r.stav === 'zrusena').length;
+    const pocetNedostavenaSe = rezVObdobi.filter(r => r.stav === 'nedostavila_se').length;
+
+    res.json({
+      obdobi: { od: od || null, do: doParam || null },
+      trzbyPoMesicich,
+      pocetDokoncenychMasazi,
+      nejzadanejsiMasaze,
+      prumernaUtrata,
+      zruseni: {
+        pocetCelkem, pocetZrusenych, pocetNedostavenaSe,
+        podilZrusenych: pocetCelkem > 0 ? pocetZrusenych / pocetCelkem : null,
+        podilNedostavenaSe: pocetCelkem > 0 ? pocetNedostavenaSe / pocetCelkem : null
+      }
+    });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
 // Denní (resp. libovolně častěji volaná — viz níže) úloha spouštěná zvenčí
 // (cron-job.org apod.) přes tajný klíč v URL: GET /api/cron/denni?klic=...
 //
