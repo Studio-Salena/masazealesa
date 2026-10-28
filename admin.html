@@ -27,9 +27,12 @@ body{font-family:'Nunito',sans-serif;background:var(--cream);color:var(--text);m
 
 /* LAYOUT */
 .admin-wrap{display:none;min-height:100vh}
-.sidebar{width:230px;background:#fff;border-right:2px solid var(--tan-light);position:fixed;top:0;left:0;bottom:0;padding:0;display:flex;flex-direction:column;box-shadow:2px 0 12px rgba(92,58,30,0.06);z-index:50;transition:transform 0.3s;overflow-y:auto}
-.sidebar-logo{font-family:'Dancing Script',cursive;font-size:1.4rem;color:var(--brown);padding:20px;border-bottom:1px solid var(--tan-light)}
-.sidebar-logo span{display:block;font-family:'Nunito',sans-serif;font-size:0.65rem;color:var(--text-light);font-weight:400;letter-spacing:1px;text-transform:uppercase}
+.sidebar{width:230px;background:#fff;border-right:2px solid var(--tan-light);position:fixed;top:0;left:0;bottom:0;padding:0;display:flex;flex-direction:column;box-shadow:2px 0 12px rgba(92,58,30,0.06);z-index:50;transition:transform 0.3s,width 0.2s;overflow-y:auto;overflow-x:hidden}
+.sidebar-logo{display:flex;align-items:center;justify-content:space-between;padding:20px;border-bottom:1px solid var(--tan-light)}
+.sidebar-logo-text{font-family:'Dancing Script',cursive;font-size:1.4rem;color:var(--brown);white-space:nowrap}
+.sidebar-logo-text span{display:block;font-family:'Nunito',sans-serif;font-size:0.65rem;color:var(--text-light);font-weight:400;letter-spacing:1px;text-transform:uppercase}
+.sidebar-collapse-btn{background:none;border:1px solid var(--tan-light);border-radius:6px;width:24px;height:24px;flex-shrink:0;cursor:pointer;color:var(--text-light);font-size:0.9rem;line-height:1;display:flex;align-items:center;justify-content:center;transition:transform 0.2s}
+.sidebar-collapse-btn:hover{border-color:var(--tan);color:var(--brown)}
 .nav-label{font-size:0.65rem;color:var(--text-light);text-transform:uppercase;letter-spacing:1.5px;padding:14px 20px 4px;font-weight:700}
 .nav-item{display:flex;align-items:center;gap:10px;padding:11px 20px;cursor:pointer;color:var(--text-light);font-weight:600;font-size:0.87rem;transition:all 0.2s;border-left:3px solid transparent;position:relative}
 .nav-item:hover{background:var(--cream);color:var(--brown)}
@@ -67,8 +70,25 @@ body{font-family:'Nunito',sans-serif;background:var(--cream);color:var(--text);m
 .zvonek-radek:hover,.zvonek-radek:focus{background:var(--cream);outline:none}
 .zvonek-pocet{background:var(--tan-light);color:var(--brown);border-radius:10px;padding:1px 8px;font-size:0.75rem;font-weight:700}
 
-.main{margin-left:230px;padding:80px 28px 28px;min-height:100vh}
+.main{margin-left:230px;padding:80px 28px 28px;min-height:100vh;transition:margin-left 0.2s}
 .page{display:none}
+
+/* SBALENÍ MENU (desktop) — jen od 769px výš, ať se nikdy nepotká s mobilním
+   výsuvným menu níž (to řeší vlastní, nezávislý stav .sidebar.open). */
+@media(min-width:769px){
+  .sidebar.collapsed{width:64px}
+  .sidebar.collapsed .sidebar-logo{padding:20px 10px;justify-content:center}
+  .sidebar.collapsed .sidebar-logo-text{display:none}
+  .sidebar.collapsed .sidebar-collapse-btn{transform:rotate(180deg)}
+  .sidebar.collapsed .nav-label{display:none}
+  .sidebar.collapsed .nav-item{justify-content:center;padding:11px 0}
+  .sidebar.collapsed .nav-item .nav-text,
+  .sidebar.collapsed .nav-item .nav-badge{display:none}
+  .sidebar.collapsed .logout-btn .nav-text{display:none}
+  .sidebar.collapsed .logout-btn .icon{display:inline-block!important}
+  .main.sidebar-collapsed-layout{margin-left:64px}
+  .topbar.sidebar-collapsed-layout{left:64px}
+}
 .page.active{display:block}
 .page-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:12px}
 .page-title{font-family:'Cormorant',serif;font-size:1.7rem;color:var(--brown)}
@@ -157,6 +177,7 @@ tr:hover td{background:#fffaf5}
 @media(max-width:768px){
   .sidebar{transform:translateX(-100%)}
   .sidebar.open{transform:translateX(0)}
+  .sidebar-collapse-btn{display:none}
   .topbar{left:0}
   .main{margin-left:0;padding:70px 14px 14px}
   .menu-toggle{display:block}
@@ -233,26 +254,29 @@ tr:hover td{background:#fffaf5}
 <!-- ADMIN -->
 <div class="admin-wrap" id="adminWrap">
   <div class="sidebar" id="sidebar">
-    <div class="sidebar-logo">🌸 Masáže Alesa<span>Admin panel</span></div>
+    <div class="sidebar-logo">
+      <span class="sidebar-logo-text">🌸 Masáže Alesa<span>Admin panel</span></span>
+      <button class="sidebar-collapse-btn" onclick="prepnoutSbaleniMenu()" id="sidebarCollapseBtn" title="Sbalit/rozbalit menu" aria-label="Sbalit/rozbalit menu">«</button>
+    </div>
     <div class="nav-label">Přehled</div>
-    <div class="nav-item active" onclick="showPage('prehled',this)"><span class="icon">📊</span> Přehled</div>
+    <div class="nav-item active" onclick="showPage('prehled',this)" title="Přehled"><span class="icon">📊</span><span class="nav-text"> Přehled</span></div>
     <div class="nav-label">Provoz</div>
-    <div class="nav-item" onclick="showPage('rezervace',this)"><span class="icon">📅</span> Rezervace <span class="nav-badge" id="navBadgeRez" style="display:none">0</span></div>
-    <div class="nav-item" onclick="showPage('poukazy',this)"><span class="icon">🎁</span> Poukazy <span class="nav-badge" id="navBadgePoukazy" style="display:none">0</span></div>
-    <div class="nav-item" onclick="showPage('zakaznici',this)"><span class="icon">👥</span> Zákazníci</div>
-    <div class="nav-item" onclick="showPage('newsletter',this)"><span class="icon">💌</span> Newsletter</div>
-    <div class="nav-item" onclick="showPage('sablony',this)"><span class="icon">✉️</span> Šablony e-mailů</div>
-    <div class="nav-item" onclick="showPage('cenik',this)"><span class="icon">💰</span> Ceník</div>
+    <div class="nav-item" onclick="showPage('rezervace',this)" title="Rezervace"><span class="icon">📅</span><span class="nav-text"> Rezervace</span> <span class="nav-badge" id="navBadgeRez" style="display:none">0</span></div>
+    <div class="nav-item" onclick="showPage('poukazy',this)" title="Poukazy"><span class="icon">🎁</span><span class="nav-text"> Poukazy</span> <span class="nav-badge" id="navBadgePoukazy" style="display:none">0</span></div>
+    <div class="nav-item" onclick="showPage('zakaznici',this)" title="Zákazníci"><span class="icon">👥</span><span class="nav-text"> Zákazníci</span></div>
+    <div class="nav-item" onclick="showPage('newsletter',this)" title="Newsletter"><span class="icon">💌</span><span class="nav-text"> Newsletter</span></div>
+    <div class="nav-item" onclick="showPage('sablony',this)" title="Šablony e-mailů"><span class="icon">✉️</span><span class="nav-text"> Šablony e-mailů</span></div>
+    <div class="nav-item" onclick="showPage('cenik',this)" title="Ceník"><span class="icon">💰</span><span class="nav-text"> Ceník</span></div>
     <div class="nav-label">Prodejna</div>
-    <div class="nav-item" onclick="showPage('masaze',this)"><span class="icon">🧖</span> Masáže</div>
-    <div class="nav-item" onclick="showPage('produkty',this)"><span class="icon">📦</span> Produkty <span class="nav-badge" id="navBadgeProdukty" style="display:none">0</span></div>
-    <div class="nav-item" onclick="showPage('kupony',this)"><span class="icon">🎟️</span> Slevové kupóny</div>
-    <div class="nav-item" onclick="showPage('ucetnictvi',this)"><span class="icon">📈</span> Účetnictví</div>
-    <div class="nav-item" onclick="showPage('statistiky',this)"><span class="icon">📊</span> Statistiky</div>
+    <div class="nav-item" onclick="showPage('masaze',this)" title="Masáže"><span class="icon">🧖</span><span class="nav-text"> Masáže</span></div>
+    <div class="nav-item" onclick="showPage('produkty',this)" title="Produkty"><span class="icon">📦</span><span class="nav-text"> Produkty</span> <span class="nav-badge" id="navBadgeProdukty" style="display:none">0</span></div>
+    <div class="nav-item" onclick="showPage('kupony',this)" title="Slevové kupóny"><span class="icon">🎟️</span><span class="nav-text"> Slevové kupóny</span></div>
+    <div class="nav-item" onclick="showPage('ucetnictvi',this)" title="Účetnictví"><span class="icon">📈</span><span class="nav-text"> Účetnictví</span></div>
+    <div class="nav-item" onclick="showPage('statistiky',this)" title="Statistiky"><span class="icon">📊</span><span class="nav-text"> Statistiky</span></div>
     <div class="nav-label">GDPR</div>
-    <div class="nav-item" onclick="showPage('retence',this)"><span class="icon">🗂️</span> Retence</div>
+    <div class="nav-item" onclick="showPage('retence',this)" title="Retence"><span class="icon">🗂️</span><span class="nav-text"> Retence</span></div>
     <div class="sidebar-footer">
-      <button class="logout-btn" onclick="logout()">Odhlásit se</button>
+      <button class="logout-btn" onclick="logout()" title="Odhlásit se"><span class="nav-text">Odhlásit se</span><span class="icon" style="display:none">🚪</span></button>
     </div>
   </div>
 
@@ -1241,6 +1265,7 @@ async function login() {
       sessionStorage.setItem('adminHeslo', zadaneHeslo);
       document.getElementById('loginOverlay').style.display = 'none';
       document.getElementById('adminWrap').style.display = 'flex';
+      obnovitSbaleniMenu();
       loadPrehled();
     } else {
       document.getElementById('loginError').style.display = 'block';
@@ -1254,10 +1279,30 @@ function logout() { sessionStorage.removeItem('adminHeslo'); location.reload(); 
 if (sessionStorage.getItem('adminHeslo')) {
   document.getElementById('loginOverlay').style.display = 'none';
   document.getElementById('adminWrap').style.display = 'flex';
+  obnovitSbaleniMenu();
   loadPrehled();
 }
 
 function toggleSidebar() { document.getElementById('sidebar').classList.toggle('open'); }
+// Sbalitelné postranní menu na desktopu (Rozvoj administrace, bod 6) — jen
+// mění vzhled (ikony místo textu), žádná stránka ani data se tím nemění.
+// Stav je čistě per-prohlížeč pohodlí (localStorage), ne nic, co by Claude
+// nebo server potřebovaly znát — proto obalené v try/catch, ať v privátním
+// okně nebo při zablokovaném úložišti jen tiše nezafunguje, nerozbije appku.
+function prepnoutSbaleniMenu() {
+  const sbaleno = document.getElementById('sidebar').classList.toggle('collapsed');
+  document.querySelector('.main').classList.toggle('sidebar-collapsed-layout', sbaleno);
+  document.querySelector('.topbar').classList.toggle('sidebar-collapsed-layout', sbaleno);
+  try { localStorage.setItem('adminSidebarSbaleno', sbaleno ? '1' : '0'); } catch (e) {}
+}
+function obnovitSbaleniMenu() {
+  let sbaleno = false;
+  try { sbaleno = localStorage.getItem('adminSidebarSbaleno') === '1'; } catch (e) {}
+  if (!sbaleno) return;
+  document.getElementById('sidebar').classList.add('collapsed');
+  document.querySelector('.main').classList.add('sidebar-collapsed-layout');
+  document.querySelector('.topbar').classList.add('sidebar-collapsed-layout');
+}
 
 function showPage(name, el) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
