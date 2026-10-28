@@ -45,6 +45,18 @@ body{font-family:'Nunito',sans-serif;background:var(--cream);color:var(--text);m
 .menu-toggle{display:none;background:none;border:none;font-size:1.4rem;cursor:pointer;color:var(--brown)}
 .topbar-user{font-size:0.82rem;color:var(--text-light);font-weight:600}
 
+/* GLOBÁLNÍ VYHLEDÁVÁNÍ */
+.topbar-search{position:relative;flex:1;max-width:420px;margin:0 20px}
+.topbar-search input{width:100%;padding:8px 12px;border:1.5px solid var(--tan-light);border-radius:8px;font-family:'Nunito',sans-serif;font-size:0.85rem;color:var(--brown);box-sizing:border-box}
+.topbar-search input:focus{outline:none;border-color:var(--tan)}
+.ghv-panel{display:none;position:absolute;top:calc(100% + 6px);left:0;right:0;background:#fff;border:1px solid var(--tan-light);border-radius:10px;box-shadow:0 8px 24px rgba(92,58,30,0.15);max-height:420px;overflow-y:auto;z-index:50}
+.ghv-panel.open{display:block}
+.ghv-skupina-nadpis{padding:8px 14px 4px;font-size:0.68rem;font-weight:700;color:var(--text-light);text-transform:uppercase;letter-spacing:0.04em}
+.ghv-polozka{padding:9px 14px;cursor:pointer;font-size:0.85rem;color:var(--brown);border-top:1px solid var(--tan-light)}
+.ghv-polozka:hover,.ghv-polozka:focus{background:var(--cream);outline:none}
+.ghv-polozka small{display:block;color:var(--text-light);font-size:0.75rem;margin-top:2px}
+.ghv-prazdno{padding:14px;color:var(--text-light);font-size:0.82rem;text-align:center}
+
 .main{margin-left:230px;padding:80px 28px 28px;min-height:100vh}
 .page{display:none}
 .page.active{display:block}
@@ -233,6 +245,11 @@ tr:hover td{background:#fffaf5}
 
   <div class="topbar">
     <button class="menu-toggle" onclick="toggleSidebar()">☰</button>
+    <div class="topbar-search">
+      <input type="text" id="ghvInput" placeholder="🔍 Hledat klientku, rezervaci, poukaz…" autocomplete="off"
+        oninput="globalniHledaniZmena()" onfocus="globalniHledaniZmena()" onkeydown="if(event.key==='Escape') globalniHledaniSkryt()">
+      <div class="ghv-panel" id="ghvPanel"></div>
+    </div>
     <div class="topbar-user">Masáže Alesa — Admin</div>
   </div>
 
@@ -1196,6 +1213,75 @@ function showPage(name, el) {
 
 function openModal(id) { document.getElementById(id).classList.add('open'); }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+// ── GLOBÁLNÍ VYHLEDÁVÁNÍ (horní lišta) ──
+let ghvCasovac = null;
+let ghvPosledniDotaz = 0; // pořadové číslo dotazu — zahodí odpověď na dotaz, který mezitím přestal být aktuální
+function globalniHledaniZmena() {
+  clearTimeout(ghvCasovac);
+  const q = document.getElementById('ghvInput').value.trim();
+  if (q.length < 2) { globalniHledaniSkryt(); return; }
+  ghvCasovac = setTimeout(() => globalniHledaniNacist(q), 300);
+}
+async function globalniHledaniNacist(q) {
+  const cisloDotazu = ++ghvPosledniDotaz;
+  const panel = document.getElementById('ghvPanel');
+  try {
+    const vysledky = await adminFetch(API + '/admin/hledat?q=' + encodeURIComponent(q)).then(r => r.json());
+    if (cisloDotazu !== ghvPosledniDotaz) return; // mezitím napsáno něco jiného, tahle odpověď je zastaralá
+    globalniHledaniVykreslit(vysledky);
+  } catch (e) { /* tichý neúspěch — vyhledávání není kritická funkce */ }
+}
+function globalniHledaniVykreslit(v) {
+  const panel = document.getElementById('ghvPanel');
+  const stavBadgeRez = { cekajici: '⏳ Čeká', potvrzena: '✅ Potvrzena', dokoncena: '🌸 Dokončena', nedostavila_se: '🚫 Nedostavila se', zrusena: '❌ Zrušena' };
+  const celkem = v.klientky.length + v.rezervace.length + v.poukazy.length;
+  if (!celkem) { panel.innerHTML = '<div class="ghv-prazdno">Nic nenalezeno.</div>'; panel.classList.add('open'); return; }
+  let html = '';
+  if (v.klientky.length) {
+    html += '<div class="ghv-skupina-nadpis">Klientky</div>';
+    html += v.klientky.map(k => `<div class="ghv-polozka" tabindex="0" onclick="ghvOtevritKlientku(${k.id})">
+      <strong>${escapeHtml(k.jmeno) || '—'}</strong>
+      <small>${escapeHtml(k.telefon) || ''}${k.telefon && k.email ? ' · ' : ''}${escapeHtml(k.email) || ''}</small>
+    </div>`).join('');
+  }
+  if (v.rezervace.length) {
+    html += '<div class="ghv-skupina-nadpis">Rezervace</div>';
+    html += v.rezervace.map(r => `<div class="ghv-polozka" tabindex="0" onclick="ghvOtevritRezervaci(${r.id})">
+      <strong>${escapeHtml(r.jmeno) || '—'}</strong>
+      <small>${new Date(r.datum).toLocaleDateString('cs-CZ')} ${r.cas_od || ''} · ${escapeHtml(r.masaz) || ''} · ${stavBadgeRez[r.stav] || r.stav}</small>
+    </div>`).join('');
+  }
+  if (v.poukazy.length) {
+    html += '<div class="ghv-skupina-nadpis">Poukazy</div>';
+    html += v.poukazy.map(p => `<div class="ghv-polozka" tabindex="0" onclick="ghvOtevritPoukaz(${p.id})">
+      <strong>${escapeHtml(p.kod)}</strong>
+      <small>${escapeHtml(p.kupujici_jmeno) || '—'} · ${Number(p.hodnota).toLocaleString('cs-CZ')} Kč · ${poukazZobrazenyStav(p).text}</small>
+    </div>`).join('');
+  }
+  panel.innerHTML = html;
+  panel.classList.add('open');
+}
+function globalniHledaniSkryt() {
+  document.getElementById('ghvPanel').classList.remove('open');
+}
+async function ghvOtevritKlientku(id) {
+  globalniHledaniSkryt();
+  await otevritDetailZakaznice(id);
+}
+async function ghvOtevritRezervaci(id) {
+  globalniHledaniSkryt();
+  if (!vsechnyRezervace.some(x => x.id === id)) await loadRezervace();
+  otevritDetailRezervace(id);
+}
+async function ghvOtevritPoukaz(id) {
+  globalniHledaniSkryt();
+  if (!posledniPoukazy.some(x => x.id === id)) await loadPoukazy();
+  zobrazitHistoriiPoukazu(id);
+}
+document.addEventListener('click', e => {
+  if (!e.target.closest('.topbar-search')) globalniHledaniSkryt();
+});
 
 // ── PŘEHLED ──
 async function loadPrehled() {

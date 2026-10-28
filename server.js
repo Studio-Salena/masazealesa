@@ -2398,6 +2398,46 @@ app.get('/api/admin/klientky/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
+// Globální vyhledávání napříč klientkami/rezervacemi/poukazy pro horní lištu
+// adminu (Fáze "Rozvoj administrace" bod 1). Klientky se hledají přes stejné
+// normalizované sloupce jako deduplikace při zakládání (viz normalizovatTelefon/
+// normalizovatEmail výš) — stejný princip "co je stejné" jako jinde v projektu.
+// Anonymizované klientky/rezervace mají dotčené sloupce NULL, takže se do
+// výsledků samy nedostanou (ILIKE proti NULL nikdy nevyhoví).
+app.get('/api/admin/hledat', async (req, res) => {
+  const q = String(req.query.q || '').trim();
+  if (q.length < 2) return res.json({ klientky: [], rezervace: [], poukazy: [] });
+  const vzor = '%' + q.toLowerCase() + '%';
+  const qEmail = normalizovatEmail(q) || '';
+  const qTelefon = normalizovatTelefon(q) || '';
+  try {
+    const [klientky, rezervace, poukazy] = await Promise.all([
+      db.query(
+        `SELECT id, jmeno, telefon, email FROM klientky
+         WHERE jmeno ILIKE $1 OR email_normalizovany ILIKE $1
+            OR ($2 <> '' AND telefon_normalizovany ILIKE '%' || $2 || '%')
+         ORDER BY jmeno LIMIT 5`,
+        [vzor, qTelefon]
+      ),
+      db.query(
+        `SELECT id, jmeno, datum, cas_od, masaz, stav FROM rezervace
+         WHERE jmeno ILIKE $1 OR poukaz_kod ILIKE $1 OR email ILIKE $1
+            OR ($2 <> '' AND telefon ILIKE '%' || $2 || '%')
+         ORDER BY datum DESC LIMIT 5`,
+        [vzor, qTelefon]
+      ),
+      db.query(
+        `SELECT id, kod, hodnota, zustatek, stav, platnost_do, kupujici_jmeno FROM poukazy
+         WHERE kod ILIKE $1 OR kupujici_jmeno ILIKE $1
+            OR ($2 <> '' AND kupujici_email ILIKE '%' || $2 || '%')
+         ORDER BY vytvoreno DESC LIMIT 5`,
+        [vzor, qEmail]
+      )
+    ]);
+    res.json({ klientky: klientky.rows, rezervace: rezervace.rows, poukazy: poukazy.rows });
+  } catch (e) { console.error('GET /api/admin/hledat selhalo:', e); res.status(500).json({ chyba: 'Interní chyba serveru.' }); }
+});
+
 // Ruční přidání klientky bez rezervace (nebo doplnění jména/e-mailu k
 // existující) — najde/založí podle normalizovaného telefonu, stejně jako
 // najitNeboVytvoritKlientku, ale mimo transakci rezervace/poukazu.
