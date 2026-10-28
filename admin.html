@@ -57,6 +57,16 @@ body{font-family:'Nunito',sans-serif;background:var(--cream);color:var(--text);m
 .ghv-polozka small{display:block;color:var(--text-light);font-size:0.75rem;margin-top:2px}
 .ghv-prazdno{padding:14px;color:var(--text-light);font-size:0.82rem;text-align:center}
 
+/* ZVONEČEK — upozornění v horní liště */
+.topbar-zvonek{position:relative}
+.zvonek-btn{position:relative;background:none;border:none;font-size:1.25rem;cursor:pointer;color:var(--brown);padding:6px;line-height:1}
+.zvonek-badge{position:absolute;top:0;right:0;background:var(--red);color:#fff;border-radius:10px;padding:1px 5px;font-size:0.62rem;font-weight:700}
+.zvonek-panel{left:auto;right:0;width:300px}
+.zvonek-radek{padding:10px 14px;cursor:pointer;font-size:0.85rem;color:var(--brown);border-top:1px solid var(--tan-light);display:flex;justify-content:space-between;align-items:center}
+.zvonek-radek:first-child{border-top:none}
+.zvonek-radek:hover,.zvonek-radek:focus{background:var(--cream);outline:none}
+.zvonek-pocet{background:var(--tan-light);color:var(--brown);border-radius:10px;padding:1px 8px;font-size:0.75rem;font-weight:700}
+
 .main{margin-left:230px;padding:80px 28px 28px;min-height:100vh}
 .page{display:none}
 .page.active{display:block}
@@ -251,6 +261,10 @@ tr:hover td{background:#fffaf5}
       <input type="text" id="ghvInput" placeholder="🔍 Hledat klientku, rezervaci, poukaz…" autocomplete="off"
         oninput="globalniHledaniZmena()" onfocus="globalniHledaniZmena()" onkeydown="if(event.key==='Escape') globalniHledaniSkryt()">
       <div class="ghv-panel" id="ghvPanel"></div>
+    </div>
+    <div class="topbar-zvonek">
+      <button class="zvonek-btn" onclick="prepnoutZvonecek()" aria-label="Upozornění">🔔<span class="zvonek-badge" id="zvonekBadge" style="display:none">0</span></button>
+      <div class="ghv-panel zvonek-panel" id="zvonekPanel"></div>
     </div>
     <div class="topbar-user">Masáže Alesa — Admin</div>
   </div>
@@ -1284,12 +1298,48 @@ async function ghvOtevritPoukaz(id) {
 }
 document.addEventListener('click', e => {
   if (!e.target.closest('.topbar-search')) globalniHledaniSkryt();
+  if (!e.target.closest('.topbar-zvonek')) document.getElementById('zvonekPanel').classList.remove('open');
 });
 
+// ── ZVONEČEK (upozornění v horní liště) ──
+// Čerpá ze stejného posledniPrehledSouhrn, co naplní loadPrehled() — žádný
+// vlastní dotaz na server, ať zvoneček a postranní odznaky nikdy neukážou
+// jiná čísla (viz komentář u posledniPrehledSouhrn výš).
+function prepnoutZvonecek() {
+  document.getElementById('zvonekPanel').classList.toggle('open');
+}
+function vykreslitZvonecek() {
+  const s = posledniPrehledSouhrn;
+  const badge = document.getElementById('zvonekBadge');
+  const panel = document.getElementById('zvonekPanel');
+  if (!s) return;
+  const polozky = [
+    { pocet: s.cekajiciRezervace, text: 'Čekající rezervace', akce: "prehledJdiNa('rezervace','cekajici')" },
+    { pocet: s.noveZadosti, text: 'Nové žádosti o poukaz', akce: "prehledJdiNa('poukazy','zadosti')" },
+    { pocet: s.brzyExpiruji, text: 'Poukazy brzy expirují', akce: "prehledJdiNa('poukazy','expiruji')" },
+    { pocet: s.nizkySklad, text: 'Nízký sklad produktů', akce: "prehledJdiNa('produkty')" }
+  ].filter(p => p.pocet > 0);
+  const celkem = polozky.reduce((sum, p) => sum + p.pocet, 0);
+  if (celkem > 0) { badge.textContent = celkem; badge.style.display = 'inline-block'; }
+  else badge.style.display = 'none';
+  panel.innerHTML = polozky.length
+    ? polozky.map(p => `<div class="zvonek-radek" tabindex="0" onclick="prepnoutZvonecek();${p.akce}">
+        <span>${escapeHtml(p.text)}</span><span class="zvonek-pocet">${p.pocet}</span>
+      </div>`).join('')
+    : '<div class="ghv-prazdno">Žádná nová upozornění.</div>';
+}
+
 // ── PŘEHLED ──
+// Souhrn posledního načtení Přehledu — sdílený zdroj jak pro postranní
+// odznaky, tak pro zvoneček v horní liště (viz vykreslitZvonecek), ať obě
+// místa vždy ukazují stejná čísla místo dvou nezávislých dotazů na server.
+let posledniPrehledSouhrn = null;
 async function loadPrehled() {
   try {
-    const d = await adminFetch(API + '/admin/prehled').then(r => r.json());
+    const [d, produkty] = await Promise.all([
+      adminFetch(API + '/admin/prehled').then(r => r.json()),
+      adminFetch(API + '/admin/produkty').then(r => r.json())
+    ]);
     document.getElementById('stCelkem').textContent = d.rezervaceCelkem;
     document.getElementById('stCekajici').textContent = d.rezervaceCekajici;
     document.getElementById('stVolne').textContent = d.rezervaceBudouci;
@@ -1305,6 +1355,18 @@ async function loadPrehled() {
     const poukBadge = document.getElementById('navBadgePoukazy');
     if (d.poukazyZadostiNove > 0) { poukBadge.textContent = d.poukazyZadostiNove; poukBadge.style.display = 'inline-block'; }
     else poukBadge.style.display = 'none';
+    const nizkySklad = spocitatNizkySklad(produkty).length;
+    const produktyBadge = document.getElementById('navBadgeProdukty');
+    if (nizkySklad > 0) { produktyBadge.textContent = nizkySklad; produktyBadge.style.display = 'inline-block'; }
+    else produktyBadge.style.display = 'none';
+
+    posledniPrehledSouhrn = {
+      cekajiciRezervace: d.rezervaceCekajici,
+      noveZadosti: d.poukazyZadostiNove,
+      brzyExpiruji: d.poukazyBrzyExpirujiPocet ?? 0,
+      nizkySklad
+    };
+    vykreslitZvonecek();
   } catch (e) { /* tichá chyba na přehledu */ }
 }
 
@@ -3077,6 +3139,13 @@ async function smazatProdej(id) {
 let posledniProdukty = [];
 let aktivniProduktId = null;
 
+// Sdílené mezi loadProdukty() (stránka Produkty) a loadPrehled() (zvoneček
+// v horní liště) — ať se definice "nízký sklad" nemůže v jednom z míst
+// rozejít od druhého.
+function spocitatNizkySklad(produkty) {
+  return produkty.filter(p => p.aktivni && p.minimalni_sklad !== null && p.sklad <= p.minimalni_sklad);
+}
+
 async function loadProdukty() {
   try {
     posledniProdukty = await adminFetch(API + '/admin/produkty').then(r => r.json());
@@ -3084,7 +3153,7 @@ async function loadProdukty() {
     document.getElementById('pdCelkem').textContent = aktivni.length;
     document.getElementById('pdHodnotaSkladu').textContent = posledniProdukty
       .reduce((s, p) => s + (Number(p.nakupni_cena) || 0) * p.sklad, 0).toLocaleString('cs-CZ') + ' Kč';
-    const nizkych = aktivni.filter(p => p.minimalni_sklad !== null && p.sklad <= p.minimalni_sklad);
+    const nizkych = spocitatNizkySklad(posledniProdukty);
     document.getElementById('pdNizkySklad').textContent = nizkych.length;
     const badge = document.getElementById('navBadgeProdukty');
     if (nizkych.length) { badge.textContent = nizkych.length; badge.style.display = 'inline-block'; }
