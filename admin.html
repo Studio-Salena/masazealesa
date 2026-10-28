@@ -173,6 +173,20 @@ tr:hover td{background:#fffaf5}
 .pill.active{background:var(--tan);color:#fff;border-color:var(--tan)}
 .pill:hover:not(.active){border-color:var(--tan);color:var(--brown)}
 
+/* TABLET — mezikrok mezi mobilem a desktopem; dřív byl jen ostrý přechod
+   mobil/desktop a tablet dostával plný desktopový layout s 230px menu i při
+   užší šířce. !important je tu nutné: řada stats-grid má sloupce dané přímo
+   v HTML atributu style="grid-template-columns:repeat(N,1fr)" (3/4/5 sloupců
+   podle stránky) a inline styl jinak vždy přebije pravidlo ze stylesheetu bez
+   ohledu na media query — stejný důvod, proč to mobilní pravidlo níž potřebuje
+   taky (dřív ho bez !important inline styl na většině stránek přebil). */
+@media(min-width:769px) and (max-width:1024px){
+  .table-wrap{overflow-x:auto}
+  table{font-size:0.82rem}
+  .stats-grid{grid-template-columns:repeat(2,1fr)!important}
+  .form-grid-3{grid-template-columns:1fr 1fr}
+}
+
 /* MOBILE */
 @media(max-width:768px){
   .sidebar{transform:translateX(-100%)}
@@ -181,7 +195,8 @@ tr:hover td{background:#fffaf5}
   .topbar{left:0}
   .main{margin-left:0;padding:70px 14px 14px}
   .menu-toggle{display:block}
-  .stats-grid{grid-template-columns:repeat(2,1fr)}
+  .table-wrap{overflow-x:auto}
+  .stats-grid{grid-template-columns:repeat(2,1fr)!important}
   .form-grid-2,.form-grid-3,.prodej-grid{grid-template-columns:1fr}
   .table-header{flex-direction:column;align-items:flex-start}
   .page-header{flex-direction:column;align-items:flex-start}
