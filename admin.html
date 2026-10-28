@@ -2575,10 +2575,6 @@ async function otevritDetailZakaznice(id) {
         <div class="form-group"><label>Telefon</label><div>${escapeHtml(z.telefon)}</div></div>
       </div>
       <div class="form-group"><label>E-mail</label><div>${escapeHtml(z.email) || '—'}</div></div>
-      <div class="form-grid-2">
-        <div class="form-group"><label>Alergie</label><div>${escapeHtml(z.alergie) || '—'}</div></div>
-        <div class="form-group"><label>Preference</label><div>${escapeHtml(z.preference) || '—'}</div></div>
-      </div>
       <div class="form-group"><label>Interní poznámka</label><div>${escapeHtml(z.poznamka) || '—'}</div></div>
       <div class="stats-grid" style="grid-template-columns:repeat(3,1fr);margin:12px 0">
         <div class="stat-card"><div class="stat-label">Návštěvy (dokončené)</div><div class="stat-value">${z.pocetNavstev}</div></div>
@@ -2587,8 +2583,31 @@ async function otevritDetailZakaznice(id) {
         <div class="stat-card"><div class="stat-label">Poslední návštěva</div><div class="stat-value" style="font-size:1.1rem">${z.posledniNavstiva ? new Date(z.posledniNavstiva).toLocaleDateString('cs-CZ') : '—'}</div></div>
         <div class="stat-card"><div class="stat-label">Další rezervace</div><div class="stat-value" style="font-size:1rem">${z.dalsiRezervace ? new Date(z.dalsiRezervace.datum).toLocaleDateString('cs-CZ') + ' ' + String(z.dalsiRezervace.cas_od).slice(0,5) : 'Žádná další rezervace'}</div></div>
         <div class="stat-card"><div class="stat-label">Aktivní poukazy</div><div class="stat-value stat-green">${z.aktivniPoukazy}</div></div>
+        <div class="stat-card"><div class="stat-label">Zrušeno / nedostavila se</div><div class="stat-value stat-orange">${z.pocetZrusenych} / ${z.pocetNedostavenaSe}</div></div>
       </div>
       ${z.dalsiRezervace ? `<div style="font-size:0.82rem;color:var(--text-light);margin:-6px 0 12px">Další: ${escapeHtml(z.dalsiRezervace.masaz)} (${stavBadge[z.dalsiRezervace.stav] || z.dalsiRezervace.stav})</div>` : ''}
+
+      <div class="form-group" style="background:var(--tan-light);border-radius:10px;padding:10px 14px;margin:0 0 16px">
+        <label style="margin-bottom:6px">🩺 Zdravotní poznámky (viditelné stejně jako ostatní údaje v adminu)</label>
+        <div class="form-grid-2">
+          <div><small style="color:var(--text-light)">Alergie</small><div>${escapeHtml(z.alergie) || '—'}</div></div>
+          <div><small style="color:var(--text-light)">Preference</small><div>${escapeHtml(z.preference) || '—'}</div></div>
+        </div>
+      </div>
+
+      <h3 style="margin:16px 0 8px;font-size:1rem">🎁 Poukazy (${z.poukazySeznam.length})</h3>
+      ${z.poukazySeznam.length ? `<div class="table-wrap" style="margin:0 0 16px">
+        <table><thead><tr><th>Kód</th><th>Hodnota</th><th>Zůstatek</th><th>Platnost do</th><th>Stav</th><th></th></tr></thead>
+        <tbody>${z.poukazySeznam.map(p => { const stav = poukazZobrazenyStav(p); const badgeTrida = { aktivni: 'badge-ok', castecne_vyuzity: 'badge-cekajici', prosly: 'badge-zruseno', pouzity: 'badge-zruseno', zruseny: 'badge-zruseno' }[stav.klic] || ''; return `<tr>
+          <td><code style="background:var(--cream);padding:2px 6px;border-radius:4px">${escapeHtml(p.kod)}</code></td>
+          <td>${Number(p.hodnota).toLocaleString('cs-CZ')} Kč</td>
+          <td>${Number(p.zustatek).toLocaleString('cs-CZ')} Kč</td>
+          <td>${new Date(p.platnost_do).toLocaleDateString('cs-CZ')}</td>
+          <td><span class="badge ${badgeTrida}">${stav.text}</span></td>
+          <td><button class="btn btn-outline btn-sm" onclick="ghvOtevritPoukaz(${p.id})" title="Historie čerpání">📜</button></td>
+        </tr>`; }).join('')}</tbody></table>
+      </div>` : '<div class="empty" style="margin:0 0 16px">Žádné poukazy</div>'}
+
       <h3 style="margin:16px 0 8px;font-size:1rem">📜 Historie rezervací (${z.rezervace.length})</h3>
       <div class="table-wrap" style="margin:0">
         <table><thead><tr><th>Termín</th><th>Služba</th><th>Cena</th><th>Stav</th><th>Platba</th><th>Poznámka</th></tr></thead>

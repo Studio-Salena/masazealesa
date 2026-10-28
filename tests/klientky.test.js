@@ -219,6 +219,33 @@ async function main() {
     assert.equal(smazatSHistorii.status, 400, 'Klientku s rezervacemi/poukazy nelze smazat (ztratila by se historie)');
     console.log('OK — smazání klientky s historií (rezervace/poukazy) je odmítnuto, historie se nemůže ztratit');
 
+    // ================= 14) KARTA KLIENTKY: ZRUŠENO/NEDOSTAVILA SE, SEZNAM POUKAZŮ =================
+    // (Rozvoj administrace, bod 3 — osobní karta klientky) — r1/TEL1 má zatím
+    // jen "dokoncena" (r3) a "cekajici" (r4), takže počty musí vyjít přesně.
+    const r5 = await vytvorRezervaci(polozka.id, TEL1, 60, 'TEST-KLIENTKY Zrusena (smazat)');
+    uklidRezervace.push(r5.id);
+    await nastavStav(r5.id, 'zrusena');
+    const r6 = await vytvorRezervaci(polozka.id, TEL1, 65, 'TEST-KLIENTKY Nedostavila (smazat)');
+    uklidRezervace.push(r6.id);
+    await nastavStav(r6.id, 'nedostavila_se');
+
+    const detailPoZruseni = await adminFetch('/admin/klientky/' + r1.klientka_id).then(res => res.json());
+    assert.equal(detailPoZruseni.pocetZrusenych, 1, '14a) pocetZrusenych musí počítat přesně jednu zrušenou rezervaci');
+    assert.equal(detailPoZruseni.pocetNedostavenaSe, 1, '14a) pocetNedostavenaSe musí počítat přesně jednu nedostavenou rezervaci');
+    console.log('OK — 14a) karta klientky správně agreguje počet zrušených a nedostavených rezervací');
+
+    assert.ok(Array.isArray(detailPoZruseni.poukazySeznam), '14b) detail klientky musí vracet poukazySeznam jako pole');
+    const poukazVSeznamu = detailPoZruseni.poukazySeznam.find(p => p.id === poukazSTelefonem.poukaz.id);
+    assert.ok(poukazVSeznamu, '14b) dříve vydaný poukaz klientky musí být v poukazySeznam');
+    assert.equal(poukazVSeznamu.kod, poukazSTelefonem.poukaz.kod, '14b) poukazySeznam musí nést správný kód poukazu');
+    assert.equal(Number(poukazVSeznamu.zustatek), Number(poukazSTelefonem.poukaz.zustatek), '14b) poukazySeznam musí nést aktuální zůstatek');
+    console.log('OK — 14b) poukazySeznam v detailu klientky obsahuje skutečně vydaný poukaz se správnými údaji');
+
+    const seznamPoZruseni = await adminFetch('/admin/klientky').then(res => res.json());
+    const vSeznamuPoZruseni = seznamPoZruseni.find(z => z.id === r1.klientka_id);
+    assert.ok(!('poukazySeznam' in vSeznamuPoZruseni), '14c) seznam /admin/klientky nemá nést plný poukazySeznam (jen souhrn), stejně jako historie rezervací');
+    console.log('OK — 14c) seznam /admin/klientky zůstává bez poukazySeznam, stejně jako bez historie rezervací');
+
     console.log('\n✅ VŠECHNY TESTY KLIENTEK (Fáze 6D) PROŠLY');
   } finally {
     for (const id of uklidRezervace) await adminFetch(`/admin/rezervace/${id}`, { method: 'DELETE' }).catch(() => {});

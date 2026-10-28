@@ -2342,7 +2342,8 @@ async function nacistKlientkyReal() {
     db.query(`SELECT id, klientka_id, jmeno, telefon, email, datum, cas_od, cas_do, masaz, cena, uhrazeno,
                       stav, stav_platby, zpusob_platby, poukaz_kod, poznamka
                FROM rezervace WHERE klientka_id IS NOT NULL`),
-    db.query('SELECT klientka_id, stav, platnost_do FROM poukazy WHERE klientka_id IS NOT NULL')
+    db.query(`SELECT id, klientka_id, kod, hodnota, zustatek, stav, platnost_do
+               FROM poukazy WHERE klientka_id IS NOT NULL ORDER BY vytvoreno DESC`)
   ]);
 
   const mapa = new Map();
@@ -2350,7 +2351,8 @@ async function nacistKlientkyReal() {
     id: k.id, jmeno: k.jmeno, telefon: k.telefon, email: k.email,
     poznamka: k.poznamka || '', alergie: k.alergie || '', preference: k.preference || '',
     pocetNavstev: 0, celkemUtraceno: 0, posledniNavstiva: null, dalsiRezervace: null,
-    aktivniPoukazy: 0, rezervace: []
+    pocetZrusenych: 0, pocetNedostavenaSe: 0,
+    aktivniPoukazy: 0, poukazySeznam: [], rezervace: []
   }));
 
   const ted = new Date();
@@ -2368,6 +2370,8 @@ async function nacistKlientkyReal() {
       k.celkemUtraceno += Number(r.uhrazeno) || 0;
       if (!k.posledniNavstiva || r.datum > k.posledniNavstiva) k.posledniNavstiva = r.datum;
     }
+    if (r.stav === 'zrusena') k.pocetZrusenych++;
+    if (r.stav === 'nedostavila_se') k.pocetNedostavenaSe++;
     if (!['zrusena', 'nedostavila_se'].includes(r.stav)) {
       const terminCas = new Date(r.datum + 'T' + String(r.cas_od).slice(0, 5) + ':00');
       if (terminCas > ted) {
@@ -2383,6 +2387,7 @@ async function nacistKlientkyReal() {
   pouk.rows.forEach(p => {
     const k = mapa.get(p.klientka_id);
     if (!k) return;
+    k.poukazySeznam.push({ id: p.id, kod: p.kod, hodnota: Number(p.hodnota), zustatek: Number(p.zustatek), stav: p.stav, platnost_do: p.platnost_do });
     if (jePoukazSkutecneAktivni(p)) k.aktivniPoukazy++;
   });
 
@@ -2398,7 +2403,7 @@ app.get('/api/admin/klientky', async (req, res) => {
   try {
     const mapa = await nacistKlientkyReal();
     const seznam = [...mapa.values()]
-      .map(({ rezervace, ...zbytek }) => zbytek)
+      .map(({ rezervace, poukazySeznam, ...zbytek }) => zbytek)
       .sort((a, b) => {
         if (!a.posledniNavstiva) return 1;
         if (!b.posledniNavstiva) return -1;
