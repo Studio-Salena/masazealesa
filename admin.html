@@ -1200,6 +1200,18 @@ function escapeHtml(hodnota) {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 }
+// Sjednocené hlášení po uložení/chybě (Rozvoj administrace, bod 6) — nahrazuje
+// ručně psaný '<span style="color:var(--tan)">✅ ...</span>' / barva #c0392b
+// na chybu, dřív duplikovaný zvlášť na řadě míst. Zapisuje PŘÍMO do daného
+// elementu vedle příslušné akce (ne plovoucí toast) — stejné umístění jako
+// dosud, jen jedna společná implementace vzhledu místo kopií.
+function ukazatZpravu(elementId, text, typ = 'ok') {
+  const el = document.getElementById(elementId);
+  if (!el) return;
+  const barva = typ === 'ok' ? 'var(--tan)' : '#c0392b';
+  const ikona = typ === 'ok' ? '✅ ' : '';
+  el.innerHTML = `<span style="color:${barva}">${ikona}${escapeHtml(text)}</span>`;
+}
 // Pro hodnoty vkládané do inline onclick="...('ZDE')" — samotné escapeHtml nestačí,
 // protože prohlížeč HTML entity v atributu dekóduje ZPĚT dřív, než onclick spustí
 // jako JS (takže escapeHtml('") by JS řetězec před spuštěním stejně "rozbil").
@@ -2449,13 +2461,13 @@ async function nahratObrazekPoukazu(klic) {
       reader.readAsDataURL(soubor);
     });
     const res = await adminFetch(API + '/admin/nastaveni/poukaz_obrazek_' + klic, { method: 'PUT', body: JSON.stringify({ hodnota: dataUrl }) });
-    if (!res.ok) { msg.innerHTML = '<span style="color:#c0392b">Nahrání se nepodařilo.</span>'; return; }
+    if (!res.ok) { ukazatZpravu('ppObrazekMsg_' + klic, 'Nahrání se nepodařilo.', 'chyba'); return; }
     document.getElementById('ppVzorek_' + klic).dataset.obrazek = dataUrl;
     await vykreslitVzorek(klic);
-    msg.innerHTML = '<span style="color:var(--tan)">✅ Nový obrázek uložen.</span>';
+    ukazatZpravu('ppObrazekMsg_' + klic, 'Nový obrázek uložen.', 'ok');
     input.value = '';
   } catch (e) {
-    msg.innerHTML = '<span style="color:#c0392b">Zpracování obrázku se nepodařilo.</span>';
+    ukazatZpravu('ppObrazekMsg_' + klic, 'Zpracování obrázku se nepodařilo.', 'chyba');
   }
 }
 async function vratitVychoziObrazekPoukazu(klic) {
@@ -2509,14 +2521,14 @@ async function inicializovatVzorek(klic) {
   await vykreslitVzorek(klic);
 }
 async function ulozitPoziceTextu(klic) {
-  const msg = document.getElementById('ppPozMsg_' + klic);
   const ziskat = nazev => Number(document.getElementById('ppPoz_' + klic + '_' + nazev).value);
   const pozice = { left: ziskat('left'), right: ziskat('right'), pro: ziskat('pro'), hodnota: ziskat('hodnota'), platnost: ziskat('platnost'), kod: ziskat('kod') };
   if (POUKAZ_SABLONY[klic].logo) { pozice.logoTop = ziskat('logoTop'); pozice.logoLeft = ziskat('logoLeft'); pozice.logoRight = ziskat('logoRight'); }
   try {
     const res = await adminFetch(API + '/admin/nastaveni/poukaz_pozice_' + klic, { method: 'PUT', body: JSON.stringify({ hodnota: JSON.stringify(pozice) }) });
-    msg.innerHTML = res.ok ? '<span style="color:var(--tan)">✅ Pozice uloženy.</span>' : '<span style="color:#c0392b">Uložení se nepodařilo.</span>';
-  } catch (e) { msg.innerHTML = '<span style="color:#c0392b">Nejde se připojit k serveru.</span>'; }
+    if (res.ok) ukazatZpravu('ppPozMsg_' + klic, 'Pozice uloženy.', 'ok');
+    else ukazatZpravu('ppPozMsg_' + klic, 'Uložení se nepodařilo.', 'chyba');
+  } catch (e) { ukazatZpravu('ppPozMsg_' + klic, 'Nejde se připojit k serveru.', 'chyba'); }
 }
 async function resetovatPoziceTextu(klic) {
   if (!confirm('Vrátit výchozí pozice textu?')) return;
@@ -3513,12 +3525,12 @@ async function nahratObrazekKuponu() {
       reader.readAsDataURL(soubor);
     });
     const res = await adminFetch(API + '/admin/nastaveni/kupon_obrazek', { method: 'PUT', body: JSON.stringify({ hodnota: dataUrl }) });
-    if (!res.ok) { msg.innerHTML = '<span style="color:#c0392b">Nahrání se nepodařilo.</span>'; return; }
+    if (!res.ok) { ukazatZpravu('kgObrazekMsg', 'Nahrání se nepodařilo.', 'chyba'); return; }
     document.getElementById('kgNahledObrazku').src = dataUrl;
-    msg.innerHTML = '<span style="color:var(--tan)">✅ Nový obrázek uložen.</span>';
+    ukazatZpravu('kgObrazekMsg', 'Nový obrázek uložen.', 'ok');
     input.value = '';
   } catch (e) {
-    msg.innerHTML = '<span style="color:#c0392b">Zpracování obrázku se nepodařilo.</span>';
+    ukazatZpravu('kgObrazekMsg', 'Zpracování obrázku se nepodařilo.', 'chyba');
   }
 }
 async function vratitVychoziObrazekKuponu() {
