@@ -1013,9 +1013,10 @@ app.post('/api/login', (req, res) => {
 // ══════════════ VEŘEJNÉ ENDPOINTY ══════════════
 
 // Ceník pro zobrazení na webu (seřazeno podle skupiny a varianty)
+// Jen aktivni=true — skryté (starý ceník u už založených rezervací) se na web nepropisují.
 app.get('/api/cenik', async (req, res) => {
   try {
-    const { rows } = await db.query('SELECT * FROM cenik ORDER BY poradi_skupiny, poradi_varianty');
+    const { rows } = await db.query('SELECT * FROM cenik WHERE aktivni = true ORDER BY poradi_skupiny, poradi_varianty');
     res.json(rows);
   } catch (e) { console.error('GET /api/cenik selhalo:', e); res.status(500).json({ chyba: 'Interní chyba serveru.' }); }
 });
@@ -1105,7 +1106,7 @@ app.get('/api/rezervace/volne-terminy', async (req, res) => {
   try {
     const { rows: [polozkaCeniku] } = await db.query('SELECT * FROM cenik WHERE id = $1', [cenikIdCislo]);
     if (!polozkaCeniku) return res.status(404).json({ chyba: 'Tato masáž nebyla v ceníku nalezena.' });
-    if (!polozkaCeniku.rezervovatelna) return res.status(400).json({ chyba: 'Na tuto položku nelze rezervovat online.' });
+    if (!polozkaCeniku.rezervovatelna || !polozkaCeniku.aktivni) return res.status(400).json({ chyba: 'Na tuto položku nelze rezervovat online.' });
 
     res.json(await spocitatTerminyDne(datum, polozkaCeniku.delka_min));
   } catch (e) { console.error('GET /api/rezervace/volne-terminy selhalo:', e); res.status(500).json({ chyba: 'Interní chyba serveru.' }); }
@@ -1125,7 +1126,7 @@ app.get('/api/rezervace/kalendar', async (req, res) => {
   try {
     const { rows: [polozkaCeniku] } = await db.query('SELECT * FROM cenik WHERE id = $1', [cenikIdCislo]);
     if (!polozkaCeniku) return res.status(404).json({ chyba: 'Tato masáž nebyla v ceníku nalezena.' });
-    if (!polozkaCeniku.rezervovatelna) return res.status(400).json({ chyba: 'Na tuto položku nelze rezervovat online.' });
+    if (!polozkaCeniku.rezervovatelna || !polozkaCeniku.aktivni) return res.status(400).json({ chyba: 'Na tuto položku nelze rezervovat online.' });
 
     const dny = [];
     for (let i = 0; i < 7; i++) {
@@ -1174,7 +1175,7 @@ app.post('/api/rezervace', async (req, res) => {
 
     const { rows: [polozkaCeniku] } = await client.query('SELECT * FROM cenik WHERE id = $1', [cenik_id]);
     if (!polozkaCeniku) { await client.query('ROLLBACK'); return res.status(404).json({ chyba: 'Tato masáž nebyla v ceníku nalezena.' }); }
-    if (!polozkaCeniku.rezervovatelna) { await client.query('ROLLBACK'); return res.status(400).json({ chyba: 'Na tuto položku nelze rezervovat online.' }); }
+    if (!polozkaCeniku.rezervovatelna || !polozkaCeniku.aktivni) { await client.query('ROLLBACK'); return res.status(400).json({ chyba: 'Na tuto položku nelze rezervovat online.' }); }
 
     const rezervaceOd = await ziskatRezervaceOd();
     if (rezervaceOd && datum < rezervaceOd) {
@@ -2666,24 +2667,39 @@ app.get('/api/admin/cenik', async (req, res) => {
 });
 
 app.post('/api/admin/cenik', async (req, res) => {
-  const { skupina, emoji, varianta, delka_min, cena, rezervovatelna, poradi_skupiny, poradi_varianty } = req.body || {};
+  const { skupina, emoji, varianta, delka_min, cena, rezervovatelna, aktivni, poradi_skupiny, poradi_varianty } = req.body || {};
   if (!skupina || !varianta || !delka_min || cena === undefined) return res.status(400).json({ chyba: 'Vyplňte název masáže, variantu, délku a cenu.' });
   try {
     const { rows: [polozka] } = await db.query(
-      `INSERT INTO cenik (skupina, emoji, varianta, delka_min, cena, rezervovatelna, poradi_skupiny, poradi_varianty)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-      [skupina, emoji || '💆', varianta, delka_min, cena, rezervovatelna !== false, poradi_skupiny || 0, poradi_varianty || 0]
+      `INSERT INTO cenik (skupina, emoji, varianta, delka_min, cena, rezervovatelna, aktivni, poradi_skupiny, poradi_varianty)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [skupina, emoji || '💆', varianta, delka_min, cena, rezervovatelna !== false, aktivni !== false, poradi_skupiny || 0, poradi_varianty || 0]
     );
     res.json({ ok: true, polozka });
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
 app.put('/api/admin/cenik/:id', async (req, res) => {
-  const { skupina, emoji, varianta, delka_min, cena, rezervovatelna } = req.body || {};
+  // COALESCE + ?? null: tabulkový editor v adminu posílá jen varianta/delka_min/cena/
+  // rezervovatelna/aktivni (bez skupina/emoji) — bez téhle ochrany by nám chybějící
+  // pole (undefined) spadla na "pg nepovoluje undefined parametr" a skupina/emoji by
+  // se při každém uložení jedné položky vynulovaly.
+  const { skupina, emoji, varianta, delka_min, cena, rezervovatelna, aktivni } = req.body || {};
   try {
     await db.query(
-      'UPDATE cenik SET skupina = $1, emoji = $2, varianta = $3, delka_min = $4, cena = $5, rezervovatelna = $6 WHERE id = $7',
-      [skupina, emoji, varianta, delka_min, cena, rezervovatelna, req.params.id]
+      `UPDATE cenik SET
+         skupina = COALESCE($1, skupina),
+         emoji = COALESCE($2, emoji),
+         varianta = COALESCE($3, varianta),
+         delka_min = COALESCE($4, delka_min),
+         cena = COALESCE($5, cena),
+         rezervovatelna = COALESCE($6, rezervovatelna),
+         aktivni = COALESCE($7, aktivni)
+       WHERE id = $8`,
+      [skupina ?? null, emoji ?? null, varianta ?? null, delka_min ?? null, cena ?? null,
+       rezervovatelna === undefined ? null : rezervovatelna,
+       aktivni === undefined ? null : aktivni,
+       req.params.id]
     );
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ chyba: e.message }); }

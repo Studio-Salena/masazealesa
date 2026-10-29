@@ -1764,7 +1764,7 @@ async function otevritNovouRezervaci(predvyplnDatum, predvyplnCas) {
   openModal('modalNovaRezervace');
   try {
     const cenik = await adminFetch(API + '/admin/cenik').then(r => r.json());
-    sel.innerHTML = cenik.map(c => `<option value="${c.id}">${escapeHtml(c.skupina)} – ${escapeHtml(c.varianta)} (${c.delka_min} min)</option>`).join('');
+    sel.innerHTML = cenik.filter(c => c.aktivni !== false).map(c => `<option value="${c.id}">${escapeHtml(c.skupina)} – ${escapeHtml(c.varianta)} (${c.delka_min} min)</option>`).join('');
   } catch (e) {
     sel.innerHTML = '<option value="">Nepodařilo se načíst ceník</option>';
   }
@@ -1789,7 +1789,11 @@ async function otevritUpravitRezervaci(id) {
   openModal('modalNovaRezervace');
   try {
     const cenik = await adminFetch(API + '/admin/cenik').then(r => r.json());
-    sel.innerHTML = cenik.map(c => `<option value="${c.id}"${c.id === r.cenik_id ? ' selected' : ''}>${escapeHtml(c.skupina)} – ${escapeHtml(c.varianta)} (${c.delka_min} min)</option>`).join('');
+    // Nabídka jen z aktivních položek — kromě té, na kterou se tahle rezervace zakládá:
+    // ta v nabídce zůstane i když je mezitím skrytá (starý ceník), ať se dá rezervace
+    // upravit (např. posunout čas), aniž by se jí omylem přepsala cena na novou sazbu.
+    const nabidka = cenik.filter(c => c.aktivni !== false || c.id === r.cenik_id);
+    sel.innerHTML = nabidka.map(c => `<option value="${c.id}"${c.id === r.cenik_id ? ' selected' : ''}>${escapeHtml(c.skupina)} – ${escapeHtml(c.varianta)} (${c.delka_min} min)${c.aktivni === false ? ' — starý ceník' : ''}</option>`).join('');
   } catch (e) {
     sel.innerHTML = '<option value="">Nepodařilo se načíst ceník</option>';
   }
@@ -3190,11 +3194,12 @@ async function loadCenik() {
     document.getElementById('cenikTable').innerHTML = Object.entries(skupiny).map(([nazev, varianty]) => `
       <div style="padding:14px 20px;border-bottom:1px solid var(--tan-light)">
         <div style="font-family:'Cormorant',serif;font-size:1.1rem;color:var(--brown);margin-bottom:8px">${varianty[0].emoji} ${escapeHtml(nazev)}</div>
-        <table><tbody>${varianty.map(c => `<tr>
-          <td style="width:35%"><input value="${escapeHtml(c.varianta)}" id="cn-var-${c.id}" style="border:1px solid var(--tan-light);border-radius:6px;padding:5px 8px;width:100%;font-family:'Nunito',sans-serif"></td>
+        <table><tbody>${varianty.map(c => `<tr${c.aktivni === false ? ' style="opacity:0.55"' : ''}>
+          <td style="width:30%"><input value="${escapeHtml(c.varianta)}" id="cn-var-${c.id}" style="border:1px solid var(--tan-light);border-radius:6px;padding:5px 8px;width:100%;font-family:'Nunito',sans-serif"></td>
           <td><input type="number" value="${c.delka_min}" id="cn-delka-${c.id}" style="border:1px solid var(--tan-light);border-radius:6px;padding:5px 8px;width:65px;font-family:'Nunito',sans-serif"> min</td>
           <td><input type="number" value="${c.cena}" id="cn-cena-${c.id}" style="border:1px solid var(--tan-light);border-radius:6px;padding:5px 8px;width:85px;font-family:'Nunito',sans-serif"> Kč</td>
           <td><label style="font-size:0.72rem;color:var(--text-light);display:flex;align-items:center;gap:4px"><input type="checkbox" id="cn-rez-${c.id}" ${c.rezervovatelna ? 'checked' : ''}> lze rezervovat</label></td>
+          <td><label style="font-size:0.72rem;color:var(--text-light);display:flex;align-items:center;gap:4px"><input type="checkbox" id="cn-akt-${c.id}" ${c.aktivni !== false ? 'checked' : ''}> aktivní (na webu)</label></td>
           <td style="display:flex;gap:4px">
             <button class="btn btn-green btn-sm" onclick="ulozitPolozkuCeniku(${c.id})">💾</button>
             <button class="btn btn-red btn-sm" onclick="smazatPolozkuCeniku(${c.id})">🗑️</button>
@@ -3208,8 +3213,9 @@ async function ulozitPolozkuCeniku(id) {
   const delka_min = document.getElementById('cn-delka-' + id).value;
   const cena = document.getElementById('cn-cena-' + id).value;
   const rezervovatelna = document.getElementById('cn-rez-' + id).checked;
+  const aktivni = document.getElementById('cn-akt-' + id).checked;
   try {
-    await adminFetch(API + '/admin/cenik/' + id, { method: 'PUT', body: JSON.stringify({ varianta, delka_min, cena, rezervovatelna }) });
+    await adminFetch(API + '/admin/cenik/' + id, { method: 'PUT', body: JSON.stringify({ varianta, delka_min, cena, rezervovatelna, aktivni }) });
     loadCenik();
   } catch (e) { alert('Nejde se připojit k serveru — backend ještě neběží nebo není doplněná jeho adresa v proměnné API.'); }
 }
@@ -3247,7 +3253,7 @@ async function loadProdejna() {
     try {
       const cenik = await adminFetch(API + '/admin/cenik').then(r => r.json());
       const skupiny = {};
-      cenik.forEach(c => { (skupiny[c.skupina] = skupiny[c.skupina] || []).push(c); });
+      cenik.filter(c => c.aktivni !== false).forEach(c => { (skupiny[c.skupina] = skupiny[c.skupina] || []).push(c); });
       wrap.innerHTML = `
         <div class="prodej-grid" style="margin-bottom:14px">
           ${Object.entries(skupiny).map(([nazev, varianty]) => `
@@ -3829,7 +3835,7 @@ function exportCsvStatistiky() {
   let csv = 'Mesic;Trzba\n';
   posledniStatistiky.trzbyPoMesicich.forEach(m => { csv += `${m.mesic};${Math.round(m.castka)}\n`; });
   csv += '\nMasaz;Pocet;Trzba\n';
-  posledniStatistiky.nejzadanejsiMasaze.forEach(m => { csv += `${m.masaz};${m.pocet};${Math.round(m.trzba)}\n`; });
+  posledniStatistiky.nejzadanejsiMasaze.forEach(m => { csv += `${escapeHtml(m.masaz)};${m.pocet};${Math.round(m.trzba)}\n`; });
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);

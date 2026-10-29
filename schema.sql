@@ -65,6 +65,7 @@ create table if not exists cenik (
   delka_min integer not null,
   cena integer not null,
   rezervovatelna boolean not null default true, -- false = jen se zobrazí v ceníku, nejde na ni rezervovat (např. kineziotaping)
+  aktivni boolean not null default true, -- false = skryto z veřejného webu i z nabídky pro nové rezervace/rychlý prodej, ale zůstává v adminu pro historické (dřív založené) rezervace se starou cenou
   poradi_skupiny integer not null default 0,
   poradi_varianty integer not null default 0,
   unique (skupina, varianta, delka_min)
