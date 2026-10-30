@@ -252,6 +252,9 @@ tr:hover td{background:#fffaf5}
 #pbKarty{display:flex;flex-direction:column;gap:14px}
 .pb-blank{display:inline-block;min-width:90px;border-bottom:1.5px solid var(--brown)}
 
+/* ÚČTENKA — úzký pokladní formát pro 58mm bluetooth tiskárnu účtenek */
+#uctenkaObsah{font-family:'Courier New',monospace;font-size:0.8rem;line-height:1.5;white-space:pre-wrap;width:100%;max-width:280px;margin:0 auto}
+
 @media print{
   body *{visibility:hidden}
   #poukazPrintCard,#poukazPrintCard *{visibility:visible}
@@ -263,10 +266,13 @@ tr:hover td{background:#fffaf5}
   #pbKarty,#pbKarty *{visibility:visible}
   #pbKarty{position:fixed;top:0;left:0;right:0;display:flex;flex-direction:column;align-items:center;gap:5mm}
   #pbKarty .poukaz-print-card{width:100mm;height:70mm;flex-shrink:0}
+  #uctenkaObsah,#uctenkaObsah *{visibility:visible}
+  #uctenkaObsah{position:fixed;top:0;left:0;width:54mm;max-width:54mm;font-size:10px}
   .no-print{display:none!important}
 }
 </style>
 <style id="khPageFormat">@page{size:A4;margin:10mm}</style>
+<style id="uctenkaPageFormat"></style>
 </head>
 <body>
 
@@ -901,6 +907,7 @@ tr:hover td{background:#fffaf5}
       <button class="btn btn-outline" onclick="closeModal('modalPoukazTisk')">Zavřít</button>
       <button class="btn btn-outline" onclick="ulozitKartuJakoObrazek('poukazPrintCard', nazevSouboruPoukazu())">💾 Uložit obrázek</button>
       <button class="btn btn-outline" onclick="ulozitKartyJakoPdf('poukazPrintCard', nazevSouboruPoukazu())">📄 Uložit PDF</button>
+      <button class="btn btn-outline" onclick="otevritUctenkuPoukazu(posledniPoukazy.find(x => x.id === aktualniPoukazId))">🧾 Účtenka</button>
       <button class="btn btn-primary" onclick="window.print()">🖨️ Vytisknout</button>
     </div>
   </div>
@@ -932,6 +939,17 @@ tr:hover td{background:#fffaf5}
       <button class="btn btn-outline" onclick="ulozitKartuJakoObrazek('pbKarty', 'prazdne-poukazy')">💾 Uložit obrázek</button>
       <button class="btn btn-outline" onclick="ulozitKartyJakoPdf('pbKarty', 'prazdne-poukazy')">📄 Uložit PDF</button>
       <button class="btn btn-primary" onclick="window.print()">🖨️ Vytisknout</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Účtenka k tisku na 58mm bluetooth tiskárně (prodej masáže / vydání poukazu) -->
+<div class="modal-overlay" id="modalUctenka">
+  <div class="modal" style="max-width:360px">
+    <div id="uctenkaObsah"></div>
+    <div class="modal-footer no-print">
+      <button class="btn btn-outline" onclick="closeModal('modalUctenka')">Zavřít</button>
+      <button class="btn btn-primary" onclick="vytisknoutUctenku()">🧾 Vytisknout účtenku</button>
     </div>
   </div>
 </div>
@@ -2580,6 +2598,7 @@ let aktualniPoukazId = null;
 async function zobrazitPoukaz(id) {
   aktualniPoukazId = id;
   document.getElementById('ppSablona').value = localStorage.getItem('poukazSablona') || 'klasicky';
+  document.getElementById('uctenkaPageFormat').textContent = ''; // ať nezůstane aktivní z dříve vytištěné účtenky
   await vykreslitNahledPoukazu();
   openModal('modalPoukazTisk');
 }
@@ -2619,8 +2638,9 @@ async function vykreslitNahledPoukazu() {
 async function otevritPrazdnePoukazy() {
   document.getElementById('pbSablona').value = localStorage.getItem('poukazSablona') || 'klasicky';
   document.getElementById('pbPocet').value = '3';
-  // vynutit A4 bez ohledu na to, v jakém formátu se naposledy tiskly slevové kupóny
+  // vynutit A4 bez ohledu na to, v jakém formátu se naposledy tiskly slevové kupóny/účtenka
   document.getElementById('khPageFormat').textContent = '@page{size:A4;margin:10mm}';
+  document.getElementById('uctenkaPageFormat').textContent = '';
   await vykreslitPrazdnePoukazy();
   openModal('modalPoukazBlankTisk');
 }
@@ -2788,6 +2808,57 @@ async function ulozitKartyJakoPdf(idElementu, nazevSouboru) {
   } catch (e) {
     alert('Uložení do PDF se nepodařilo.');
   }
+}
+
+// ── ÚČTENKA (58mm bluetooth tiskárna, např. Cashino PTP-II) ──
+// Jednoduchý textový formát místo grafické kartičky — na malé pokladní
+// tiskárně nejde o žádný "ceníkový" tisk, jen o doklad o platbě. Tisk ze
+// stránky funguje přes libovolnou tiskovou appku, co umí z Androidu
+// přemostit prohlížeč na bluetooth tiskárnu (např. RawBT) — ta zachytí
+// tiskovou úlohu stránky a pošle ji na tiskárnu jako běžný tisk.
+const UCTENKA_SIRKA_ZNAKU = 32; // cca šířka 58mm papíru v monospace fontu
+function uctenkaOddelovac() { return '-'.repeat(UCTENKA_SIRKA_ZNAKU); }
+function uctenkaRadek(label, hodnota) {
+  return escapeHtml(label) + ': ' + escapeHtml(hodnota);
+}
+function otevritUctenku(radky) {
+  document.getElementById('uctenkaObsah').innerHTML = [
+    '🌸 Masáže Alesa',
+    uctenkaOddelovac(),
+    ...radky,
+    uctenkaOddelovac(),
+    'Děkujeme!'
+  ].join('\n');
+  document.getElementById('uctenkaPageFormat').textContent = '@page{size:58mm auto;margin:2mm}';
+  openModal('modalUctenka');
+}
+function vytisknoutUctenku() { window.print(); }
+function otevritUctenkuProdeje(prodej) {
+  const radky = [
+    uctenkaRadek('Datum', new Date(prodej.vytvoreno).toLocaleString('cs-CZ')),
+    uctenkaRadek('Masáž', prodej.masaz),
+  ];
+  if (prodej.poukaz_castka) {
+    radky.push(uctenkaRadek('Uplatněno z poukazu', Number(prodej.poukaz_castka).toLocaleString('cs-CZ') + ' Kč'));
+    const zbytek = Number(prodej.cena) - Number(prodej.poukaz_castka);
+    if (zbytek > 0) radky.push(uctenkaRadek('Doplatek (' + prodej.zpusob_platby + ')', zbytek.toLocaleString('cs-CZ') + ' Kč'));
+  } else {
+    radky.push(uctenkaRadek('Cena', Number(prodej.cena).toLocaleString('cs-CZ') + ' Kč'));
+    radky.push(uctenkaRadek('Způsob platby', prodej.zpusob_platby));
+  }
+  otevritUctenku(radky);
+}
+function otevritUctenkuPoukazu(poukaz) {
+  const zakoupenoLabel = { web: 'Přes web', osobne: 'Osobně v salonu', vratka: 'Vratka' }[poukaz.zakoupeno_kde] || poukaz.zakoupeno_kde;
+  const radky = [
+    uctenkaRadek('Datum', new Date(poukaz.vytvoreno).toLocaleString('cs-CZ')),
+    uctenkaRadek('Kód poukazu', poukaz.kod),
+    poukaz.konkretni_masaz ? uctenkaRadek('Masáž', poukaz.konkretni_masaz) : uctenkaRadek('Hodnota', Number(poukaz.hodnota).toLocaleString('cs-CZ') + ' Kč'),
+    uctenkaRadek('Platnost do', new Date(poukaz.platnost_do).toLocaleDateString('cs-CZ')),
+    uctenkaRadek('Zakoupeno', zakoupenoLabel),
+  ];
+  if (poukaz.kupujici_jmeno) radky.push(uctenkaRadek('Kupující', poukaz.kupujici_jmeno));
+  otevritUctenku(radky);
 }
 
 // ── ZÁKAZNÍCI / KLIENTKY ── Od Fáze 6D čte a zapisuje výhradně
@@ -3461,8 +3532,11 @@ async function potvrditProdej() {
   try {
     const res = await adminFetch(API + '/admin/prodejna', { method: 'POST', body: JSON.stringify({ masaz, cena, zpusob_platby, kupon_kod: kupon_kod || undefined, poukaz_kod: poukaz_kod || undefined }) });
     const data = await res.json();
-    if (res.ok) { document.getElementById('prodejForm').style.display = 'none'; loadProdejna(); loadKupony(); if (poukaz_kod) loadPoukazy(); }
-    else msg.innerHTML = '<div class="error-msg">' + (data.chyba || 'Nepodařilo se zapsat prodej.') + '</div>';
+    if (res.ok) {
+      document.getElementById('prodejForm').style.display = 'none';
+      loadProdejna(); loadKupony(); if (poukaz_kod) loadPoukazy();
+      otevritUctenkuProdeje(data.prodej);
+    } else msg.innerHTML = '<div class="error-msg">' + (data.chyba || 'Nepodařilo se zapsat prodej.') + '</div>';
   } catch (e) { msg.innerHTML = '<div class="error-msg">Nejde se připojit k serveru — backend ještě neběží nebo není doplněná jeho adresa v proměnné API.</div>'; }
 }
 async function smazatProdej(id) {
@@ -3729,6 +3803,7 @@ async function tisknoutKupon(id) {
   if (!k) return;
   document.getElementById('ktObrazek').src = await ziskatObrazekKuponu();
   document.getElementById('ktKod').textContent = k.kod;
+  document.getElementById('uctenkaPageFormat').textContent = ''; // ať nezůstane aktivní z dříve vytištěné účtenky
   openModal('modalKuponTisk');
 }
 // Hromadný tisk — vždy jen nepoužité kupóny (použitý se tisknout nemá smysl).
@@ -3760,6 +3835,7 @@ function zmenitFormatTiskuKuponu() {
   const sloupce = format === 'A3' ? 3 : 2;
   document.getElementById('khKarty').style.gridTemplateColumns = 'repeat(' + sloupce + ',1fr)';
   document.getElementById('khPageFormat').textContent = '@page{size:' + format + ';margin:10mm}';
+  document.getElementById('uctenkaPageFormat').textContent = '';
 }
 // Obrázek se před odesláním vždy zmenší/zkomprimuje v prohlížeči (canvas) —
 // appka ho ukládá jako base64 do stávající tabulky "nastaveni" (klíč
