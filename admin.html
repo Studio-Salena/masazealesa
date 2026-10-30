@@ -919,7 +919,8 @@ tr:hover td{background:#fffaf5}
     <div id="pbKarty"></div>
     <div class="modal-footer no-print">
       <button class="btn btn-outline" onclick="closeModal('modalPoukazBlankTisk')">Zavřít</button>
-      <button class="btn btn-outline" onclick="ulozitKartuJakoObrazek('pbKarty', 'prazdne-poukazy')">💾 Uložit</button>
+      <button class="btn btn-outline" onclick="ulozitKartuJakoObrazek('pbKarty', 'prazdne-poukazy')">💾 Uložit obrázek</button>
+      <button class="btn btn-outline" onclick="ulozitKartyJakoPdf('pbKarty', 'prazdne-poukazy')">📄 Uložit PDF</button>
       <button class="btn btn-primary" onclick="window.print()">🖨️ Vytisknout</button>
     </div>
   </div>
@@ -1309,6 +1310,7 @@ tr:hover td{background:#fffaf5}
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
 <script>
 // ⚠️ Jakmile zprovozníš backend na Renderu, sem doplň jeho URL adresu:
 const API = 'https://masazealesa.onrender.com/api';
@@ -2739,6 +2741,28 @@ async function ulozitKartuJakoObrazek(idElementu, nazevSouboru) {
     link.click();
   } catch (e) {
     alert('Uložení obrázku se nepodařilo.');
+  }
+}
+
+// Uložení (třeba) prázdných poukazů jako PDF — každá kartička má pevnou
+// tiskovou velikost 100×70 mm (viz POUKAZ_POMER_TISK), takže se na A4
+// rozmístí stejně, jako při tisku z prohlížeče (10mm okraj, 5mm mezera).
+async function ulozitKartyJakoPdf(idElementu, nazevSouboru) {
+  const kontejner = document.getElementById(idElementu);
+  const karty = kontejner.querySelectorAll('.poukaz-print-card');
+  const SIRKA_MM = 100, VYSKA_MM = 70, OKRAJ_MM = 10, MEZERA_MM = 5, SIRKA_A4_MM = 210;
+  try {
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
+    const x = (SIRKA_A4_MM - SIRKA_MM) / 2;
+    for (let i = 0; i < karty.length; i++) {
+      const canvas = await html2canvas(karty[i], { scale: 3, backgroundColor: '#ffffff' });
+      const y = OKRAJ_MM + i * (VYSKA_MM + MEZERA_MM);
+      pdf.addImage(canvas.toDataURL('image/png'), 'PNG', x, y, SIRKA_MM, VYSKA_MM);
+    }
+    pdf.save(nazevSouboru + '.pdf');
+  } catch (e) {
+    alert('Uložení do PDF se nepodařilo.');
   }
 }
 
