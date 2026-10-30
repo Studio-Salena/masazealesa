@@ -2532,7 +2532,7 @@ var UKAZKA_SABLONY = {
     logo: false,
     podklad: false,
     box: { left: '10%', right: '10%' },
-    radky: { pro: '53%', hodnota: '60%', platnost: '67%' }
+    radky: { pro: '53%', hodnota: '60%', platnost: '67%', kod: '74%' }
   },
   vanocni: {
     obrazek: 'assets/vanocni-poukaz.jpg',
@@ -2541,7 +2541,7 @@ var UKAZKA_SABLONY = {
     podklad: false,
     logoBox: { top: '8%', left: '32%', right: '15%' },
     box: { left: '32%', right: '15%' },
-    radky: { pro: '34%', hodnota: '44%', platnost: '54%' }
+    radky: { pro: '34%', hodnota: '44%', platnost: '54%', kod: '64%' }
   }
 };
 var ukazkaAktivniSablona = 'klasicky';
@@ -2603,7 +2603,7 @@ async function vykreslitUkazkuPoukazu() {
   if (ukazkaAktivniSablona !== klic) return; // mezitím přepnuto na jinou šablonu, zahodit zastaralou odpověď
   // Admin-uložené pozice (pokud existují) mají přednost před napevno danými výchozími z UKAZKA_SABLONY.
   var box = pozice ? { left: pozice.left + '%', right: pozice.right + '%' } : s.box;
-  var radky = pozice ? { pro: pozice.pro + '%', hodnota: pozice.hodnota + '%', platnost: pozice.platnost + '%' } : s.radky;
+  var radky = pozice ? { pro: pozice.pro + '%', hodnota: pozice.hodnota + '%', platnost: pozice.platnost + '%', kod: pozice.kod + '%' } : s.radky;
   el.style.backgroundImage = obrazek ? "url('" + obrazek + "')" : 'none';
   el.style.aspectRatio = pomer;
   // Bez pevného bílého podkladu jde jen o jemný textový stín, aby text nezmizel v obrázku
@@ -2616,7 +2616,8 @@ async function vykreslitUkazkuPoukazu() {
     '</div>' : '') +
     '<div class="pu-radek" style="' + radekStyl + 'top:' + radky.pro + ';left:' + box.left + ';right:' + box.right + '">Pro: <strong>— — —</strong></div>' +
     '<div class="pu-radek" style="' + radekStyl + 'top:' + radky.hodnota + ';left:' + box.left + ';right:' + box.right + '">Hodnota: <strong>1 000 Kč</strong></div>' +
-    '<div class="pu-radek" style="' + radekStyl + 'top:' + radky.platnost + ';left:' + box.left + ';right:' + box.right + '">Platnost: <strong>31. 12. 2027</strong></div>';
+    '<div class="pu-radek" style="' + radekStyl + 'top:' + radky.platnost + ';left:' + box.left + ';right:' + box.right + '">Platnost: <strong>31. 12. 2027</strong></div>' +
+    '<div class="pu-radek" style="' + radekStyl + 'top:' + radky.kod + ';left:' + box.left + ';right:' + box.right + '">Kód: <strong>ALESA-2026-ABC123</strong></div>';
 }
 document.addEventListener('DOMContentLoaded', vykreslitUkazkuPoukazu);
 
