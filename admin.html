@@ -537,10 +537,6 @@ tr:hover td{background:#fffaf5}
                   <div class="form-group" style="margin-bottom:0"><label style="font-size:0.72rem">Kód (% shora)</label><input type="number" id="ppPoz_vanocni_kod" min="0" max="100" oninput="vykreslitVzorek('vanocni')"></div>
                   <div class="form-group" style="margin-bottom:0"><label style="font-size:0.72rem">Okraj zleva (%)</label><input type="number" id="ppPoz_vanocni_left" min="0" max="100" oninput="vykreslitVzorek('vanocni')"></div>
                   <div class="form-group" style="margin-bottom:0"><label style="font-size:0.72rem">Okraj zprava (%)</label><input type="number" id="ppPoz_vanocni_right" min="0" max="100" oninput="vykreslitVzorek('vanocni')"></div>
-                  <div class="form-group" style="margin-bottom:0"><label style="font-size:0.72rem">Logo shora (%)</label><input type="number" id="ppPoz_vanocni_logoTop" min="0" max="100" oninput="vykreslitVzorek('vanocni')"></div>
-                  <div class="form-group" style="margin-bottom:0"></div>
-                  <div class="form-group" style="margin-bottom:0"><label style="font-size:0.72rem">Logo zleva (%)</label><input type="number" id="ppPoz_vanocni_logoLeft" min="0" max="100" oninput="vykreslitVzorek('vanocni')"></div>
-                  <div class="form-group" style="margin-bottom:0"><label style="font-size:0.72rem">Logo zprava (%)</label><input type="number" id="ppPoz_vanocni_logoRight" min="0" max="100" oninput="vykreslitVzorek('vanocni')"></div>
                 </div>
                 <div style="display:flex;gap:8px;margin-top:8px">
                   <button class="btn btn-primary btn-sm" onclick="ulozitPoziceTextu('vanocni')">Uložit pozice</button>
@@ -2503,9 +2499,8 @@ const POUKAZ_SABLONY = {
   },
   vanocni: {
     pomer: '1024/559',
-    logo: true,
+    logo: false, // logo je už napečené v samotném nahraném obrázku, nepřekrývat ho druhým
     stin: true,
-    logoBox: { top: '8%', left: '32%', right: '15%' },
     box: { left: '18%', right: '15%' },
     radky: { pro: '34%', hodnota: '44%', platnost: '54%', kod: '64%' }
   }
