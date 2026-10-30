@@ -1040,6 +1040,19 @@ app.get('/api/poukazy/obrazek/:klic', async (req, res) => {
   } catch (e) { console.error('GET /api/poukazy/obrazek selhalo:', e); res.status(500).json({ chyba: 'Interní chyba serveru.' }); }
 });
 
+// Pozice popisků (Pro/Hodnota/Platnost/okraje) pro ukázku na webu — stejný zdroj
+// (nastaveni.poukaz_pozice_<klic>), jaký si majitelka upravuje v adminu (panel
+// "Upravit pozice textu", viz ulozitPoziceTextu v admin.html), ať se web nikdy
+// nerozejde s tím, co je vidět v adminu. Stejné veřejné/whitelistované pravidlo
+// jako u /api/poukazy/obrazek/:klic výš.
+app.get('/api/poukazy/pozice/:klic', async (req, res) => {
+  if (!['klasicky', 'vanocni'].includes(req.params.klic)) return res.status(404).json({ chyba: 'Neznámá šablona.' });
+  try {
+    const { rows: [n] } = await db.query("SELECT hodnota FROM nastaveni WHERE klic = $1", ['poukaz_pozice_' + req.params.klic]);
+    res.json({ pozice: n && n.hodnota ? JSON.parse(n.hodnota) : null });
+  } catch (e) { console.error('GET /api/poukazy/pozice selhalo:', e); res.status(500).json({ chyba: 'Interní chyba serveru.' }); }
+});
+
 // Zjistí skutečnou otevírací dobu pro konkrétní datum: buď normální týdenní
 // pracovní dobu, nebo — pokud na ten den existuje "výjimka provozu" s vlastní
 // otevírací dobou — tu (ať jde nastavit třeba jeden den v měsíci s delší
