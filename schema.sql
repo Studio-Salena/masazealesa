@@ -200,6 +200,8 @@ create table if not exists klientky (
   preference text,
   aktivni boolean not null default true, -- příprava na budoucí "deaktivaci" bez mazání (GDPR, řeší až pozdější fáze)
   anonymizovano_kdy timestamptz, -- NULL dokud neproběhla anonymizace (GDPR, řeší až pozdější fáze)
+  marketing_odhlasen boolean not null default false, -- true = klientka se odhlásila z hromadných e-mailů (odkaz v každé zprávě)
+  marketing_odhlasovaci_token text, -- generuje se lazy při prvním hromadném e-mailu (crypto.randomBytes), ne hned při vzniku klientky
   vytvoreno timestamptz not null default now(),
   upraveno timestamptz not null default now()
 );

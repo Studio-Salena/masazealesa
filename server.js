@@ -1418,6 +1418,22 @@ app.get('/api/newsletter/odhlasit', async (req, res) => {
   } catch (e) { res.status(500).send('Chyba serveru.'); }
 });
 
+// Odhlášení z hromadných e-mailů klientkám (odkaz v každém takovém e-mailu) —
+// nezávislé na newsletteru, protože jde o jiný seznam příjemců (všechny
+// klientky, ne jen odběratelky newsletteru).
+app.get('/api/klientky/odhlasit-marketing', async (req, res) => {
+  const { token } = req.query;
+  if (!token) return res.status(400).send('Chybí odhlašovací odkaz.');
+  try {
+    const { rowCount } = await db.query(
+      'UPDATE klientky SET marketing_odhlasen = true WHERE marketing_odhlasovaci_token = $1', [token]
+    );
+    res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:60px">
+      <h2>${rowCount ? 'Byli jste odhlášeni z hromadných e-mailů salónu.' : 'Odkaz nenalezen (možná už jste odhlášeni).'}</h2>
+    </body></html>`);
+  } catch (e) { res.status(500).send('Chyba serveru.'); }
+});
+
 // ══════════════ ADMIN ENDPOINTY (heslo v hlavičce x-admin-heslo) ══════════════
 app.use('/api/admin', vyzadovatAdmina);
 
@@ -2350,6 +2366,7 @@ async function nacistKlientkyReal() {
   const mapa = new Map();
   klienti.rows.forEach(k => mapa.set(k.id, {
     id: k.id, jmeno: k.jmeno, telefon: k.telefon, email: k.email,
+    marketing_odhlasen: k.marketing_odhlasen,
     poznamka: k.poznamka || '', alergie: k.alergie || '', preference: k.preference || '',
     pocetNavstev: 0, celkemUtraceno: 0, posledniNavstiva: null, dalsiRezervace: null,
     pocetZrusenych: 0, pocetNedostavenaSe: 0,
@@ -2580,6 +2597,42 @@ app.post('/api/admin/klientky/:id/anonymizovat', async (req, res) => {
   } finally {
     client.release();
   }
+});
+
+// Hromadný e-mail všem klientkám (ne jen newsletterovým odběratelkám) — stejný
+// princip jako POST /api/admin/newsletter/odeslat: každé se posílá SAMOSTATNĚ,
+// takže žádná klientka nikdy neuvidí e-mail/jméno jiné (GDPR). Vynechává
+// anonymizované klientky (bez e-mailu) a ty, co se z hromadných e-mailů
+// odhlásily přes odkaz v předchozí zprávě (marketing_odhlasen).
+app.post('/api/admin/klientky/hromadny-email', async (req, res) => {
+  const { predmet, obsah } = req.body || {};
+  if (!predmet || !obsah) return res.status(400).json({ chyba: 'Vyplňte prosím předmět a obsah.' });
+  if (!process.env.RESEND_API_KEY) {
+    return res.status(500).json({ chyba: 'Rozesílání e-mailů zatím není nastavené (na Renderu chybí RESEND_API_KEY).' });
+  }
+  try {
+    const { rows: klientky } = await db.query(
+      `SELECT id, email, marketing_odhlasovaci_token FROM klientky
+       WHERE email IS NOT NULL AND email <> '' AND anonymizovano_kdy IS NULL AND marketing_odhlasen = false`
+    );
+    if (!klientky.length) return res.status(400).json({ chyba: 'Nejsou žádné klientky s e-mailem, které se dají oslovit.' });
+
+    let odeslano = 0;
+    for (const k of klientky) {
+      let token = k.marketing_odhlasovaci_token;
+      if (!token) {
+        token = crypto.randomBytes(20).toString('hex');
+        await db.query('UPDATE klientky SET marketing_odhlasovaci_token = $1 WHERE id = $2', [token, k.id]);
+      }
+      const odhlasitUrl = `${API_URL}/api/klientky/odhlasit-marketing?token=${token}`;
+      const html = emailSablona(`${obsah}
+        <p style="font-size:12px;color:#999;margin-top:30px;border-top:1px solid #f0ece6;padding-top:15px;">
+          Nechcete už tyto e-maily dostávat? <a href="${odhlasitUrl}" style="color:#bfa14f;">Odhlásit se z hromadných e-mailů</a>
+        </p>`);
+      if (await odeslatEmail(k.email, predmet, html)) odeslano++;
+    }
+    res.json({ ok: true, odeslano, celkem: klientky.length });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
 // Fáze 7G.3 — retenční engine, dry-run (READ-ONLY, nic nemění, nic nezapisuje

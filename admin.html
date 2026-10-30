@@ -587,6 +587,7 @@ tr:hover td{background:#fffaf5}
         <div class="table-actions">
           <button class="btn btn-primary" onclick="openModal('modalNovaZakaznice')">+ Přidat zákaznici</button>
           <button class="btn btn-outline" onclick="otevritHromadnyImport()">📋 Hromadný import</button>
+          <button class="btn btn-outline" onclick="otevritHromadnyEmailKlientkam()">📧 Hromadný e-mail klientkám</button>
           <button class="refresh-btn" onclick="loadZakaznici()">↻ Obnovit</button>
         </div>
       </div>
@@ -1137,6 +1138,22 @@ tr:hover td{background:#fffaf5}
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal('modalNovyNewsletter')">Zrušit</button>
       <button class="btn btn-primary" onclick="odeslatNewsletter()">Odeslat</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Hromadný e-mail všem klientkám (ne jen newsletterovým odběratelkám) -->
+<div class="modal-overlay" id="modalHromadnyEmailKlientkam">
+  <div class="modal">
+    <h3>📧 Hromadný e-mail klientkám</h3>
+    <div id="hekMsg"></div>
+    <p id="hekPocetPrijemcu" style="font-size:0.82rem;color:var(--text-light);margin-bottom:10px"></p>
+    <p style="font-size:0.78rem;color:var(--text-light);margin-bottom:10px">Každé klientce se e-mail odešle samostatně — nikdy neuvidí e-mail ani jméno jiné klientky. Každá zpráva obsahuje odkaz pro odhlášení z dalších hromadných e-mailů.</p>
+    <div class="form-group"><label>Předmět</label><input type="text" id="hekPredmet" placeholder="např. Nový ceník masáží 🌸"></div>
+    <div class="form-group"><label>Obsah</label><textarea id="hekObsah" rows="8" placeholder="Text e-mailu…"></textarea></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modalHromadnyEmailKlientkam')">Zrušit</button>
+      <button class="btn btn-primary" onclick="odeslatHromadnyEmailKlientkam()">Odeslat</button>
     </div>
   </div>
 </div>
@@ -3109,6 +3126,33 @@ async function odeslatNewsletter() {
       document.getElementById('nlPredmet').value = ''; document.getElementById('nlObsah').value = '';
       alert(`Odesláno ${data.odeslano} z ${data.celkem} odběratelek.`);
       loadNewsletter();
+    } else msg.innerHTML = '<div class="error-msg">' + (data.chyba || 'Nepodařilo se odeslat.') + '</div>';
+  } catch (e) { msg.innerHTML = '<div class="error-msg">Nejde se připojit k serveru.</div>'; }
+}
+
+function otevritHromadnyEmailKlientkam() {
+  const pocet = posledniZakaznici.filter(z => z.email && !z.marketing_odhlasen).length;
+  document.getElementById('hekPocetPrijemcu').textContent = pocet
+    ? `Klientek s e-mailem (bez odhlášených): ${pocet} — e-mail se odešle všem, každé samostatně.`
+    : 'Zatím žádná klientka s e-mailem, kterou by šlo oslovit.';
+  document.getElementById('hekMsg').innerHTML = '';
+  openModal('modalHromadnyEmailKlientkam');
+}
+async function odeslatHromadnyEmailKlientkam() {
+  const predmet = document.getElementById('hekPredmet').value.trim();
+  const obsah = document.getElementById('hekObsah').value.trim();
+  const msg = document.getElementById('hekMsg');
+  if (!predmet || !obsah) { msg.innerHTML = '<div class="error-msg">Vyplňte prosím předmět i obsah.</div>'; return; }
+  if (!confirm('Opravdu odeslat tento e-mail všem klientkám (každé samostatně)?')) return;
+  msg.innerHTML = '<div class="loading">Odesílám...</div>';
+  try {
+    const obsahHtml = obsah.replace(/\n/g, '<br>');
+    const res = await adminFetch(API + '/admin/klientky/hromadny-email', { method: 'POST', body: JSON.stringify({ predmet, obsah: obsahHtml }) });
+    const data = await res.json();
+    if (data.ok) {
+      closeModal('modalHromadnyEmailKlientkam');
+      document.getElementById('hekPredmet').value = ''; document.getElementById('hekObsah').value = '';
+      alert(`Odesláno ${data.odeslano} z ${data.celkem} klientek.`);
     } else msg.innerHTML = '<div class="error-msg">' + (data.chyba || 'Nepodařilo se odeslat.') + '</div>';
   } catch (e) { msg.innerHTML = '<div class="error-msg">Nejde se připojit k serveru.</div>'; }
 }
