@@ -899,7 +899,8 @@ tr:hover td{background:#fffaf5}
     <div class="poukaz-print-card" id="poukazPrintCard"></div>
     <div class="modal-footer no-print">
       <button class="btn btn-outline" onclick="closeModal('modalPoukazTisk')">Zavřít</button>
-      <button class="btn btn-outline" onclick="ulozitKartuJakoObrazek('poukazPrintCard', 'poukaz')">💾 Uložit</button>
+      <button class="btn btn-outline" onclick="ulozitKartuJakoObrazek('poukazPrintCard', nazevSouboruPoukazu())">💾 Uložit obrázek</button>
+      <button class="btn btn-outline" onclick="ulozitKartyJakoPdf('poukazPrintCard', nazevSouboruPoukazu())">📄 Uložit PDF</button>
       <button class="btn btn-primary" onclick="window.print()">🖨️ Vytisknout</button>
     </div>
   </div>
@@ -908,14 +909,23 @@ tr:hover td{background:#fffaf5}
 <!-- MODAL: Tisk prázdných poukazů (3× na A4, k ručnímu vyplnění) -->
 <div class="modal-overlay" id="modalPoukazBlankTisk">
   <div class="modal" style="max-width:480px">
-    <div class="form-group no-print" style="margin-bottom:14px">
-      <label>Vzhled poukazu</label>
-      <select id="pbSablona" onchange="vykreslitPrazdnePoukazy()">
-        <option value="klasicky">🌸 Klasický</option>
-        <option value="vanocni">🎄 Vánoční</option>
-      </select>
+    <div class="form-grid-2 no-print" style="margin-bottom:14px">
+      <div class="form-group" style="margin-bottom:0">
+        <label>Vzhled poukazu</label>
+        <select id="pbSablona" onchange="vykreslitPrazdnePoukazy()">
+          <option value="klasicky">🌸 Klasický</option>
+          <option value="vanocni">🎄 Vánoční</option>
+        </select>
+      </div>
+      <div class="form-group" style="margin-bottom:0">
+        <label>Počet kusů</label>
+        <select id="pbPocet" onchange="vykreslitPrazdnePoukazy()">
+          <option value="3">3× na A4</option>
+          <option value="1">1× samostatně</option>
+        </select>
+      </div>
     </div>
-    <p class="no-print" style="font-size:0.85rem;color:var(--text-light);margin:0 0 10px">Na jednu stránku A4 se vytisknou 3 prázdné poukazy — údaje (pro koho, hodnota, platnost) na ně pak doplníš ručně.</p>
+    <p class="no-print" style="font-size:0.85rem;color:var(--text-light);margin:0 0 10px" id="pbPopisek">Na jednu stránku A4 se vytisknou 3 prázdné poukazy — údaje (pro koho, hodnota, platnost) na ně pak doplníš ručně.</p>
     <div id="pbKarty"></div>
     <div class="modal-footer no-print">
       <button class="btn btn-outline" onclick="closeModal('modalPoukazBlankTisk')">Zavřít</button>
@@ -2577,6 +2587,12 @@ async function zmenitSablonuPoukazu() {
   localStorage.setItem('poukazSablona', document.getElementById('ppSablona').value);
   await vykreslitNahledPoukazu();
 }
+// Název souboru pro uložení (obrázek/PDF) aktuálně zobrazeného vydaného
+// poukazu — podle jeho kódu, ať jde v e-mailu zákaznici hned poznat.
+function nazevSouboruPoukazu() {
+  const p = posledniPoukazy.find(x => x.id === aktualniPoukazId);
+  return p ? 'poukaz-' + p.kod : 'poukaz';
+}
 async function vykreslitNahledPoukazu() {
   const p = posledniPoukazy.find(x => x.id === aktualniPoukazId);
   if (!p) return;
@@ -2598,10 +2614,11 @@ async function vykreslitNahledPoukazu() {
   `;
 }
 
-// Prázdné (nevyplněné) poukazy k ručnímu dopsání — 3 kopie stejné šablony na
-// jednu A4 stránku (žádná konkrétní poukazová data, žádný čárový kód).
+// Prázdné (nevyplněné) poukazy k ručnímu dopsání — 1 nebo 3 kopie stejné
+// šablony na jednu A4 stránku (žádná konkrétní poukazová data, žádný kód).
 async function otevritPrazdnePoukazy() {
   document.getElementById('pbSablona').value = localStorage.getItem('poukazSablona') || 'klasicky';
+  document.getElementById('pbPocet').value = '3';
   // vynutit A4 bez ohledu na to, v jakém formátu se naposledy tiskly slevové kupóny
   document.getElementById('khPageFormat').textContent = '@page{size:A4;margin:10mm}';
   await vykreslitPrazdnePoukazy();
@@ -2609,6 +2626,7 @@ async function otevritPrazdnePoukazy() {
 }
 async function vykreslitPrazdnePoukazy() {
   const klic = document.getElementById('pbSablona').value;
+  const pocet = Number(document.getElementById('pbPocet').value);
   const s = await sablonaSPozicemi(klic);
   const obrazek = await ziskatObrazekPoukazu(klic);
   const stin = s.stin ? ' pp-text-shadow' : '';
@@ -2623,7 +2641,10 @@ async function vykreslitPrazdnePoukazy() {
       <div class="pp-radek${stin}" style="top:${s.radky.platnost};left:${s.box.left};right:${s.box.right}">Platnost: <span class="pb-blank">&nbsp;</span></div>
       <div class="pp-radek${stin}" style="top:${s.radky.kod};left:${s.box.left};right:${s.box.right}">Kód: <span class="pb-blank">&nbsp;</span></div>
     </div>`;
-  document.getElementById('pbKarty').innerHTML = karta + karta + karta;
+  document.getElementById('pbKarty').innerHTML = karta.repeat(pocet);
+  document.getElementById('pbPopisek').textContent = pocet === 1
+    ? 'Vytiskne se 1 prázdný poukaz — údaje (pro koho, hodnota, platnost) na něj pak doplníš ručně.'
+    : 'Na jednu stránku A4 se vytisknou 3 prázdné poukazy — údaje (pro koho, hodnota, platnost) na ně pak doplníš ručně.';
 }
 async function nahratObrazekPoukazu(klic) {
   const input = document.getElementById('ppSoubor_' + klic);
@@ -2744,12 +2765,15 @@ async function ulozitKartuJakoObrazek(idElementu, nazevSouboru) {
   }
 }
 
-// Uložení (třeba) prázdných poukazů jako PDF — každá kartička má pevnou
-// tiskovou velikost 100×70 mm (viz POUKAZ_POMER_TISK), takže se na A4
-// rozmístí stejně, jako při tisku z prohlížeče (10mm okraj, 5mm mezera).
+// Uložení prázdných poukazů (i jediné vydané kartičky) jako PDF — každá
+// kartička má pevnou tiskovou velikost 100×70 mm (viz POUKAZ_POMER_TISK),
+// takže se na A4 rozmístí stejně, jako při tisku z prohlížeče (10mm okraj,
+// 5mm mezera). idElementu může být buď kontejner s více kartičkami
+// (prázdné poukazy), nebo rovnou jedna kartička (vydaný poukaz).
 async function ulozitKartyJakoPdf(idElementu, nazevSouboru) {
   const kontejner = document.getElementById(idElementu);
-  const karty = kontejner.querySelectorAll('.poukaz-print-card');
+  const karty = kontejner.classList.contains('poukaz-print-card')
+    ? [kontejner] : kontejner.querySelectorAll('.poukaz-print-card');
   const SIRKA_MM = 100, VYSKA_MM = 70, OKRAJ_MM = 10, MEZERA_MM = 5, SIRKA_A4_MM = 210;
   try {
     const { jsPDF } = window.jspdf;
