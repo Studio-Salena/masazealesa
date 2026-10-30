@@ -2390,7 +2390,12 @@ async function vydatPoukaz() {
   if (druh === 'masaz') body.cenik_id = id; else body.poukaz_typ_id = id;
   try {
     const res = await adminFetch(API + '/admin/poukazy', { method: 'POST', body: JSON.stringify(body) });
-    if (res.ok) { closeModal('modalNovyPoukaz'); loadPoukazy(); } else msg.innerHTML = '<div class="error-msg">Nepodařilo se vydat poukaz.</div>';
+    const data = await res.json();
+    if (res.ok) {
+      closeModal('modalNovyPoukaz');
+      await loadPoukazy();
+      zobrazitPoukaz(data.poukaz.id); // rovnou náhled k tisku, ať ho majitelka vidí ještě než poukaz vytiskne
+    } else msg.innerHTML = '<div class="error-msg">Nepodařilo se vydat poukaz.</div>';
   } catch (e) { msg.innerHTML = '<div class="error-msg">Nejde se připojit k serveru — backend ještě neběží nebo není doplněná jeho adresa v proměnné API.</div>'; }
 }
 async function smazatPoukaz(id) {
