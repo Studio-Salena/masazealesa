@@ -2296,7 +2296,7 @@ async function loadPoukazyTypy() {
     const npTyp = document.getElementById('npTyp');
     if (npTyp) {
       const cenik = await adminFetch(API + '/admin/cenik').then(r => r.json()).catch(() => []);
-      const masazeOptions = cenik.filter(c => c.rezervovatelna)
+      const masazeOptions = cenik.filter(c => c.rezervovatelna && c.aktivni !== false)
         .map(c => `<option value="masaz:${c.id}">${escapeHtml(c.skupina)} – ${escapeHtml(c.varianta)} (${Number(c.cena).toLocaleString('cs-CZ')} Kč)</option>`).join('');
       const castkyOptions = posledniTypyPoukazu.length
         ? posledniTypyPoukazu.map(t => `<option value="typ:${t.id}">${Number(t.hodnota).toLocaleString('cs-CZ')} Kč — platí ${t.platnost_mesicu} měsíců</option>`).join('')
