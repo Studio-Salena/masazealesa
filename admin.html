@@ -255,14 +255,14 @@ tr:hover td{background:#fffaf5}
 @media print{
   body *{visibility:hidden}
   #poukazPrintCard,#poukazPrintCard *{visibility:visible}
-  #poukazPrintCard{position:fixed;top:20px;left:50%;transform:translateX(-50%);width:420px;box-shadow:none}
+  #poukazPrintCard{position:fixed;top:20px;left:50%;transform:translateX(-50%);width:100mm;height:70mm;box-shadow:none}
   #ktKarta,#ktKarta *{visibility:visible}
   #ktKarta{position:fixed;top:20px;left:50%;transform:translateX(-50%);width:500px;box-shadow:none}
   #khKarty,#khKarty *{visibility:visible}
   #khKarty{position:fixed;top:10px;left:10px;right:10px;display:grid;gap:14px}
   #pbKarty,#pbKarty *{visibility:visible}
   #pbKarty{position:fixed;top:0;left:0;right:0;display:flex;flex-direction:column;align-items:center;gap:5mm}
-  #pbKarty .poukaz-print-card{width:122mm;flex-shrink:0}
+  #pbKarty .poukaz-print-card{width:100mm;height:70mm;flex-shrink:0}
   .no-print{display:none!important}
 }
 </style>
@@ -497,7 +497,7 @@ tr:hover td{background:#fffaf5}
         <div class="table-header"><h3>🖼️ Vzhled poukazu</h3></div>
         <div style="padding:16px;display:flex;gap:28px;flex-wrap:wrap">
           <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
-            <div class="poukaz-print-card" id="ppVzorek_klasicky" style="width:220px;aspect-ratio:795/532;flex-shrink:0"></div>
+            <div class="poukaz-print-card" id="ppVzorek_klasicky" style="width:220px;aspect-ratio:100/70;flex-shrink:0"></div>
             <div style="display:flex;flex-direction:column;gap:8px;min-width:240px">
               <strong style="font-size:0.85rem">🌸 Klasický</strong>
               <input type="file" id="ppSoubor_klasicky" accept="image/*" onchange="nahratObrazekPoukazu('klasicky')">
@@ -522,7 +522,7 @@ tr:hover td{background:#fffaf5}
             </div>
           </div>
           <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
-            <div class="poukaz-print-card" id="ppVzorek_vanocni" style="width:220px;aspect-ratio:1024/559;flex-shrink:0"></div>
+            <div class="poukaz-print-card" id="ppVzorek_vanocni" style="width:220px;aspect-ratio:100/70;flex-shrink:0"></div>
             <div style="display:flex;flex-direction:column;gap:8px;min-width:240px">
               <strong style="font-size:0.85rem">🎄 Vánoční</strong>
               <input type="file" id="ppSoubor_vanocni" accept="image/*" onchange="nahratObrazekPoukazu('vanocni')">
@@ -2489,16 +2489,18 @@ async function uplatnitPoukaz(id) {
 
 // Šablony grafického vzhledu poukazu k tisku — každá má vlastní pozadí (nahrané
 // přes admin nastavení, viz ziskatObrazekPoukazu níž) a pozice popisků.
+// Pevný poměr stran pro tisk/export obou šablon — 100×70 mm, spolehlivě se
+// vejde do obálky C6 (114×162 mm) i při tisku na 100 % měřítko. Nahrané
+// fotky (poměr cca 1200×846/844 px) se do něj vejdou prakticky beze ztráty.
+const POUKAZ_POMER_TISK = '100/70';
 const POUKAZ_SABLONY = {
   klasicky: {
-    pomer: '795/532',
     logo: false,
     stin: true,
     box: { left: '10%', right: '10%' },
     radky: { pro: '61%', hodnota: '68%', platnost: '75%', kod: '82%' }
   },
   vanocni: {
-    pomer: '1024/559',
     logo: false, // logo je už napečené v samotném nahraném obrázku, nepřekrývat ho druhým
     stin: true,
     box: { left: '18%', right: '15%' },
@@ -2518,24 +2520,6 @@ async function ziskatObrazekPoukazu(klic) {
     if (polozka && polozka.hodnota) return polozka.hodnota;
   } catch (e) { /* spadne na výchozí níž */ }
   return POUKAZ_VYCHOZI_OBRAZEK[klic];
-}
-
-// Skutečný poměr stran konkrétního obrázku (ne napevno daný z POUKAZ_SABLONY).
-// Majitelka si může nahrát vlastní fotku jiného tvaru, než má výchozí šablona
-// (viz Fáze audit 2026-10-27 — vánoční nahraný obrázek 1200×800 vs. šablonou
-// předpokládaných 1024×559 vypadal kvůli nesedícímu poměru zmenšený/oříznutý).
-// Kartička proto vždy použije poměr skutečně zobrazeného obrázku; s.pomer z
-// POUKAZ_SABLONY zůstává jen jako záložní tvar, když obrázek vůbec není.
-const _pomerObrazkuCache = new Map();
-function zjistitPomerObrazku(url) {
-  if (!url) return Promise.resolve(null);
-  if (_pomerObrazkuCache.has(url)) return Promise.resolve(_pomerObrazkuCache.get(url));
-  return new Promise(resolve => {
-    const img = new Image();
-    img.onload = () => { const p = img.naturalWidth + '/' + img.naturalHeight; _pomerObrazkuCache.set(url, p); resolve(p); };
-    img.onerror = () => resolve(null);
-    img.src = url;
-  });
 }
 
 // Výchozí pozice textu — vytažené z POUKAZ_SABLONY jako čistá čísla (bez "%"),
@@ -2593,7 +2577,7 @@ async function vykreslitNahledPoukazu() {
   const s = await sablonaSPozicemi(klic);
   const obrazek = await ziskatObrazekPoukazu(klic);
   const card = document.getElementById('poukazPrintCard');
-  card.style.aspectRatio = (await zjistitPomerObrazku(obrazek)) || s.pomer;
+  card.style.aspectRatio = POUKAZ_POMER_TISK;
   const stin = s.stin ? ' pp-text-shadow' : '';
   card.innerHTML = `
     ${obrazek ? `<img class="pp-bg" src="${obrazek}" alt="">` : ''}
@@ -2620,10 +2604,9 @@ async function vykreslitPrazdnePoukazy() {
   const klic = document.getElementById('pbSablona').value;
   const s = await sablonaSPozicemi(klic);
   const obrazek = await ziskatObrazekPoukazu(klic);
-  const pomer = (await zjistitPomerObrazku(obrazek)) || s.pomer;
   const stin = s.stin ? ' pp-text-shadow' : '';
   const karta = `
-    <div class="poukaz-print-card" style="aspect-ratio:${pomer}">
+    <div class="poukaz-print-card" style="aspect-ratio:${POUKAZ_POMER_TISK}">
       ${obrazek ? `<img class="pp-bg" src="${obrazek}" alt="">` : ''}
       ${s.logo ? `<div class="pp-logo-overlay${stin}" style="top:${s.logoBox.top};left:${s.logoBox.left};right:${s.logoBox.right}">
         <img src="assets/logo.png" alt="Masáže Alesa" style="max-width:100%;max-height:44px;display:block;margin:0 auto">
@@ -2687,7 +2670,7 @@ async function vykreslitVzorek(klic) {
   const stin = sablona.stin ? ' pp-text-shadow' : '';
   const vzorek = document.getElementById('ppVzorek_' + klic);
   const obrazek = vzorek.dataset.obrazek || '';
-  vzorek.style.aspectRatio = (await zjistitPomerObrazku(obrazek)) || sablona.pomer;
+  vzorek.style.aspectRatio = POUKAZ_POMER_TISK;
   const ziskat = nazev => document.getElementById('ppPoz_' + klic + '_' + nazev).value + '%';
   const left = ziskat('left'), right = ziskat('right');
   let logoHtml = '';
