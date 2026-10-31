@@ -2817,16 +2817,22 @@ async function ulozitKartyJakoPdf(idElementu, nazevSouboru) {
 // přemostit prohlížeč na bluetooth tiskárnu (např. RawBT) — ta zachytí
 // tiskovou úlohu stránky a pošle ji na tiskárnu jako běžný tisk.
 const UCTENKA_SIRKA_ZNAKU = 32; // cca šířka 58mm papíru v monospace fontu
+// Identifikační údaje prodávajícího — povinná náležitost účtenky (nejsme plátci
+// DPH, takže se nerozepisuje základ/sazba/výše DPH, jen souhrn). Stejné údaje
+// jako na ochrana-osobnich-udaju.html — menit na obou místech zároveň.
+const UCTENKA_PRODEJCE = ['Alena Hasalová', 'Masáže Alesa', 'Včelín 1211, 768 24 Hulín', 'IČO: 03237885'];
 function uctenkaOddelovac() { return '-'.repeat(UCTENKA_SIRKA_ZNAKU); }
 function uctenkaRadek(label, hodnota) {
   return escapeHtml(label) + ': ' + escapeHtml(hodnota);
 }
-function otevritUctenku(radky) {
+function otevritUctenku(radky, cisloDokladu) {
   document.getElementById('uctenkaObsah').innerHTML = [
-    '🌸 Masáže Alesa',
+    ...UCTENKA_PRODEJCE,
     uctenkaOddelovac(),
+    uctenkaRadek('Doklad č.', cisloDokladu),
     ...radky,
     uctenkaOddelovac(),
+    '736 734 951 · info@masazealesa.cz',
     'Děkujeme!'
   ].join('\n');
   document.getElementById('uctenkaPageFormat').textContent = '@page{size:58mm auto;margin:0}';
@@ -2841,12 +2847,12 @@ function otevritUctenkuProdeje(prodej) {
   if (prodej.poukaz_castka) {
     radky.push(uctenkaRadek('Uplatněno z poukazu', Number(prodej.poukaz_castka).toLocaleString('cs-CZ') + ' Kč'));
     const zbytek = Number(prodej.cena) - Number(prodej.poukaz_castka);
-    if (zbytek > 0) radky.push(uctenkaRadek('Doplatek (' + prodej.zpusob_platby + ')', zbytek.toLocaleString('cs-CZ') + ' Kč'));
+    if (zbytek > 0) radky.push(uctenkaRadek('Doplatek (' + (platbaZpusobLabel[prodej.zpusob_platby] || prodej.zpusob_platby) + ')', zbytek.toLocaleString('cs-CZ') + ' Kč'));
   } else {
     radky.push(uctenkaRadek('Cena', Number(prodej.cena).toLocaleString('cs-CZ') + ' Kč'));
-    radky.push(uctenkaRadek('Způsob platby', prodej.zpusob_platby));
+    radky.push(uctenkaRadek('Způsob platby', platbaZpusobLabel[prodej.zpusob_platby] || prodej.zpusob_platby));
   }
-  otevritUctenku(radky);
+  otevritUctenku(radky, 'P-' + prodej.id);
 }
 function otevritUctenkuPoukazu(poukaz) {
   const zakoupenoLabel = { web: 'Přes web', osobne: 'Osobně v salonu', vratka: 'Vratka' }[poukaz.zakoupeno_kde] || poukaz.zakoupeno_kde;
@@ -2857,8 +2863,9 @@ function otevritUctenkuPoukazu(poukaz) {
     uctenkaRadek('Platnost do', new Date(poukaz.platnost_do).toLocaleDateString('cs-CZ')),
     uctenkaRadek('Zakoupeno', zakoupenoLabel),
   ];
+  if (poukaz.zpusob_platby) radky.push(uctenkaRadek('Způsob platby', platbaZpusobLabel[poukaz.zpusob_platby] || poukaz.zpusob_platby));
   if (poukaz.kupujici_jmeno) radky.push(uctenkaRadek('Kupující', poukaz.kupujici_jmeno));
-  otevritUctenku(radky);
+  otevritUctenku(radky, 'V-' + poukaz.id);
 }
 
 // ── ZÁKAZNÍCI / KLIENTKY ── Od Fáze 6D čte a zapisuje výhradně
