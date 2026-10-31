@@ -267,7 +267,7 @@ tr:hover td{background:#fffaf5}
   #pbKarty{position:fixed;top:0;left:0;right:0;display:flex;flex-direction:column;align-items:center;gap:5mm}
   #pbKarty .poukaz-print-card{width:100mm;height:70mm;flex-shrink:0}
   #uctenkaObsah,#uctenkaObsah *{visibility:visible}
-  #uctenkaObsah{position:fixed;top:0;left:0;width:54mm;max-width:54mm;font-size:10px}
+  #uctenkaObsah{position:fixed;top:0;left:0;width:54mm;max-width:54mm;font-size:10px;line-height:1.15;color:#000;font-weight:700;-webkit-print-color-adjust:exact;print-color-adjust:exact}
   .no-print{display:none!important}
 }
 </style>
@@ -2829,13 +2829,13 @@ function otevritUctenku(radky) {
     uctenkaOddelovac(),
     'Děkujeme!'
   ].join('\n');
-  document.getElementById('uctenkaPageFormat').textContent = '@page{size:58mm auto;margin:2mm}';
+  document.getElementById('uctenkaPageFormat').textContent = '@page{size:58mm auto;margin:0}';
   openModal('modalUctenka');
 }
 function vytisknoutUctenku() { window.print(); }
 function otevritUctenkuProdeje(prodej) {
   const radky = [
-    uctenkaRadek('Datum', new Date(prodej.vytvoreno).toLocaleString('cs-CZ')),
+    uctenkaRadek('Datum', new Date(prodej.vytvoreno).toLocaleString('cs-CZ', { dateStyle: 'short', timeStyle: 'short' })),
     uctenkaRadek('Masáž', prodej.masaz),
   ];
   if (prodej.poukaz_castka) {
@@ -2851,7 +2851,7 @@ function otevritUctenkuProdeje(prodej) {
 function otevritUctenkuPoukazu(poukaz) {
   const zakoupenoLabel = { web: 'Přes web', osobne: 'Osobně v salonu', vratka: 'Vratka' }[poukaz.zakoupeno_kde] || poukaz.zakoupeno_kde;
   const radky = [
-    uctenkaRadek('Datum', new Date(poukaz.vytvoreno).toLocaleString('cs-CZ')),
+    uctenkaRadek('Datum', new Date(poukaz.vytvoreno).toLocaleString('cs-CZ', { dateStyle: 'short', timeStyle: 'short' })),
     uctenkaRadek('Kód poukazu', poukaz.kod),
     poukaz.konkretni_masaz ? uctenkaRadek('Masáž', poukaz.konkretni_masaz) : uctenkaRadek('Hodnota', Number(poukaz.hodnota).toLocaleString('cs-CZ') + ' Kč'),
     uctenkaRadek('Platnost do', new Date(poukaz.platnost_do).toLocaleDateString('cs-CZ')),
