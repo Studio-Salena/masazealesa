@@ -3420,6 +3420,42 @@ app.get('/api/cron/denni', async (req, res) => {
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
+// Ranní souhrn dnešního programu pro majitelku — samostatný cron endpoint
+// (ne součást /api/cron/denni výš), ať si ho majitelka může v cron-job.org
+// naplánovat na přesný čas podle sebe (např. 7:00 ráno), nezávisle na tom,
+// jak často/kdy běží connect úloha pro připomínky. Stejný sdílený CRON_KLIC.
+app.get('/api/cron/ranni-prehled', async (req, res) => {
+  if (!CRON_KLIC || req.query.klic !== CRON_KLIC) {
+    return res.status(401).json({ chyba: 'Neplatný klíč.' });
+  }
+  try {
+    const dnesIso = new Date().toISOString().slice(0, 10);
+    const { rows: dnesniRezervace } = await db.query(
+      `SELECT cas_od, cas_do, jmeno, masaz, stav FROM rezervace
+       WHERE datum = $1 AND stav != 'zrusena' ORDER BY cas_od`,
+      [dnesIso]
+    );
+
+    const radky = dnesniRezervace.map(r => {
+      const cas = String(r.cas_od).slice(0, 5) + '–' + String(r.cas_do).slice(0, 5);
+      const nepotvrzeno = r.stav === 'cekajici' ? ' <strong style="color:#b23b3b">(nepotvrzeno)</strong>' : '';
+      return `<li><strong>${cas}</strong> — ${r.jmeno} (${r.masaz})${nepotvrzeno}</li>`;
+    }).join('');
+
+    const telo = dnesniRezervace.length
+      ? `<h2>Dnešní program — ${formatDatumCz(dnesIso)}</h2><p>${dnesniRezervace.length} rezervací:</p><ul>${radky}</ul>`
+      : `<h2>Dnešní program — ${formatDatumCz(dnesIso)}</h2><p>Na dnešek nemáte žádnou rezervaci.</p>`;
+
+    const odeslano = await odeslatEmail(
+      EMAIL_MAJITELKY,
+      `Dnešní program (${dnesniRezervace.length}) — ${formatDatumCz(dnesIso)}`,
+      emailSablona(telo)
+    );
+
+    res.json({ ok: true, pocetRezervaci: dnesniRezervace.length, odeslano });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
 // Fáze 7G.3 — retenční cron. Fail-closed stejným mechanismem jako /api/cron/
 // denni výš (sdílený CRON_KLIC). ZÁSADNÍ: smí jen DRY-RUN/report, NIKDY
 // neprovádí APPLY — automatický scheduler nesmí sám anonymizovat data, ani
