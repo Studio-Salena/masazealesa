@@ -2514,6 +2514,106 @@ app.post('/api/admin/klientky', async (req, res) => {
   }
 });
 
+// Úprava kontaktních údajů existující klientky (jméno/telefon/e-mail) —
+// na rozdíl od najitNeboVytvoritKlientku (COALESCE, nikdy nepřepíše) tohle je
+// výslovná ruční oprava z karty klientky v adminu, proto smí přepsat i už
+// vyplněné hodnoty. Telefon zůstává povinný a je to JEDINÝ identifikační
+// údaj (unique index na telefon_normalizovany) — změna na číslo, které už
+// patří JINÉ klientce, se vždy celá odmítne (409), nikdy automatické sloučení
+// (to by muselo být samostatný, výslovně schválený proces). Stejná validační
+// pravidla (min. 9 číslic po normalizaci, max. délky, e-mail s '@') jako u
+// POST /api/rezervace výš, ať se chová konzistentně v celém projektu.
+// Anonymizovanou klientku nejde upravovat — znovu zapsaný kontakt by jinak
+// fakticky zrušil efekt anonymizace.
+app.patch('/api/admin/klientky/:id', async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ chyba: 'Neplatné ID klientky.' });
+
+  let { jmeno, telefon, email } = req.body || {};
+  jmeno = typeof jmeno === 'string' ? jmeno.trim() : '';
+  telefon = typeof telefon === 'string' ? telefon.trim() : '';
+  email = typeof email === 'string' ? email.trim() : '';
+
+  if (!telefon) return res.status(400).json({ chyba: 'Telefonní číslo je povinné.' });
+  if (email && !email.includes('@')) return res.status(400).json({ chyba: 'Zadejte prosím platný e-mail.' });
+  if (jmeno.length > 100 || email.length > 200 || telefon.length > 30) {
+    return res.status(400).json({ chyba: 'Některé z vyplněných polí je příliš dlouhé.' });
+  }
+  const tn = normalizovatTelefon(telefon);
+  if (!tn || tn.length < 9) return res.status(400).json({ chyba: 'Zadejte prosím platné telefonní číslo.' });
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Advisory zámek MUSÍ se vzít dřív než "SELECT ... FOR UPDATE" na řádek
+    // klientky — stejné pořadí jako v najitNeboVytvoritKlientku (zámek, pak
+    // až práce s řádkem). Kdyby to bylo obráceně, běžná souběžná situace
+    // (někdo tady upravuje kontakt klientky X zrovna ve chvíli, kdy si ona
+    // sama telefonicky objednává novou rezervaci se stejným telefonem, který
+    // už má) by vytvořila opačné pořadí zámků než najitNeboVytvoritKlientku
+    // (ten bere nejdřív advisory zámek, pak řádek) → reálná hrozba deadlocku
+    // mezi touhle úpravou kontaktu a BĚŽNÝM zakládáním rezervace/poukazu.
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['klientka:' + tn]);
+
+    const { rows: [existujici] } = await client.query('SELECT * FROM klientky WHERE id = $1 FOR UPDATE', [id]);
+    if (!existujici) { await client.query('ROLLBACK'); return res.status(404).json({ chyba: 'Klientka nebyla nalezena.' }); }
+    if (existujici.anonymizovano_kdy) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ chyba: 'Klientka je anonymizovaná, údaje nelze upravit.' });
+    }
+
+    if (tn !== existujici.telefon_normalizovany) {
+      const { rows: [duplicita] } = await client.query(
+        'SELECT id FROM klientky WHERE telefon_normalizovany = $1 AND id != $2', [tn, id]
+      );
+      if (duplicita) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ chyba: 'Toto telefonní číslo už patří jiné klientce.' });
+      }
+    }
+
+    const emailNorm = normalizovatEmail(email);
+    const zmenenaPole = [];
+    if ((jmeno || null) !== existujici.jmeno) zmenenaPole.push('jmeno');
+    if (telefon !== existujici.telefon || tn !== existujici.telefon_normalizovany) zmenenaPole.push('telefon');
+    if ((email || null) !== existujici.email) zmenenaPole.push('email');
+
+    const { rows: [aktualizovana] } = await client.query(
+      `UPDATE klientky SET jmeno = $1, telefon = $2, telefon_normalizovany = $3, email = $4, email_normalizovany = $5, upraveno = now()
+       WHERE id = $6 RETURNING *`,
+      [jmeno || null, telefon, tn, email || null, emailNorm, id]
+    );
+
+    // Auditní stopa — jen NÁZVY změněných polí, nikdy původní/nové hodnoty:
+    // tahle tabulka musí přežít i budoucí anonymizaci klientky (viz
+    // anonymizovatKlientku), takže do ní záměrně nesmí uniknout osobní obsah,
+    // který by anonymizaci fakticky obešel.
+    if (zmenenaPole.length) {
+      await client.query(
+        `INSERT INTO klientky_udalosti (klientka_id, udalost, pole) VALUES ($1, 'upraveno_kontakt', $2)`,
+        [id, zmenenaPole.join(',')]
+      );
+    }
+
+    await client.query('COMMIT');
+    res.json({ ok: true, klientka: aktualizovana });
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch {}
+    // Záchranná síť nad už provedenou kontrolou duplicity výš: unique index
+    // na telefon_normalizovany je poslední, autoritativní pojistka (kontrola
+    // v kódu + advisory zámek dělají kolizi prakticky nemožnou, ale radši
+    // vracet srozumitelnou 409 než syrovou chybu Postgresu, kdyby k ní přesto
+    // došlo).
+    if (e.code === '23505') {
+      return res.status(409).json({ chyba: 'Toto telefonní číslo už patří jiné klientce.' });
+    }
+    res.status(500).json({ chyba: e.message });
+  } finally {
+    client.release();
+  }
+});
+
 // Hromadný import klientek (Fáze 9D) — admin v adminu sám sestaví a odškrtá
 // náhled (viz zpracovatHromadnyImport v admin.html), sem už přijde jen
 // seznam, který admin výslovně potvrdil. Znovu se tu ale ověřuje telefon

@@ -2888,6 +2888,7 @@ function otevritUctenkuTest() {
 // sekci ("zakaznici...") jsou jen pozůstatek pojmenování z doby před
 // přechodem — funkčně na starém modelu nezávisí.
 let posledniZakaznici = [];
+let aktualniZakaznice = null; // poslední načtený detail karty klientky (pro reset editačního formuláře při "Zrušit")
 async function loadZakaznici() {
   try {
     posledniZakaznici = await adminFetch(API + '/admin/klientky').then(r => r.json());
@@ -2949,12 +2950,28 @@ async function otevritDetailZakaznice(id) {
       nedostavila_se: '🚫 Nedostavila se', zrusena: '❌ Zrušena'
     };
     const platbaLabel = { nezaplaceno: '💸 Nezaplaceno', castecne_zaplaceno: '🟡 Částečně', zaplaceno: '✅ Zaplaceno' };
+    aktualniZakaznice = z;
     obsah.innerHTML = `
-      <div class="form-grid-2">
-        <div class="form-group"><label>Jméno</label><div>${escapeHtml(z.jmeno) || '—'}</div></div>
-        <div class="form-group"><label>Telefon</label><div>${escapeHtml(z.telefon)}</div></div>
+      <div id="zakKontaktZobrazeni">
+        <div class="form-grid-2">
+          <div class="form-group"><label>Jméno</label><div>${escapeHtml(z.jmeno) || '—'}</div></div>
+          <div class="form-group"><label>Telefon</label><div>${escapeHtml(z.telefon)}</div></div>
+        </div>
+        <div class="form-group"><label>E-mail</label><div>${escapeHtml(z.email) || '—'}</div></div>
+        <button class="btn btn-outline btn-sm" style="margin-bottom:14px" onclick="prepnoutEditaciKlientky()">✏️ Upravit údaje</button>
       </div>
-      <div class="form-group"><label>E-mail</label><div>${escapeHtml(z.email) || '—'}</div></div>
+      <div id="zakKontaktForma" style="display:none">
+        <div class="form-grid-2">
+          <div class="form-group"><label>Jméno</label><input type="text" id="zakEditJmeno" value="${escapeHtml(z.jmeno || '')}"></div>
+          <div class="form-group"><label>Telefon *</label><input type="text" id="zakEditTelefon" value="${escapeHtml(z.telefon || '')}"></div>
+        </div>
+        <div class="form-group"><label>E-mail</label><input type="email" id="zakEditEmail" value="${escapeHtml(z.email || '')}"></div>
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px">
+          <button class="btn btn-green btn-sm" id="zakEditUlozitBtn" onclick="ulozitKontaktKlientky(${z.id})">💾 Uložit</button>
+          <button class="btn btn-outline btn-sm" onclick="zrusitEditaciKlientky()">Zrušit</button>
+          <span id="zakEditZprava" style="font-size:0.82rem"></span>
+        </div>
+      </div>
       <div class="form-group"><label>Interní poznámka</label><div>${escapeHtml(z.poznamka) || '—'}</div></div>
       <div class="stats-grid" style="grid-template-columns:repeat(3,1fr);margin:12px 0">
         <div class="stat-card"><div class="stat-label">Návštěvy (dokončené)</div><div class="stat-value">${z.pocetNavstev}</div></div>
@@ -3006,6 +3023,58 @@ async function otevritDetailZakaznice(id) {
       </div>`;
   } catch (e) {
     obsah.innerHTML = '<div class="error-msg">Chyba načítání detailu.</div>';
+  }
+}
+// Úprava kontaktních údajů klientky přímo z karty (Rozvoj administrace, bod 1
+// schváleného auditu). "Zrušit" vrací formulář na hodnoty z aktualniZakaznice
+// (poslední skutečně uložený stav), ne na prázdno. Po úspěšném uložení se
+// karta znovu načte ze serveru (otevritDetailZakaznice), ať se nikde
+// neopakuje vykreslovací logika, a zároveň se obnoví seznam/odznaky
+// (loadZakaznici), aby se změna promítla i tam bez nutnosti ručního obnovení.
+function prepnoutEditaciKlientky() {
+  const forma = document.getElementById('zakKontaktForma');
+  const zobrazeni = document.getElementById('zakKontaktZobrazeni');
+  const zapnuto = forma.style.display === 'none';
+  forma.style.display = zapnuto ? 'block' : 'none';
+  zobrazeni.style.display = zapnuto ? 'none' : '';
+}
+function zrusitEditaciKlientky() {
+  if (aktualniZakaznice) {
+    document.getElementById('zakEditJmeno').value = aktualniZakaznice.jmeno || '';
+    document.getElementById('zakEditTelefon').value = aktualniZakaznice.telefon || '';
+    document.getElementById('zakEditEmail').value = aktualniZakaznice.email || '';
+  }
+  document.getElementById('zakEditZprava').textContent = '';
+  prepnoutEditaciKlientky();
+}
+async function ulozitKontaktKlientky(id) {
+  const btn = document.getElementById('zakEditUlozitBtn');
+  const zprava = document.getElementById('zakEditZprava');
+  const jmeno = document.getElementById('zakEditJmeno').value.trim();
+  const telefon = document.getElementById('zakEditTelefon').value.trim();
+  const email = document.getElementById('zakEditEmail').value.trim();
+  if (!telefon) { zprava.style.color = '#b8402a'; zprava.textContent = 'Telefon je povinný.'; return; }
+  // Zablokování tlačítka po dobu požadavku (stejný vzor jako ulozitVsechnyDny
+  // výš) — brání dvojímu odeslání při rychlém dvojkliku.
+  btn.disabled = true;
+  zprava.style.color = 'var(--text-light)'; zprava.textContent = 'Ukládám…';
+  try {
+    const res = await adminFetch(API + '/admin/klientky/' + encodeURIComponent(id), {
+      method: 'PATCH', body: JSON.stringify({ jmeno, telefon, email })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      loadZakaznici();
+      otevritDetailZakaznice(id);
+    } else {
+      zprava.style.color = '#b8402a';
+      zprava.textContent = data.chyba || 'Nepodařilo se uložit změny.';
+      btn.disabled = false;
+    }
+  } catch (e) {
+    zprava.style.color = '#b8402a';
+    zprava.textContent = 'Nejde se připojit k serveru.';
+    btn.disabled = false;
   }
 }
 // Fáze 7D.2B — GDPR anonymizace klientky. Backend (POST /admin/klientky/:id/
