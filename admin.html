@@ -885,7 +885,11 @@ tr:hover td{background:#fffaf5}
     <div class="page" id="page-system">
       <div class="page-header"><div class="page-title">⚙️ Systém</div></div>
       <div class="table-wrap">
-        <div class="empty" style="padding:24px">Zatím bez obsahu — místo pro budoucí technická nastavení.</div>
+        <div class="table-header"><h3>🧾 Tisk účtenky</h3></div>
+        <div style="padding:16px">
+          <p style="font-size:0.85rem;color:var(--text-light);margin:0 0 12px">Vytiskne vzorovou účtenku se smyšlenými údaji — pro vyzkoušení nebo doladění tiskárny (sytost, délka papíru...), bez nutnosti dělat skutečný prodej.</p>
+          <button class="btn btn-outline btn-sm" onclick="otevritUctenkuTest()">🧾 Testovací účtenka</button>
+        </div>
       </div>
     </div>
 
@@ -2866,6 +2870,15 @@ function otevritUctenkuPoukazu(poukaz) {
   if (poukaz.zpusob_platby) radky.push(uctenkaRadek('Způsob platby', platbaZpusobLabel[poukaz.zpusob_platby] || poukaz.zpusob_platby));
   if (poukaz.kupujici_jmeno) radky.push(uctenkaRadek('Kupující', poukaz.kupujici_jmeno));
   otevritUctenku(radky, 'V-' + poukaz.id);
+}
+function otevritUctenkuTest() {
+  const radky = [
+    uctenkaRadek('Datum', new Date().toLocaleString('cs-CZ', { dateStyle: 'short', timeStyle: 'short' })),
+    uctenkaRadek('Masáž', 'Klasická masáž 60 min'),
+    uctenkaRadek('Cena', '890 Kč'),
+    uctenkaRadek('Způsob platby', 'Hotově'),
+  ];
+  otevritUctenku(radky, 'TEST');
 }
 
 // ── ZÁKAZNÍCI / KLIENTKY ── Od Fáze 6D čte a zapisuje výhradně
