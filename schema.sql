@@ -304,7 +304,8 @@ create table if not exists newsletter_zpravy (
 create table if not exists klientky_udalosti (
   id serial primary key,
   klientka_id integer not null,
-  udalost text not null, -- zatím jediná hodnota: 'anonymizovano'
+  udalost text not null, -- 'anonymizovano', nebo 'upraveno_kontakt' (ruční oprava kontaktu z karty klientky)
+  pole text, -- jen u 'upraveno_kontakt': názvy změněných polí oddělené čárkou (např. 'jmeno,telefon') — NIKDY původní/nové hodnoty, ať tahle tabulka přežije i budoucí anonymizaci klientky beze stopy osobního obsahu
   kdy timestamptz not null default now()
 );
 
