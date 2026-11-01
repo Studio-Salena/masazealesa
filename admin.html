@@ -267,7 +267,7 @@ tr:hover td{background:#fffaf5}
   #pbKarty{position:fixed;top:0;left:0;right:0;display:flex;flex-direction:column;align-items:center;gap:5mm}
   #pbKarty .poukaz-print-card{width:100mm;height:70mm;flex-shrink:0}
   #uctenkaObsah,#uctenkaObsah *{visibility:visible}
-  #uctenkaObsah{position:fixed;top:0;left:0;width:54mm;max-width:54mm;font-size:10px;line-height:1.15;color:#000;font-weight:700;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  #uctenkaObsah{position:fixed;top:0;left:0;width:54mm;max-width:54mm;font-size:13px;line-height:1.3;color:#000;font-weight:700;-webkit-print-color-adjust:exact;print-color-adjust:exact}
   .no-print{display:none!important}
 }
 </style>
@@ -2871,7 +2871,7 @@ async function ulozitKartyJakoPdf(idElementu, nazevSouboru) {
 // stránky funguje přes libovolnou tiskovou appku, co umí z Androidu
 // přemostit prohlížeč na bluetooth tiskárnu (např. RawBT) — ta zachytí
 // tiskovou úlohu stránky a pošle ji na tiskárnu jako běžný tisk.
-const UCTENKA_SIRKA_ZNAKU = 32; // cca šířka 58mm papíru v monospace fontu
+const UCTENKA_SIRKA_ZNAKU = 26; // cca šířka 58mm papíru v monospace fontu při 13px
 // Identifikační údaje prodávajícího — povinná náležitost účtenky (nejsme plátci
 // DPH, takže se nerozepisuje základ/sazba/výše DPH, jen souhrn). Stejné údaje
 // jako na ochrana-osobnich-udaju.html — menit na obou místech zároveň.
