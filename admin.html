@@ -1113,6 +1113,7 @@ tr:hover td{background:#fffaf5}
   <div class="modal">
     <h3 id="nrModalNadpis">+ Přidat rezervaci</h3>
     <p id="nrModalHint" style="font-size:0.8rem;color:var(--text-light);margin-top:-8px">Jde i mimo běžnou otevírací dobu — hodí se pro klientky domluvené mimo web. Rezervace se rovnou založí jako potvrzená a pokud vyplníš e-mail, hned se jí pošle potvrzovací e-mail.</p>
+    <div id="nrKlientkaInfo" style="display:none;background:var(--tan-light);border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:0.85rem"></div>
     <div id="novaRezervaceMsg"></div>
     <div class="form-group"><label>Masáž</label>
       <select id="nrMasaz" style="width:100%;border:1px solid var(--tan-light);border-radius:6px;padding:8px"><option value="">Načítám…</option></select>
@@ -1123,12 +1124,14 @@ tr:hover td{background:#fffaf5}
     </div>
     <div class="form-grid-2">
       <div class="form-group"><label>Jméno a příjmení*</label><input type="text" id="nrJmeno" placeholder="Jana Nováková"></div>
-      <div class="form-group"><label>Telefon*</label><input type="tel" id="nrTelefon" placeholder="736 734 951"></div>
+      <div class="form-group"><label>Telefon*</label><input type="tel" id="nrTelefon" placeholder="736 734 951" oninput="kontrolaZmenyTelefonuRezervace()">
+        <div id="nrTelefonVarovani" style="display:none;color:#b45309;font-size:0.78rem;margin-top:4px">⚠️ Telefon byl oproti kartě klientky změněn — rezervace se může přiřadit jiné (nebo zcela nové) klientce.</div>
+      </div>
     </div>
     <div class="form-group"><label id="nrEmailLabel">E-mail*</label><input type="email" id="nrEmail" placeholder="jana@example.cz"></div>
     <div class="form-group"><label>Poznámka</label><input type="text" id="nrPoznamka" placeholder="Nepovinné"></div>
     <div class="modal-footer">
-      <button class="btn btn-outline" onclick="closeModal('modalNovaRezervace')">Zrušit</button>
+      <button class="btn btn-outline" onclick="zrusitFormularRezervace()">Zrušit</button>
       <button class="btn btn-primary" id="nrUlozitBtn" onclick="pridatRezervaci()">Přidat</button>
     </div>
   </div>
@@ -1793,8 +1796,30 @@ function akKliknoutNaDen(ev, datum, minMin) {
 }
 
 let upravovanaRezervaceId = null;
+// Kontext "rezervace založená z karty klientky" (viz otevritNovouRezervaciZKlientky) —
+// vždy se vynuluje při otevření běžné nové rezervace, editaci jiné rezervace,
+// zrušení formuláře i po úspěšném uložení, ať nezůstane viset a neovlivní
+// omylem příští rezervaci.
+let rezervaceZKlientkyId = null;
+let rezervaceZKlientkyPuvodniTelefon = '';
+function resetovatKontextKlientkyRezervace() {
+  rezervaceZKlientkyId = null;
+  rezervaceZKlientkyPuvodniTelefon = '';
+  document.getElementById('nrKlientkaInfo').style.display = 'none';
+  document.getElementById('nrTelefonVarovani').style.display = 'none';
+}
+function kontrolaZmenyTelefonuRezervace() {
+  if (!rezervaceZKlientkyId) return;
+  const zmeneno = document.getElementById('nrTelefon').value.trim() !== rezervaceZKlientkyPuvodniTelefon.trim();
+  document.getElementById('nrTelefonVarovani').style.display = zmeneno ? 'block' : 'none';
+}
+function zrusitFormularRezervace() {
+  closeModal('modalNovaRezervace');
+  resetovatKontextKlientkyRezervace();
+}
 async function otevritNovouRezervaci(predvyplnDatum, predvyplnCas) {
   upravovanaRezervaceId = null;
+  resetovatKontextKlientkyRezervace();
   document.getElementById('nrModalNadpis').textContent = '+ Přidat rezervaci';
   document.getElementById('nrModalHint').textContent = 'Jde i mimo běžnou otevírací dobu — hodí se pro klientky domluvené mimo web. Rezervace se rovnou založí jako potvrzená a hned se na zadaný e-mail pošle potvrzení.';
   document.getElementById('nrUlozitBtn').textContent = 'Přidat';
@@ -1820,6 +1845,7 @@ async function otevritUpravitRezervaci(id) {
   const r = vsechnyRezervace.find(x => x.id === id);
   if (!r) return;
   upravovanaRezervaceId = id;
+  resetovatKontextKlientkyRezervace();
   document.getElementById('nrModalNadpis').textContent = '✏️ Upravit rezervaci';
   document.getElementById('nrModalHint').textContent = 'Změna termínu se znovu ověří proti otevírací době, výjimkám a kolizím. Platby a jejich historie se úpravou nemění. E-mail o změně se pošle jen při skutečné změně termínu/masáže.';
   document.getElementById('nrUlozitBtn').textContent = 'Uložit změny';
@@ -1844,6 +1870,25 @@ async function otevritUpravitRezervaci(id) {
   } catch (e) {
     sel.innerHTML = '<option value="">Nepodařilo se načíst ceník</option>';
   }
+}
+// Nová rezervace založená z karty klientky (otevritDetailZakaznice) — používá stejný
+// formulář a stejnou POST logiku jako běžná nová rezervace, jen ho předvyplní a po
+// uložení se vrátí zpět na kartu klientky místo zavření. Klientka se naváže stejně
+// jako dnes u jakékoli jiné rezervace — spárováním podle telefonu na serveru
+// (najitNeboVytvoritKlientku) — tady se žádné klientka_id na server neposílá.
+async function otevritNovouRezervaciZKlientky(klientkaId) {
+  const z = aktualniZakaznice;
+  closeModal('modalDetailZakaznice');
+  await otevritNovouRezervaci();
+  if (!z || z.id !== klientkaId) return; // bez načtených dat klientky radši nic nepředvyplní
+  document.getElementById('nrJmeno').value = z.jmeno || '';
+  document.getElementById('nrTelefon').value = z.telefon || '';
+  document.getElementById('nrEmail').value = z.email || '';
+  rezervaceZKlientkyId = klientkaId;
+  rezervaceZKlientkyPuvodniTelefon = z.telefon || '';
+  const info = document.getElementById('nrKlientkaInfo');
+  info.textContent = '👤 Zakládáte rezervaci pro klientku: ' + (z.jmeno || z.telefon || ('#' + klientkaId));
+  info.style.display = 'block';
 }
 async function pridatRezervaci() {
   const cenik_id = document.getElementById('nrMasaz').value;
@@ -1873,10 +1918,16 @@ async function pridatRezervaci() {
     });
     const data = await res.json();
     if (res.ok) {
+      const klientkaId = rezervaceZKlientkyId; // zapamatovat před resetem kontextu níž
       closeModal('modalNovaRezervace');
+      resetovatKontextKlientkyRezervace();
       await loadRezervace();
       if (editace) otevritDetailRezervace(upravovanaRezervaceId);
+      else if (klientkaId) await otevritDetailZakaznice(klientkaId);
     } else {
+      // Chyba uložení: formulář, zadané hodnoty i kontext klientky (nrKlientkaInfo,
+      // rezervaceZKlientkyId) se záměrně NEMAŽOU, ať je po opravě chyby (např. jiný
+      // termín) možné rezervaci rovnou zkusit uložit znovu se stejným kontextem.
       msg.innerHTML = '<div class="error-msg">' + (data.chyba || 'Nepodařilo se uložit.') + '</div>';
     }
   } catch (e) {
@@ -2959,6 +3010,7 @@ async function otevritDetailZakaznice(id) {
         </div>
         <div class="form-group"><label>E-mail</label><div>${escapeHtml(z.email) || '—'}</div></div>
         <button class="btn btn-outline btn-sm" style="margin-bottom:14px" onclick="prepnoutEditaciKlientky()">✏️ Upravit údaje</button>
+        <button class="btn btn-outline btn-sm" style="margin-bottom:14px;margin-left:8px" onclick="otevritNovouRezervaciZKlientky(${z.id})">📅 Nová rezervace</button>
       </div>
       <div id="zakKontaktForma" style="display:none">
         <div class="form-grid-2">
