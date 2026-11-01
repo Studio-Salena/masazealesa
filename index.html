@@ -104,13 +104,15 @@
 
   .nav-links {
     display: flex;
-    gap: 2rem;
+    flex-wrap: nowrap;
+    gap: 1.6rem;
     list-style: none;
   }
   .nav-links a {
     text-decoration: none;
     font-size: 0.85rem;
     letter-spacing: 0.1em;
+    white-space: nowrap;
     text-transform: uppercase;
     color: var(--brown-light);
     font-weight: 700;
@@ -138,6 +140,31 @@
   }
   .nav-cta::after { display: none !important; }
   .nav-cta:hover { background: var(--terracotta-dark) !important; transform: translateY(-1px); }
+
+  /* Podmenu "Pro klienty" (sdružuje Kvíz, Před a po masáži, Kontraindikace,
+     Časté dotazy) — ovládané kliknutím/tapem přes JS (toggleNavDropdown),
+     ne čistě :hover, ať to spolehlivě funguje i na dotykových tabletech
+     v šířkovém rozmezí, kde se ještě nezobrazuje mobilní hamburger. */
+  .nav-dropdown { position: relative; }
+  .nav-dropdown-menu {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    margin-top: 0.8rem;
+    background: var(--cream);
+    border: 1px solid rgba(196,122,74,0.2);
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(90,50,20,0.12);
+    padding: 0.5rem 0;
+    min-width: 200px;
+    list-style: none;
+    z-index: 150;
+  }
+  .nav-dropdown.open .nav-dropdown-menu { display: block; }
+  .nav-dropdown-menu a { display: block; padding: 0.55rem 1.2rem; }
+  .nav-dropdown-menu a::after { display: none !important; }
 
   .hamburger { display: none; cursor: pointer; flex-direction: column; gap: 5px; position: relative; z-index: 9999; }
   .hamburger span { display: block; width: 24px; height: 2px; background: var(--brown); border-radius: 2px; transition: 0.3s; }
@@ -1457,13 +1484,16 @@
   /* ── STŘEDNÍ OBRAZOVKY (1100-1400px) ── */
   @media (max-width: 1400px) and (min-width: 1100px) {
     .container { padding: 0 3rem !important; }
+    .nav-links { gap: 1.1rem !important; }
   }
 
   /* ── TABLET (768-1100px) ── */
   @media (max-width: 1100px) and (min-width: 769px) {
     .container { padding: 0 2rem !important; }
     .hero { padding: 7rem 2rem 4rem !important; }
-    #navbar { padding: 1rem 2rem !important; }
+    #navbar { padding: 1rem 1.5rem !important; }
+    .nav-links { gap: 0.7rem !important; }
+    .nav-links a { font-size: 0.78rem !important; letter-spacing: 0.06em !important; }
     .masaze-grid { grid-template-columns: repeat(2, 1fr) !important; }
     .recenze-grid { grid-template-columns: repeat(2, 1fr) !important; }
   }
@@ -1513,6 +1543,11 @@
     .nav-links.open { display: flex !important; position: fixed !important; top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important; background: rgba(255,245,239,0.98) !important; flex-direction: column !important; align-items: center !important; justify-content: center !important; gap: 1.8rem !important; z-index: 9998 !important; }
     .hamburger { display: flex !important; }
     .nav-cta { font-size: 0.9rem !important; }
+
+    /* Podmenu "Pro klienty" v mobilním celoobrazovkovém menu — místo
+       plovoucího boxu se rozbalí jako obyčejný seznam v toku stránky. */
+    .nav-dropdown-menu { display: none; position: static !important; transform: none !important; flex-direction: column !important; align-items: center !important; gap: 1.2rem !important; margin: 1.2rem 0 0 !important; padding: 0 !important; min-width: 0 !important; background: transparent !important; border: none !important; box-shadow: none !important; }
+    .nav-dropdown.open .nav-dropdown-menu { display: flex !important; }
   }
 
   /* ── MALÝ MOBIL (do 480px) ── */
@@ -1571,11 +1606,16 @@
     <li><a href="#o-mne">O mně</a></li>
     <li><a href="#cenik">Ceník</a></li>
     <li><a href="#poukazy">Poukazy</a></li>
-    <li><a href="#kviz">Kvíz</a></li>
-    <li><a href="#predpo">Před a po masáži</a></li>
-    <li><a href="kontraindikace.html">Kontraindikace</a></li>
+    <li class="nav-dropdown">
+      <a href="#" class="nav-dropdown-trigger" onclick="toggleNavDropdown(event)">Pro klienty ▾</a>
+      <ul class="nav-dropdown-menu">
+        <li><a href="#kviz">Kvíz</a></li>
+        <li><a href="#predpo">Před a po masáži</a></li>
+        <li><a href="kontraindikace.html">Kontraindikace</a></li>
+        <li><a href="#faq">Časté dotazy</a></li>
+      </ul>
+    </li>
     <li><a href="#recenze">Recenze</a></li>
-    <li><a href="#faq">Časté dotazy</a></li>
     <li><a href="#kontakt">Kontakt</a></li>
     <li><a href="#" onclick="otevritRezForm();return false;" class="nav-cta">📅 Rezervovat</a></li>
   </ul>
@@ -2781,6 +2821,29 @@ document.addEventListener('keydown', function(e) {
   }
 });
 
+// Podmenu "Pro klienty" — klik/tap na spouštěč ho rozbalí/sbalí, klik mimo
+// nebo Escape ho zavře. Řešeno klikem (ne jen :hover), ať to spolehlivě
+// funguje i na dotykových zařízeních v šířkách, kde ještě neběží mobilní
+// hamburger (viz nav-dropdown v CSS).
+function toggleNavDropdown(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  var li = event.currentTarget.closest('.nav-dropdown');
+  var bylOtevreny = li.classList.contains('open');
+  document.querySelectorAll('.nav-dropdown.open').forEach(function(el) { el.classList.remove('open'); });
+  if (!bylOtevreny) li.classList.add('open');
+}
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('.nav-dropdown')) {
+    document.querySelectorAll('.nav-dropdown.open').forEach(function(el) { el.classList.remove('open'); });
+  }
+});
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    document.querySelectorAll('.nav-dropdown.open').forEach(function(el) { el.classList.remove('open'); });
+  }
+});
+
 // ── KVÍZ ──
 var kvizAnswers = {};
 var kvizMasaze = {
@@ -2882,13 +2945,15 @@ window.addEventListener('scroll', function() {
 
 // ── INIT ──
 document.addEventListener('DOMContentLoaded', function() {
-  // Zavřít menu po kliknutí
-  document.querySelectorAll('#navLinks a').forEach(function(link) {
+  // Zavřít menu po kliknutí (kromě spouštěče podmenu "Pro klienty" —
+  // ten jen rozbaluje/sbaluje, nikam nenaviguje, viz toggleNavDropdown)
+  document.querySelectorAll('#navLinks a:not(.nav-dropdown-trigger)').forEach(function(link) {
     link.addEventListener('click', function() {
       var l = document.getElementById('navLinks');
       var b = document.getElementById('hamburger');
       if (l) l.classList.remove('open');
       if (b) b.classList.remove('open');
+      document.querySelectorAll('.nav-dropdown.open').forEach(function(el) { el.classList.remove('open'); });
     });
   });
   // Reveal animace
