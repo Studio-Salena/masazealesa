@@ -268,6 +268,8 @@ tr:hover td{background:#fffaf5}
   #pbKarty .poukaz-print-card{width:100mm;height:70mm;flex-shrink:0}
   #uctenkaObsah,#uctenkaObsah *{visibility:visible}
   #uctenkaObsah{position:fixed;top:0;left:0;width:54mm;max-width:54mm;font-size:13px;line-height:1.3;color:#000;font-weight:700;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  #uzaverkaRokObsah,#uzaverkaRokObsah *{visibility:visible}
+  #uzaverkaRokObsah{position:fixed;top:0;left:0;right:0;padding:15mm;color:#000}
   .no-print{display:none!important}
 }
 </style>
@@ -779,6 +781,10 @@ tr:hover td{background:#fffaf5}
         </div>
         <p style="padding:0 16px 4px;font-size:0.78rem;color:var(--text-light)">Skutečně přijaté peníze (stejná částka jako „💰 Přijaté platby“ výš) rozdělené podle způsobu platby — pro uzavření pokladny k danému dni/měsíci/roku.</p>
         <div id="uzaverkaZpusoby"><div class="loading">Načítám...</div></div>
+        <div style="padding:4px 16px 14px;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-primary btn-sm" id="uzaverkaTiskUctenkaBtn" style="display:none" onclick="vytisknoutUzaverkuUctenka()">🧾 Vytisknout účtenku</button>
+          <button class="btn btn-primary btn-sm" id="uzaverkaTiskA4Btn" style="display:none" onclick="otevritUzaverkuRok()">🖨️ Tisk uzávěrky (A4)</button>
+        </div>
       </div>
 
       <div class="form-grid-2">
@@ -966,6 +972,18 @@ tr:hover td{background:#fffaf5}
       <button class="btn btn-outline" onclick="closeModal('modalUctenka')">Zavřít</button>
       <button class="btn btn-outline" id="uctenkaSdiletBtn" style="display:none" onclick="sdiletUctenku()">📤 Sdílet do appky</button>
       <button class="btn btn-primary" onclick="vytisknoutUctenku()">🧾 Vytisknout účtenku</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Roční uzávěrka na A4 -->
+<div class="modal-overlay" id="modalUzaverkaRok">
+  <div class="modal" style="max-width:650px">
+    <h3 class="no-print">📅 Roční uzávěrka</h3>
+    <div id="uzaverkaRokObsah"></div>
+    <div class="modal-footer no-print">
+      <button class="btn btn-outline" onclick="closeModal('modalUzaverkaRok')">Zavřít</button>
+      <button class="btn btn-primary" onclick="vytisknoutUzaverkuRok()">🖨️ Vytisknout</button>
     </div>
   </div>
 </div>
@@ -2905,11 +2923,11 @@ function uctenkaRadek(label, hodnota) {
   return escapeHtml(label) + ': ' + escapeHtml(hodnota);
 }
 let posledniUctenkaText = '';
-function otevritUctenku(radky, cisloDokladu) {
+function otevritUctenku(radky, cisloDokladu, popisekDokladu) {
   posledniUctenkaText = [
     ...UCTENKA_PRODEJCE,
     uctenkaOddelovac(),
-    uctenkaRadek('Doklad č.', cisloDokladu),
+    uctenkaRadek(popisekDokladu || 'Doklad č.', cisloDokladu),
     ...radky,
     uctenkaOddelovac(),
     '736 734 951 · info@masazealesa.cz',
@@ -4071,6 +4089,9 @@ async function vratitVychoziObrazekKuponu() {
 // představovat čtyři různé věci (hodnota služby, přijaté peníze, prodej
 // poukazu, vratka). Viz GET /api/admin/ucetnictvi.
 let posledniUcetnictvi = null;
+let ucetAktivniObdobi = null; // 'den' | 'mesic' | 'rok' | null (ruční výběr) — řídí, která tisková varianta uzávěrky se nabídne
+const uzaverkaZpusobLabel = { hotove: 'Hotově', kartou: 'Kartou', qr: 'QR kód', online: 'Online' };
+const uzaverkaPoradi = ['hotove', 'kartou', 'qr', 'online'];
 function tabulkaPodleDne(data, prazdnyText) {
   if (!data.length) return `<div class="empty">${prazdnyText}</div>`;
   return `<table><thead><tr><th>Den</th><th>Částka</th></tr></thead>
@@ -4117,8 +4138,6 @@ async function loadUcetnictvi() {
         <td style="color:#c0392b">${Math.round(p.castka).toLocaleString('cs-CZ')} Kč</td>
       </tr>`).join('')}</tbody></table>`;
 
-    const uzaverkaZpusobLabel = { hotove: 'Hotově', kartou: 'Kartou', qr: 'QR kód', online: 'Online' };
-    const uzaverkaPoradi = ['hotove', 'kartou', 'qr', 'online'];
     const uzaverkaRadky = d.podleZpusobuPlatby.slice().sort((a, b) => uzaverkaPoradi.indexOf(a.zpusob_platby) - uzaverkaPoradi.indexOf(b.zpusob_platby));
     document.getElementById('uzaverkaZpusoby').innerHTML = !uzaverkaRadky.length ? '<div class="empty">Zatím žádné přijaté platby v tomto období</div>' : `
       <table><thead><tr><th>Způsob platby</th><th>Částka</th></tr></thead>
@@ -4139,7 +4158,68 @@ function ucetNastavObdobi(typ) {
   ['Den', 'Mesic', 'Rok'].forEach(t => document.getElementById('uzaverkaBtn' + t).style.cssText = '');
   const aktivni = document.getElementById('uzaverkaBtn' + typ.charAt(0).toUpperCase() + typ.slice(1));
   aktivni.style.cssText = 'background:linear-gradient(135deg,#d4856a,#e0a830);color:#fff;border-color:transparent';
+  ucetAktivniObdobi = typ;
+  document.getElementById('uzaverkaTiskUctenkaBtn').style.display = (typ === 'den' || typ === 'mesic') ? 'inline-flex' : 'none';
+  document.getElementById('uzaverkaTiskA4Btn').style.display = typ === 'rok' ? 'inline-flex' : 'none';
   loadUcetnictvi();
+}
+function uzaverkaObdobiLabel() {
+  const d = posledniUcetnictvi;
+  if (ucetAktivniObdobi === 'den') return new Date(d.obdobi.od).toLocaleDateString('cs-CZ');
+  if (ucetAktivniObdobi === 'mesic') return new Date(d.obdobi.od).toLocaleDateString('cs-CZ', { month: 'long', year: 'numeric' });
+  if (ucetAktivniObdobi === 'rok') return new Date(d.obdobi.od).getFullYear().toString();
+  return (d.obdobi.od ? new Date(d.obdobi.od).toLocaleDateString('cs-CZ') : '…') + ' – ' + (d.obdobi.do ? new Date(d.obdobi.do).toLocaleDateString('cs-CZ') : '…');
+}
+// Denní/měsíční uzávěrka jde na stejnou 58mm pokladní tiskárnu/appku jako
+// účtenky prodeje (viz otevritUctenku výš) — stejný formát, stejné "Sdílet
+// do appky" i tisk, jen jiný obsah (souhrn podle způsobu platby, ne položka).
+function vytisknoutUzaverkuUctenka() {
+  if (!posledniUcetnictvi) return;
+  const d = posledniUcetnictvi;
+  const uzaverkaRadky = d.podleZpusobuPlatby.slice().sort((a, b) => uzaverkaPoradi.indexOf(a.zpusob_platby) - uzaverkaPoradi.indexOf(b.zpusob_platby));
+  const radky = [
+    ...uzaverkaRadky.map(p => uctenkaRadek(uzaverkaZpusobLabel[p.zpusob_platby] || p.zpusob_platby, Math.round(p.castka).toLocaleString('cs-CZ') + ' Kč')),
+    uctenkaRadek('Celkem přijato', Math.round(d.prijatePlatby.celkem).toLocaleString('cs-CZ') + ' Kč')
+  ];
+  otevritUctenku(radky, uzaverkaObdobiLabel(), ucetAktivniObdobi === 'den' ? 'Denní uzávěrka' : 'Měsíční uzávěrka');
+}
+// Roční uzávěrka na A4 — na rozdíl od denní/měsíční nejde na pokladní
+// tiskárnu, ale na běžnou tiskárnu/PDF (viz modalUzaverkaRok), proto má
+// vlastní formátovanou tabulku místo úzkého textu pro 58mm pásku.
+function otevritUzaverkuRok() {
+  if (!posledniUcetnictvi) return;
+  const d = posledniUcetnictvi;
+  const uzaverkaRadky = d.podleZpusobuPlatby.slice().sort((a, b) => uzaverkaPoradi.indexOf(a.zpusob_platby) - uzaverkaPoradi.indexOf(b.zpusob_platby));
+  const radek = (popis, castka, tucne) => `<tr><td style="padding:6px 8px;${tucne ? 'font-weight:700;border-top:2px solid #333' : 'border-bottom:1px solid #ddd'}">${escapeHtml(popis)}</td><td style="padding:6px 8px;text-align:right;${tucne ? 'font-weight:700;border-top:2px solid #333' : 'border-bottom:1px solid #ddd'}">${Math.round(castka).toLocaleString('cs-CZ')} Kč</td></tr>`;
+  document.getElementById('uzaverkaRokObsah').innerHTML = `
+    <div style="text-align:center;margin-bottom:20px">
+      <h2 style="margin:0 0 4px;font-family:'Cormorant',serif">Roční uzávěrka ${escapeHtml(uzaverkaObdobiLabel())}</h2>
+      <p style="margin:0;color:#555;font-size:0.85rem">${UCTENKA_PRODEJCE.join(' · ')}</p>
+      <p style="margin:4px 0 0;color:#888;font-size:0.78rem">Vytištěno ${new Date().toLocaleString('cs-CZ')}</p>
+    </div>
+    <table style="width:100%;border-collapse:collapse;margin-bottom:24px">
+      <thead><tr><th style="text-align:left;border-bottom:2px solid #333;padding:6px 8px">Způsob platby</th><th style="text-align:right;border-bottom:2px solid #333;padding:6px 8px">Částka</th></tr></thead>
+      <tbody>
+        ${uzaverkaRadky.map(p => radek(uzaverkaZpusobLabel[p.zpusob_platby] || p.zpusob_platby, p.castka)).join('')}
+        ${radek('Celkem přijato', d.prijatePlatby.celkem, true)}
+      </tbody>
+    </table>
+    <table style="width:100%;border-collapse:collapse">
+      <thead><tr><th colspan="2" style="text-align:left;border-bottom:2px solid #333;padding:6px 8px">Souhrn za rok</th></tr></thead>
+      <tbody>
+        ${radek('🌸 Tržby za služby', d.trzbyZaSluzby.celkem)}
+        ${radek('💰 Přijaté platby', d.prijatePlatby.celkem)}
+        ${radek('🎁 Prodané poukazy', d.prodejPoukazu.celkem)}
+        ${radek('📦 Prodej produktů', d.prodejProduktu.celkem)}
+        ${radek('↺ Vráceno', d.vratky.celkem)}
+      </tbody>
+    </table>`;
+  openModal('modalUzaverkaRok');
+}
+function vytisknoutUzaverkuRok() {
+  document.getElementById('uctenkaPageFormat').textContent = ''; // ať nezůstane aktivní 58mm formát z účtenky
+  document.getElementById('khPageFormat').textContent = '@page{size:A4;margin:15mm}';
+  window.print();
 }
 async function zobrazitRezervaciZUcetnictvi(id) {
   if (!vsechnyRezervace.length) await loadRezervace();
