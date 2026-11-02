@@ -1096,11 +1096,17 @@ async function spocitatTerminyDne(datum, delka) {
   const pauzaDo = oteviraciDoba.pauza_do ? casNaMinuty(oteviraciDoba.pauza_do) : null;
   const KROK = 15; // kandidátní časy po 15 minutách
   const terminy = [];
-  for (let start = otevrenoOd; start + delka <= otevrenoDo; start += KROK) {
+  // Kandidátní časy jedou až do skutečné zavírací doby (ne jen do posledního
+  // startu, kam se vybraná masáž ještě celá vejde) — ať kalendář nevypadá
+  // jako zavřený už dřív, jen protože se tam nevejde právě tahle délka.
+  // Termín, kam by se masáž nevešla, je pořád volno:false (nejde vybrat),
+  // jen se to na weby nezobrazí jako "mimo otevírací dobu", ale jako obsazeno.
+  for (let start = otevrenoOd; start < otevrenoDo; start += KROK) {
     const konec = start + delka;
+    const nevejdeSeDoZavirani = konec > otevrenoDo;
     const koliduje = obsazeno.some(o => start < o.do && konec > o.od);
     const vPauze = pauzaOd !== null && pauzaDo !== null && start < pauzaDo && konec > pauzaOd;
-    terminy.push({ cas: minutyNaCas(start), volno: !koliduje && !vPauze });
+    terminy.push({ cas: minutyNaCas(start), volno: !nevejdeSeDoZavirani && !koliduje && !vPauze });
   }
   return terminy;
 }
