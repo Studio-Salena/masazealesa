@@ -3249,7 +3249,7 @@ app.get('/api/admin/ucetnictvi', async (req, res) => {
       db.query('SELECT cena, zpusob_platby, poukaz_castka, vytvoreno FROM prodeje'),
       db.query("SELECT id, hodnota, vytvoreno FROM poukazy WHERE ucel = 'prodej'"),
       db.query('SELECT id, rezervace_id, castka, typ, zpusob_platby, vytvoreno FROM platby'),
-      db.query('SELECT id, nazev, mnozstvi, cena_celkem, vytvoreno FROM prodeje_produktu')
+      db.query('SELECT id, nazev, mnozstvi, cena_celkem, zpusob_platby, vytvoreno FROM prodeje_produktu')
     ]);
 
     const prodejnaPolozky = prod.rows.map(p => ({
@@ -3277,8 +3277,8 @@ app.get('/api/admin/ucetnictvi', async (req, res) => {
       .map(p => ({ ...p, den: p.vytvoreno.toISOString().slice(0, 10) }))
       .filter(p => vObdobi(p.den));
     const prijatePlatbyPolozky = [
-      ...platbyFiltr.filter(p => p.zpusob_platby !== 'poukaz').map(p => ({ castka: Number(p.castka), datum: p.den })),
-      ...prodejnaPolozky.filter(p => vObdobi(p.datum) && p.zpusob_platby !== 'poukaz').map(p => ({ castka: p.hotovostCastka, datum: p.datum })),
+      ...platbyFiltr.filter(p => p.zpusob_platby !== 'poukaz').map(p => ({ castka: Number(p.castka), datum: p.den, zpusob_platby: p.zpusob_platby })),
+      ...prodejnaPolozky.filter(p => vObdobi(p.datum) && p.zpusob_platby !== 'poukaz').map(p => ({ castka: p.hotovostCastka, datum: p.datum, zpusob_platby: p.zpusob_platby })),
       ...produktyPolozky.filter(p => vObdobi(p.datum))
     ];
 
@@ -3295,6 +3295,16 @@ app.get('/api/admin/ucetnictvi', async (req, res) => {
 
     // E) Prodej produktů
     const produktyFiltr = produktyPolozky.filter(p => vObdobi(p.datum));
+
+    // F) Uzávěrka — skutečný pohyb peněz (stejná položková sada jako B,
+    // "přijaté platby") rozdělený podle způsobu platby, pro denní/měsíční/
+    // roční uzávěrku pokladny. Poukaz je tu záměrně vynechán stejně jako v B
+    // — ty peníze se počítají v den PRODEJE poukazu (C), ne při uplatnění.
+    const zpusobyMapa = {};
+    prijatePlatbyPolozky.forEach(p => {
+      const z = p.zpusob_platby || 'hotove';
+      zpusobyMapa[z] = (zpusobyMapa[z] || 0) + p.castka;
+    });
 
     res.json({
       obdobi: { od: od || null, do: doParam || null },
@@ -3331,7 +3341,8 @@ app.get('/api/admin/ucetnictvi', async (req, res) => {
           id: p.id, rezervace_id: p.rezervace_id, castka: Number(p.castka),
           zpusob_platby: p.zpusob_platby, vytvoreno: p.vytvoreno.toISOString()
         }))
-      }
+      },
+      podleZpusobuPlatby: Object.entries(zpusobyMapa).map(([zpusob_platby, castka]) => ({ zpusob_platby, castka }))
     });
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
