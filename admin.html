@@ -953,6 +953,7 @@ tr:hover td{background:#fffaf5}
     <div id="uctenkaObsah"></div>
     <div class="modal-footer no-print">
       <button class="btn btn-outline" onclick="closeModal('modalUctenka')">Zavřít</button>
+      <button class="btn btn-outline" id="uctenkaSdiletBtn" style="display:none" onclick="sdiletUctenku()">📤 Sdílet do appky</button>
       <button class="btn btn-primary" onclick="vytisknoutUctenku()">🧾 Vytisknout účtenku</button>
     </div>
   </div>
@@ -2880,8 +2881,9 @@ function uctenkaOddelovac() { return '-'.repeat(UCTENKA_SIRKA_ZNAKU); }
 function uctenkaRadek(label, hodnota) {
   return escapeHtml(label) + ': ' + escapeHtml(hodnota);
 }
+let posledniUctenkaText = '';
 function otevritUctenku(radky, cisloDokladu) {
-  document.getElementById('uctenkaObsah').innerHTML = [
+  posledniUctenkaText = [
     ...UCTENKA_PRODEJCE,
     uctenkaOddelovac(),
     uctenkaRadek('Doklad č.', cisloDokladu),
@@ -2890,10 +2892,29 @@ function otevritUctenku(radky, cisloDokladu) {
     '736 734 951 · info@masazealesa.cz',
     'Děkujeme!'
   ].join('\n');
+  document.getElementById('uctenkaObsah').innerHTML = posledniUctenkaText;
   document.getElementById('uctenkaPageFormat').textContent = '@page{size:58mm auto;margin:0}';
+  // Tlačítko "Sdílet do appky" (Web Share API) jde použít jen tam, kde ho
+  // prohlížeč podporuje (Android Chrome ano, desktop prohlížeče obvykle ne) —
+  // na desktopu zůstává skryté a je k dispozici jen tisk přes window.print().
+  document.getElementById('uctenkaSdiletBtn').style.display = navigator.share ? 'inline-flex' : 'none';
   openModal('modalUctenka');
 }
 function vytisknoutUctenku() { window.print(); }
+// Pošle účtenku jako čistý text přes systémové sdílení Androidu (Web Share
+// API) — otevře nabídku "Sdílet do…", kde si uživatelka vybere JAKOUKOLI
+// appku na tiskárnu (žádná appka se nepředpokládá napevno). Appka pak text
+// vytiskne svým vlastním způsobem, takže odpadá závislost na tom, jestli
+// daná appka správně renderuje CSS/vzhled stránky (viz window.print() výš,
+// kde se to různě lišilo appku od appky).
+async function sdiletUctenku() {
+  try {
+    await navigator.share({ text: posledniUctenkaText });
+  } catch (e) {
+    // Uživatelka sdílení zrušila, nebo appka na pozadí selhala — nic
+    // nehlásit jako chybu, zrušení sdílení je normální/časté.
+  }
+}
 function otevritUctenkuProdeje(prodej) {
   const radky = [
     uctenkaRadek('Datum', new Date(prodej.vytvoreno).toLocaleString('cs-CZ', { dateStyle: 'short', timeStyle: 'short' })),
