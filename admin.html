@@ -2873,6 +2873,18 @@ async function ulozitKartyJakoPdf(idElementu, nazevSouboru) {
 // přemostit prohlížeč na bluetooth tiskárnu (např. RawBT) — ta zachytí
 // tiskovou úlohu stránky a pošle ji na tiskárnu jako běžný tisk.
 const UCTENKA_SIRKA_ZNAKU = 26; // cca šířka 58mm papíru v monospace fontu při 13px
+// Appky, co dostanou účtenku přes "Sdílet" (sdiletUctenku níže), posílají text
+// tiskárně po bajtech a diakritiku (UTF-8) často nepřevedou do znakové sady
+// tiskárny — vyjde "nesmysl" místo háčků/čárek. Pro tuhle cestu proto text
+// zbavíme diakritiky předem; klasický tisk přes window.print() (RawBT apod.)
+// diakritiku renderuje jako obrázek/bitmapu, tam problém není a nechává se beze změny.
+const UCTENKA_DIAKRITIKA_MAPA = {
+  'á':'a','č':'c','ď':'d','é':'e','ě':'e','í':'i','ň':'n','ó':'o','ř':'r','š':'s','ť':'t','ú':'u','ů':'u','ý':'y','ž':'z',
+  'Á':'A','Č':'C','Ď':'D','É':'E','Ě':'E','Í':'I','Ň':'N','Ó':'O','Ř':'R','Š':'S','Ť':'T','Ú':'U','Ů':'U','Ý':'Y','Ž':'Z'
+};
+function odstranitDiakritiku(text) {
+  return text.replace(/[áčďéěíňóřšťúůýžÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ]/g, ch => UCTENKA_DIAKRITIKA_MAPA[ch] || ch);
+}
 // Identifikační údaje prodávajícího — povinná náležitost účtenky (nejsme plátci
 // DPH, takže se nerozepisuje základ/sazba/výše DPH, jen souhrn). Stejné údaje
 // jako na ochrana-osobnich-udaju.html — menit na obou místech zároveň.
@@ -2909,7 +2921,7 @@ function vytisknoutUctenku() { window.print(); }
 // kde se to různě lišilo appku od appky).
 async function sdiletUctenku() {
   try {
-    await navigator.share({ text: posledniUctenkaText });
+    await navigator.share({ text: odstranitDiakritiku(posledniUctenkaText) });
   } catch (e) {
     // Uživatelka sdílení zrušila, nebo appka na pozadí selhala — nic
     // nehlásit jako chybu, zrušení sdílení je normální/časté.
