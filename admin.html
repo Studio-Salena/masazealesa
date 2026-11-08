@@ -130,6 +130,13 @@ td{padding:12px 14px;border-bottom:1px solid #faf0e6;font-size:0.85rem;vertical-
 tr:last-child td{border-bottom:none}
 .row-clickable{cursor:pointer}
 .row-clickable:hover td{background:var(--cream)}
+.rez-den{border-bottom:1px solid var(--tan-light)}
+.rez-den:last-child{border-bottom:none}
+.rez-den summary{padding:12px 20px;cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-weight:700;color:var(--brown);background:var(--cream)}
+.rez-den summary::-webkit-details-marker{display:none}
+.rez-den summary::before{content:'▸';display:inline-block;transition:transform 0.15s;color:var(--tan)}
+.rez-den[open] summary::before{transform:rotate(90deg)}
+.rez-den summary .rez-den-pocet{font-weight:700;color:var(--text-light);font-size:0.78rem;text-transform:none;letter-spacing:0}
 
 /* PŘEHLED KALENDÁŘE */
 .ak-grid{display:grid;grid-template-columns:52px repeat(7,minmax(110px,1fr));min-width:850px;border:1px solid var(--tan-light);border-radius:12px;overflow:hidden}
@@ -2152,10 +2159,19 @@ function vykreslitRezervace(filtr) {
     nedostavila_se: '<span class="badge badge-zruseno">🚫 Nedostavila se</span>',
     zrusena: '<span class="badge badge-zruseno">❌ Zrušena</span>'
   };
-  document.getElementById('rezervaceTable').innerHTML = `
-    <table><thead><tr><th>Termín</th><th>Jméno</th><th>Kontakt</th><th>Masáž</th><th>Stav</th><th>Akce</th></tr></thead>
-    <tbody>${seznam.map(r => `<tr class="row-clickable" onclick="otevritDetailRezervace(${r.id})">
-      <td>${new Date(r.datum).toLocaleDateString('cs-CZ')} ${r.cas_od.slice(0,5)}–${r.cas_do.slice(0,5)}</td>
+  // Seznam je ze serveru seřazený ORDER BY datum DESC, takže řádky se stejným
+  // datem jsou vždy souvislé — stačí je při jednom průchodu rozdělit do
+  // skupin podle dne, žádné přeřazování netřeba.
+  const dnesKlic = new Date().toISOString().slice(0, 10);
+  const skupiny = [];
+  seznam.forEach(r => {
+    const klic = String(r.datum).slice(0, 10);
+    let posledni = skupiny[skupiny.length - 1];
+    if (!posledni || posledni.klic !== klic) { posledni = { klic, polozky: [] }; skupiny.push(posledni); }
+    posledni.polozky.push(r);
+  });
+  const radek = r => `<tr class="row-clickable" onclick="otevritDetailRezervace(${r.id})">
+      <td>${r.cas_od.slice(0,5)}–${r.cas_do.slice(0,5)}</td>
       <td>${escapeHtml(r.jmeno)}</td>
       <td>${escapeHtml(r.telefon)}${r.email ? '<br><small>' + escapeHtml(r.email) + '</small>' : ''}</td>
       <td>${escapeHtml(r.masaz)}${r.poukaz_kod ? '<br><small>🎁 ' + escapeHtml(r.poukaz_kod) + '</small>' : ''}${r.poznamka ? '<br><small style="color:var(--text-light)">' + escapeHtml(r.poznamka) + '</small>' : ''}</td>
@@ -2167,7 +2183,18 @@ function vykreslitRezervace(filtr) {
         ${r.stav !== 'zrusena' ? `<button class="btn btn-red btn-sm" onclick="zmenitStavRez(${r.id},'zrusena')" title="Zrušit">❌</button>` : ''}
         <button class="btn btn-red btn-sm" onclick="smazatRezervaci(${r.id})" title="Smazat">🗑️</button>
       </td>
-    </tr>`).join('')}</tbody></table>`;
+    </tr>`;
+  // Dnešní a budoucí dny jsou rovnou rozbalené (to hlavní, co ji zajímá),
+  // minulé dny sbalené, ať seznam není jeden dlouhý svitek.
+  document.getElementById('rezervaceTable').innerHTML = skupiny.map(s => {
+    const datumLabel = new Date(s.klic).toLocaleDateString('cs-CZ', { weekday: 'long', day: 'numeric', month: 'numeric', year: 'numeric' });
+    const cekajicich = s.polozky.filter(r => r.stav === 'cekajici').length;
+    return `<details class="rez-den"${s.klic >= dnesKlic ? ' open' : ''}>
+      <summary><span style="text-transform:capitalize">${datumLabel}</span><span class="rez-den-pocet">${s.polozky.length}×</span>${cekajicich ? `<span class="badge badge-cekajici">⏳ ${cekajicich}</span>` : ''}</summary>
+      <table><thead><tr><th>Čas</th><th>Jméno</th><th>Kontakt</th><th>Masáž</th><th>Stav</th><th>Akce</th></tr></thead>
+      <tbody>${s.polozky.map(radek).join('')}</tbody></table>
+    </details>`;
+  }).join('');
 }
 const platbaZpusobLabel = { hotove: 'Hotově', kartou: 'Kartou', online: 'Online', poukaz: 'Poukaz' };
 function otevritDetailRezervace(id) {
