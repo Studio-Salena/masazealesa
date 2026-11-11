@@ -2738,6 +2738,7 @@ async function zobrazitPoukaz(id) {
   aktualniPoukazId = id;
   document.getElementById('ppSablona').value = localStorage.getItem('poukazSablona') || 'klasicky';
   document.getElementById('uctenkaPageFormat').textContent = ''; // ať nezůstane aktivní z dříve vytištěné účtenky
+  document.getElementById('khPageFormat').textContent = '@page{size:A4;margin:10mm}'; // ať nezůstane aktivní A3/jiný okraj z dříve tištěných kupónů/uzávěrky
   await vykreslitNahledPoukazu();
   openModal('modalPoukazTisk');
 }
