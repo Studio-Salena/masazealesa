@@ -146,6 +146,7 @@ tr:last-child td{border-bottom:none}
 .ak-hlavicka.dnes{color:var(--tan)}
 .ak-hodiny-col{position:relative}
 .ak-den{position:relative;border-left:1px solid #f4e9e0;border-top:1px solid #f4e9e0;cursor:pointer}
+.ak-den.ak-den-zavreno{cursor:not-allowed;background:repeating-linear-gradient(135deg, rgba(0,0,0,0.03) 0 6px, rgba(0,0,0,0.07) 6px 12px)}
 .ak-blok{position:absolute;left:2px;right:2px;border-radius:5px;padding:2px 5px;font-size:0.62rem;line-height:1.25;color:#fff;overflow:hidden;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,0.15)}
 .ak-blok strong{display:block;font-size:0.66rem}
 tr:hover td{background:#fffaf5}
@@ -1760,6 +1761,23 @@ function akCasNaMin(cas) { const p = String(cas).split(':'); return Number(p[0])
 function akMinNaCas(m) { const h = Math.floor(m / 60), mm = m % 60; return String(h).padStart(2, '0') + ':' + String(mm).padStart(2, '0'); }
 function akIso(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
 
+// Je daný den (YYYY-MM-DD) celý zavřený? Stejná pravidla jako server
+// (ziskatEfektivniOtevrenoDobu v server.js): výjimka provozu přes ten den
+// přebíjí běžnou otevírací dobu — bez vyplněné otevírací doby ve výjimce je
+// to zavřeno celý den, i kdyby ten den v týdnu byl jinak otevřeno. Vrací i
+// popis výjimky (důvod), ať se dá zobrazit ve zprávě.
+function akZjistitZavreno(datumIso) {
+  const vyjimka = (posledniVyjimky || []).find(v => datumIso >= String(v.datum_od).slice(0, 10) && datumIso <= String(v.datum_do).slice(0, 10));
+  if (vyjimka) {
+    if (!vyjimka.otevreno_od || !vyjimka.otevreno_do) return { zavreno: true, popis: vyjimka.popis || 'výjimka provozu' };
+    return { zavreno: false };
+  }
+  const denVTydnu = new Date(datumIso + 'T12:00:00').getDay();
+  const pd = (vsechnyDnyPD || []).find(d => d.den_v_tydnu === denVTydnu);
+  if (pd && !pd.aktivni) return { zavreno: true, popis: 'běžně zavřeno' };
+  return { zavreno: false };
+}
+
 function vykreslitAdminKalendar() {
   const wrap = document.getElementById('adminKalendar');
   if (!wrap) return;
@@ -1815,7 +1833,9 @@ function vykreslitAdminKalendar() {
       const barva = barvy[r.stav] || '#b0a89f';
       return `<div class="ak-blok" style="top:${top}px;height:${h}px;background:${barva}" onclick="event.stopPropagation();otevritDetailRezervace(${r.id})" title="${escapeHtml(r.jmeno)} — ${escapeHtml(r.masaz)}"><strong>${String(r.cas_od).slice(0, 5)}</strong>${escapeHtml(r.jmeno)}</div>`;
     }).join('');
-    html += `<div class="ak-den" style="height:${vyska}px" onclick="akKliknoutNaDen(event,'${isoDny[i]}',${minMin})" title="Kliknutím sem založíš rezervaci na tento čas">${blokyHtml}</div>`;
+    const zavreno = akZjistitZavreno(isoDny[i]);
+    const titulek = zavreno.zavreno ? 'Zavřeno (' + zavreno.popis + ')' : 'Kliknutím sem založíš rezervaci na tento čas';
+    html += `<div class="ak-den${zavreno.zavreno ? ' ak-den-zavreno' : ''}" style="height:${vyska}px" onclick="akKliknoutNaDen(event,'${isoDny[i]}',${minMin})" title="${titulek}">${blokyHtml}</div>`;
   });
 
   wrap.innerHTML = html;
@@ -1825,6 +1845,11 @@ function vykreslitAdminKalendar() {
 // s předvyplněným datem a časem odvozeným z pozice kliknutí (zaokrouhleno na
 // čtvrthodiny) — ať se nemusí datum/čas přepisovat ručně.
 function akKliknoutNaDen(ev, datum, minMin) {
+  const zavreno = akZjistitZavreno(datum);
+  if (zavreno.zavreno) {
+    alert('Tento den máte zavřeno (' + zavreno.popis + '), takže se tu rezervace nezakládá kliknutím do kalendáře.\n\nPokud i tak potřebujete rezervaci na tento den založit (např. výjimečně domluvená klientka), použijte tlačítko "+ Přidat rezervaci" nahoře — tam datum i čas zadáte ručně.');
+    return;
+  }
   const rect = ev.currentTarget.getBoundingClientRect();
   const offsetY = ev.clientY - rect.top;
   let minuty = minMin + Math.round(offsetY / 1); // PX_MIN = 1 (viz vykreslitAdminKalendar)
@@ -2084,8 +2109,7 @@ let posledniVyjimky = [];
 async function loadVyjimky() {
   try {
     posledniVyjimky = await adminFetch(API + '/admin/vyjimky').then(r => r.json());
-    if (!posledniVyjimky.length) { document.getElementById('vyjimkyTable').innerHTML = '<div class="empty">Žádné výjimky</div>'; return; }
-    document.getElementById('vyjimkyTable').innerHTML = `
+    document.getElementById('vyjimkyTable').innerHTML = !posledniVyjimky.length ? '<div class="empty">Žádné výjimky</div>' : `
       <table><thead><tr><th>Od</th><th>Do</th><th>Popis</th><th>Otevírací doba</th><th></th></tr></thead>
       <tbody>${posledniVyjimky.map(v => `<tr>
         <td>${new Date(v.datum_od).toLocaleDateString('cs-CZ')}</td>
@@ -2098,6 +2122,9 @@ async function loadVyjimky() {
         </td>
       </tr>`).join('')}</tbody></table>`;
   } catch (e) { document.getElementById('vyjimkyTable').innerHTML = '<div class="error-msg">Chyba načítání.</div>'; }
+  // Výjimky (dovolená/svátek) ovlivňují, jestli je den v přehledu kalendáře
+  // zavřený (šrafovaně) — po (opětovném) načtení je potřeba přehled překreslit.
+  vykreslitAdminKalendar();
 }
 let upravovanaVyjimkaId = null;
 function otevritNovouVyjimku() {
