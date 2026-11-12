@@ -806,6 +806,7 @@ tr:hover td{background:#fffaf5}
           <button class="btn btn-outline btn-sm" id="uzaverkaBtnRok" onclick="ucetNastavObdobi('rok')">Rok</button>
         </div>
         <p style="padding:0 16px 4px;font-size:0.78rem;color:var(--text-light)">Skutečně přijaté peníze (stejná částka jako „💰 Přijaté platby“ výš) rozdělené podle způsobu platby — pro uzavření pokladny k danému dni/měsíci/roku.</p>
+        <p style="padding:0 16px 4px;font-size:0.78rem;color:var(--text-light)">💡 I zpětně: zadejte datum do pole „Období od“ výš a klikněte na „Den“ — zobrazí se uzávěrka a jde vytisknout účtenka pro ten konkrétní (i minulý) den.</p>
         <div id="uzaverkaZpusoby"><div class="loading">Načítám...</div></div>
         <div style="padding:4px 16px 14px;display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn btn-primary btn-sm" id="uzaverkaTiskUctenkaBtn" style="display:none" onclick="vytisknoutUzaverkuUctenka()">🧾 Vytisknout účtenku</button>
@@ -4292,22 +4293,24 @@ async function loadUcetnictvi() {
 
     const zpusobLabel = { hotove: 'Hotově', kartou: 'Kartou', online: 'Online', poukaz: 'Poukaz' };
     document.getElementById('ucetPrijatePlatbySeznam').innerHTML = !d.prijatePlatby.seznam.length ? '<div class="empty">Zatím žádné platby v tomto období</div>' : `
-      <table><thead><tr><th>Datum</th><th>Typ</th><th>Způsob</th><th>Rezervace</th><th>Částka</th></tr></thead>
+      <table><thead><tr><th>Datum</th><th>Typ</th><th>Způsob</th><th>Rezervace</th><th>Částka</th><th>Tisk</th></tr></thead>
       <tbody>${d.prijatePlatby.seznam.slice(0, 100).map(p => `<tr>
         <td>${new Date(p.vytvoreno).toLocaleDateString('cs-CZ')}</td>
         <td>${p.typ === 'vratka' ? '↺ vratka' : '✅ platba'}</td>
         <td>${zpusobLabel[p.zpusob_platby] || p.zpusob_platby}</td>
         <td>${p.rezervace_id ? '<a href="#" onclick="zobrazitRezervaciZUcetnictvi(' + p.rezervace_id + ');return false;">#' + p.rezervace_id + '</a>' : '—'}</td>
         <td>${Number(p.castka) > 0 ? '+' : ''}${Math.round(p.castka).toLocaleString('cs-CZ')} Kč</td>
+        <td><button class="btn btn-outline btn-sm" onclick="vytisknoutUctenkuZPlatby(${p.id})" title="Vytisknout účtenku zpětně">🧾</button></td>
       </tr>`).join('')}</tbody></table>`;
 
     document.getElementById('ucetVratkySeznam').innerHTML = !d.vratky.seznam.length ? '<div class="empty">Zatím žádné vratky v tomto období</div>' : `
-      <table><thead><tr><th>Datum</th><th>Způsob</th><th>Rezervace</th><th>Částka</th></tr></thead>
+      <table><thead><tr><th>Datum</th><th>Způsob</th><th>Rezervace</th><th>Částka</th><th>Tisk</th></tr></thead>
       <tbody>${d.vratky.seznam.slice(0, 100).map(p => `<tr>
         <td>${new Date(p.vytvoreno).toLocaleDateString('cs-CZ')}</td>
         <td>${zpusobLabel[p.zpusob_platby] || p.zpusob_platby}</td>
         <td>${p.rezervace_id ? '<a href="#" onclick="zobrazitRezervaciZUcetnictvi(' + p.rezervace_id + ');return false;">#' + p.rezervace_id + '</a>' : '—'}</td>
         <td style="color:#c0392b">${Math.round(p.castka).toLocaleString('cs-CZ')} Kč</td>
+        <td><button class="btn btn-outline btn-sm" onclick="vytisknoutUctenkuZPlatby(${p.id})" title="Vytisknout účtenku zpětně">🧾</button></td>
       </tr>`).join('')}</tbody></table>`;
 
     const uzaverkaRadky = d.podleZpusobuPlatby.slice().sort((a, b) => uzaverkaPoradi.indexOf(a.zpusob_platby) - uzaverkaPoradi.indexOf(b.zpusob_platby));
@@ -4315,24 +4318,47 @@ async function loadUcetnictvi() {
       <table><thead><tr><th>Způsob platby</th><th>Částka</th></tr></thead>
       <tbody>${uzaverkaRadky.map(p => `<tr><td>${uzaverkaZpusobLabel[p.zpusob_platby] || p.zpusob_platby}</td><td><strong>${Math.round(p.castka).toLocaleString('cs-CZ')} Kč</strong></td></tr>`).join('')}
       <tr style="border-top:2px solid var(--tan-light)"><td><strong>Celkem</strong></td><td><strong>${Math.round(d.prijatePlatby.celkem).toLocaleString('cs-CZ')} Kč</strong></td></tr></tbody></table>`;
+
+    // Rozpoznat, jestli zvolené období (ať nastavené tlačítkem Den/Měsíc/Rok,
+    // nebo ručně zadaným stejným/celým rozsahem dat) odpovídá jednomu dni,
+    // celému měsíci nebo celému roku — jen pak má smysl nabídnout tisk
+    // uzávěrkové účtenky (ta se tiskne za přesně jedno takové období).
+    ucetAktivniObdobi = ucetDetekovatObdobi(od, doDat);
+    ['Den', 'Mesic', 'Rok'].forEach(t => document.getElementById('uzaverkaBtn' + t).style.cssText = '');
+    if (ucetAktivniObdobi) {
+      const aktivni = document.getElementById('uzaverkaBtn' + ucetAktivniObdobi.charAt(0).toUpperCase() + ucetAktivniObdobi.slice(1));
+      if (aktivni) aktivni.style.cssText = 'background:linear-gradient(135deg,#d4856a,#e0a830);color:#fff;border-color:transparent';
+    }
+    document.getElementById('uzaverkaTiskUctenkaBtn').style.display = (ucetAktivniObdobi === 'den' || ucetAktivniObdobi === 'mesic') ? 'inline-flex' : 'none';
+    document.getElementById('uzaverkaTiskA4Btn').style.display = ucetAktivniObdobi === 'rok' ? 'inline-flex' : 'none';
   } catch (e) { document.getElementById('ucetTrzbySluzbyDny').innerHTML = '<div class="error-msg">Chyba načítání.</div>'; }
+}
+// Vrátí 'den'/'mesic'/'rok', když od–do přesně odpovídá jednomu takovému
+// období (i zpětně, libovolný minulý den/měsíc/rok), jinak null.
+function ucetDetekovatObdobi(od, doDat) {
+  if (!od || !doDat) return null;
+  if (od === doDat) return 'den';
+  const pad = n => String(n).padStart(2, '0');
+  const zacatek = new Date(od + 'T12:00:00');
+  if (od === `${zacatek.getFullYear()}-01-01` && doDat === `${zacatek.getFullYear()}-12-31`) return 'rok';
+  const posledniDenMesice = new Date(zacatek.getFullYear(), zacatek.getMonth() + 1, 0);
+  const isoPosledni = `${posledniDenMesice.getFullYear()}-${pad(posledniDenMesice.getMonth() + 1)}-${pad(posledniDenMesice.getDate())}`;
+  if (zacatek.getDate() === 1 && doDat === isoPosledni) return 'mesic';
+  return null;
 }
 function ucetNastavObdobi(typ) {
   const dnes = new Date();
   const pad = n => String(n).padStart(2, '0');
   const iso = dt => `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
   let od, doDat;
-  if (typ === 'den') { od = doDat = iso(dnes); }
+  // "Den" zpětně: když je v poli „Období od“ už vyplněné nějaké datum
+  // (i minulé), vezme se jako celý den místo dneška — tak jde tisknout
+  // uzávěrka/účtenka i za starší den, ne jen za dnešek.
+  if (typ === 'den') { od = doDat = document.getElementById('ucetOd').value || iso(dnes); }
   else if (typ === 'mesic') { od = iso(new Date(dnes.getFullYear(), dnes.getMonth(), 1)); doDat = iso(new Date(dnes.getFullYear(), dnes.getMonth() + 1, 0)); }
   else { od = `${dnes.getFullYear()}-01-01`; doDat = `${dnes.getFullYear()}-12-31`; }
   document.getElementById('ucetOd').value = od;
   document.getElementById('ucetDo').value = doDat;
-  ['Den', 'Mesic', 'Rok'].forEach(t => document.getElementById('uzaverkaBtn' + t).style.cssText = '');
-  const aktivni = document.getElementById('uzaverkaBtn' + typ.charAt(0).toUpperCase() + typ.slice(1));
-  aktivni.style.cssText = 'background:linear-gradient(135deg,#d4856a,#e0a830);color:#fff;border-color:transparent';
-  ucetAktivniObdobi = typ;
-  document.getElementById('uzaverkaTiskUctenkaBtn').style.display = (typ === 'den' || typ === 'mesic') ? 'inline-flex' : 'none';
-  document.getElementById('uzaverkaTiskA4Btn').style.display = typ === 'rok' ? 'inline-flex' : 'none';
   loadUcetnictvi();
 }
 function uzaverkaObdobiLabel() {
@@ -4396,6 +4422,26 @@ function vytisknoutUzaverkuRok() {
 async function zobrazitRezervaciZUcetnictvi(id) {
   if (!vsechnyRezervace.length) await loadRezervace();
   otevritDetailRezervace(id);
+}
+// Zpětný tisk účtenky k jednotlivé platbě/vratce z Účetnictví (bod uživatelky
+// 2026-11-12: "potřebuji tisknout účtenky i zpětně, u každé položky"). Čerpá
+// z dat už načtených v Účetnictví (posledniUcetnictvi) + jméno/masáž dotáhne
+// z rezervace — žádný nový endpoint, jen jiné zobrazení existujících dat.
+async function vytisknoutUctenkuZPlatby(id) {
+  if (!posledniUcetnictvi) return;
+  const p = posledniUcetnictvi.prijatePlatby.seznam.find(x => x.id === id) || posledniUcetnictvi.vratky.seznam.find(x => x.id === id);
+  if (!p) return;
+  if (!vsechnyRezervace.length) await loadRezervace();
+  const r = vsechnyRezervace.find(x => x.id === p.rezervace_id);
+  const jeVratka = p.typ === 'vratka' || Number(p.castka) < 0;
+  const radky = [
+    uctenkaRadek('Datum', new Date(p.vytvoreno).toLocaleString('cs-CZ', { dateStyle: 'short', timeStyle: 'short' })),
+    r ? uctenkaRadek('Klientka', r.jmeno) : '',
+    r ? uctenkaRadek('Masáž', r.masaz) : '',
+    uctenkaRadek(jeVratka ? 'Vráceno' : 'Částka', Math.abs(Number(p.castka)).toLocaleString('cs-CZ') + ' Kč'),
+    uctenkaRadek('Způsob platby', platbaZpusobLabel[p.zpusob_platby] || p.zpusob_platby)
+  ].filter(Boolean);
+  otevritUctenku(radky, (jeVratka ? 'VR-' : 'PL-') + p.id, jeVratka ? 'Vratka' : 'Doklad č.');
 }
 function exportCsvUcetnictvi() {
   if (!posledniUcetnictvi) return;
