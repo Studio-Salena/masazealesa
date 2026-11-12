@@ -12,6 +12,16 @@
   --tan:#d4856a;--tan-light:#fde8d8;--sage:#6bbf7a;--gold:#d4a84a;
   --red:#e74c3c;--blue:#3498db;--orange:#f39c12;--purple:#9b59b6;
   --text:#3a2410;--text-light:#7a5535;
+  /* Tmavé postranní menu (Etapa 1 — vizuální sjednocení s administrací Dětských
+     krůčků): nové proměnné jen pro sidebar/topbar shell, NEpřepisují --brown/
+     --tan/--sage výš, ať se barva tlačítek, nadpisů a stavových badge v
+     obsahu stránek v tomto kroku nezmění — to je až další krok. */
+  --sb-bg:#4A3427;--sb-bg-2:#3a2a1e;--sb-text:#f6ece4;--sb-muted:#d9c7bb;
+  --sb-akcent:#D1A9A5;--sb-hover:rgba(255,255,255,0.08);--sb-aktivni:rgba(209,169,165,0.22);
+  /* Etapa 3 (dashboard) — jemná šalvějová z téhle stejné sady barev; --sage
+     výš (#6bbf7a) zůstává beze změny, je sytější a používá se na existující
+     zelené hodnoty (stat-green), tahle je jen pro nový proužek na kartách. */
+  --sage-soft:#A7B59A;
 }
 body{font-family:'Nunito',sans-serif;background:var(--cream);color:var(--text);min-height:100vh}
 
@@ -21,52 +31,67 @@ body{font-family:'Nunito',sans-serif;background:var(--cream);color:var(--text);m
 .login-logo{font-family:'Dancing Script',cursive;font-size:2.2rem;color:var(--brown);margin-bottom:4px}
 .login-sub{color:var(--text-light);font-size:0.85rem;margin-bottom:32px}
 .login-box input{width:100%;padding:14px 16px;border:2px solid var(--tan-light);border-radius:12px;font-size:1rem;outline:none;margin-bottom:16px;font-family:'Nunito',sans-serif}
-.login-box input:focus{border-color:var(--tan)}
-.login-btn{width:100%;padding:14px;background:linear-gradient(135deg,#d4856a,#e0a830);color:#fff;border:none;border-radius:12px;font-size:1rem;font-weight:700;cursor:pointer;font-family:'Nunito',sans-serif}
+.login-box input:focus{border-color:var(--sb-bg)}
+.login-btn{width:100%;padding:14px;background:var(--sb-bg);color:#fff;border:none;border-radius:12px;font-size:1rem;font-weight:700;cursor:pointer;font-family:'Nunito',sans-serif;transition:background 0.2s}
+.login-btn:hover{background:var(--sb-bg-2)}
 .login-error{color:var(--red);font-size:0.85rem;margin-top:12px;display:none}
 
 /* LAYOUT */
 .admin-wrap{display:none;min-height:100vh}
-.sidebar{width:230px;background:#fff;border-right:2px solid var(--tan-light);position:fixed;top:0;left:0;bottom:0;padding:0;display:flex;flex-direction:column;box-shadow:2px 0 12px rgba(92,58,30,0.06);z-index:50;transition:transform 0.3s,width 0.2s;overflow-y:auto;overflow-x:hidden}
-.sidebar-logo{display:flex;align-items:center;justify-content:space-between;padding:20px;border-bottom:1px solid var(--tan-light)}
-.sidebar-logo-text{font-family:'Dancing Script',cursive;font-size:1.4rem;color:var(--brown);white-space:nowrap}
-.sidebar-logo-text span{display:block;font-family:'Nunito',sans-serif;font-size:0.65rem;color:var(--text-light);font-weight:400;letter-spacing:1px;text-transform:uppercase}
-.sidebar-collapse-btn{background:none;border:1px solid var(--tan-light);border-radius:6px;width:24px;height:24px;flex-shrink:0;cursor:pointer;color:var(--text-light);font-size:0.9rem;line-height:1;display:flex;align-items:center;justify-content:center;transition:transform 0.2s}
-.sidebar-collapse-btn:hover{border-color:var(--tan);color:var(--brown)}
-.nav-item{display:flex;align-items:center;gap:10px;padding:11px 20px;cursor:pointer;color:var(--text-light);font-weight:600;font-size:0.87rem;transition:all 0.2s;border-left:3px solid transparent;position:relative}
-.nav-item:hover{background:var(--cream);color:var(--brown)}
-.nav-item:focus-visible{background:var(--cream);color:var(--brown);outline:2px solid var(--tan);outline-offset:-2px}
-.nav-item.active{background:linear-gradient(90deg,var(--tan-light),transparent);color:var(--brown);border-left-color:var(--tan)}
+.sidebar{width:230px;background:linear-gradient(180deg,var(--sb-bg),var(--sb-bg-2));border-right:none;position:fixed;top:56px;left:0;bottom:0;padding:0;display:flex;flex-direction:column;box-shadow:2px 0 16px rgba(0,0,0,0.15);z-index:50;transition:transform 0.3s,width 0.2s}
+.sidebar-logo{display:flex;align-items:center;justify-content:space-between;padding:20px;border-bottom:1px solid rgba(255,255,255,0.12)}
+.sidebar-logo-text{font-family:'Dancing Script',cursive;font-size:1.4rem;color:var(--sb-text);white-space:nowrap}
+.sidebar-logo-text span{display:block;font-family:'Nunito',sans-serif;font-size:0.65rem;color:var(--sb-muted);font-weight:400;letter-spacing:1px;text-transform:uppercase}
+.sidebar-collapse-btn{background:none;border:1px solid rgba(255,255,255,0.25);border-radius:6px;width:24px;height:24px;flex-shrink:0;cursor:pointer;color:var(--sb-muted);font-size:0.9rem;line-height:1;display:flex;align-items:center;justify-content:center;transition:transform 0.2s}
+.sidebar-collapse-btn:hover{border-color:var(--sb-akcent);color:#fff}
+/* Rolovatelná je jen oblast položek menu — logo nahoře a patička s odhlášením
+   (Etapa 2) zůstávají vždy na místě, přesně jako u Dětských krůčků. Posuvník
+   je tenký a téměř neviditelný, dokud se ho myš nedotkne (hover). */
+.nav-scroll{flex:1;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,0.22) transparent}
+.nav-scroll::-webkit-scrollbar{width:6px}
+.nav-scroll::-webkit-scrollbar-track{background:transparent}
+.nav-scroll::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.18);border-radius:6px}
+.nav-scroll::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,0.35)}
+/* Etapa 2: nav-item a nav-group-header jsou teď <button> (dřív <div
+   role="button">, viz navAktivovat() výš — ten zůstává definovaný, pro jistotu,
+   ale pro tato tlačítka už se nevolá, nativní <button> ovládání klávesnicí umí
+   sám). Zde jsou explicitní resety (border/background/font/text-align/width),
+   aby se neprojevil výchozí vzhled tlačítka prohlížeče — stejný princip, jaký
+   už dřív fungoval beze zbytku u .logout-btn níž.*/
+.nav-item{display:flex;align-items:center;gap:10px;width:100%;padding:11px 20px;cursor:pointer;color:var(--sb-muted);font-weight:600;font-size:0.87rem;font-family:'Nunito',sans-serif;text-align:left;background:none;border:0;border-left:3px solid transparent;transition:all 0.2s;position:relative}
+.nav-item:hover{background:var(--sb-hover);color:#fff}
+.nav-item:focus-visible{background:var(--sb-hover);color:#fff;outline:2px solid var(--sb-akcent);outline-offset:-2px}
+.nav-item.active{background:var(--sb-aktivni);color:#fff;border-left-color:var(--sb-akcent)}
 .nav-item .icon{font-size:1rem;width:20px;text-align:center}
 .nav-badge{background:var(--red);color:#fff;border-radius:10px;padding:2px 7px;font-size:0.65rem;font-weight:700;margin-left:auto}
 
 /* SKUPINY MENU (rozbalovací) */
 .nav-group{margin-top:6px}
-.nav-group-header{display:flex;align-items:center;gap:10px;padding:11px 20px;cursor:pointer;color:var(--text-light);font-weight:700;font-size:0.8rem;text-transform:uppercase;letter-spacing:0.5px;transition:all 0.2s}
-.nav-group-header:hover{background:var(--cream);color:var(--brown)}
-.nav-group-header:focus-visible{background:var(--cream);color:var(--brown);outline:2px solid var(--tan);outline-offset:-2px}
+.nav-group-header{display:flex;align-items:center;gap:10px;width:100%;padding:11px 20px;cursor:pointer;color:var(--sb-muted);font-weight:700;font-size:0.8rem;font-family:'Nunito',sans-serif;text-align:left;text-transform:uppercase;letter-spacing:0.5px;background:none;border:0;transition:all 0.2s}
+.nav-group-header:hover{background:var(--sb-hover);color:#fff}
+.nav-group-header:focus-visible{background:var(--sb-hover);color:#fff;outline:2px solid var(--sb-akcent);outline-offset:-2px}
 .nav-group-header .icon{font-size:1rem;width:20px;text-align:center}
 .nav-chevron{margin-left:auto;font-size:0.7rem;transition:transform 0.2s;flex-shrink:0}
 .nav-group.collapsed .nav-chevron{transform:rotate(-90deg)}
 .nav-group.collapsed .nav-subitems{display:none}
 .nav-item.nav-subitem{padding-left:46px;font-size:0.84rem}
-.sidebar-footer{margin-top:auto;padding:16px;border-top:1px solid var(--tan-light)}
-.logout-btn{width:100%;padding:10px;background:none;border:2px solid var(--tan-light);border-radius:8px;color:var(--text-light);cursor:pointer;font-family:'Nunito',sans-serif;font-weight:600;font-size:0.85rem;transition:all 0.2s}
-.logout-btn:hover{border-color:var(--red);color:var(--red)}
+.sidebar-footer{margin-top:auto;padding:16px;border-top:1px solid rgba(255,255,255,0.12)}
+.logout-btn{width:100%;padding:10px;background:none;border:2px solid rgba(255,255,255,0.2);border-radius:8px;color:var(--sb-muted);cursor:pointer;font-family:'Nunito',sans-serif;font-weight:600;font-size:0.85rem;transition:all 0.2s}
+.logout-btn:hover{border-color:#e74c3c;color:#ff8a7a}
 
-/* TOP BAR */
-.topbar{position:fixed;top:0;left:230px;right:0;height:56px;background:#fff;border-bottom:1px solid var(--tan-light);display:flex;align-items:center;justify-content:space-between;padding:0 24px;z-index:40;box-shadow:0 2px 8px rgba(92,58,30,0.06)}
+/* TOP BAR — přes celou šířku (Etapa 1), sidebar visí pod ní */
+.topbar{position:fixed;top:0;left:0;right:0;height:56px;background:#fff;border-bottom:1px solid var(--tan-light);display:flex;align-items:center;justify-content:space-between;padding:0 24px;z-index:60;box-shadow:0 2px 8px rgba(92,58,30,0.06)}
 .menu-toggle{display:none;background:none;border:none;font-size:1.4rem;cursor:pointer;color:var(--brown)}
 .topbar-user{font-size:0.82rem;color:var(--text-light);font-weight:600}
 
 /* GLOBÁLNÍ VYHLEDÁVÁNÍ */
 .topbar-search{position:relative;flex:1;max-width:420px;margin:0 20px}
 .topbar-search input{width:100%;padding:8px 12px;border:1.5px solid var(--tan-light);border-radius:8px;font-family:'Nunito',sans-serif;font-size:0.85rem;color:var(--brown);box-sizing:border-box}
-.topbar-search input:focus{outline:none;border-color:var(--tan)}
+.topbar-search input:focus{outline:none;border-color:var(--sb-bg)}
 .ghv-panel{display:none;position:absolute;top:calc(100% + 6px);left:0;right:0;background:#fff;border:1px solid var(--tan-light);border-radius:10px;box-shadow:0 8px 24px rgba(92,58,30,0.15);max-height:420px;overflow-y:auto;z-index:50}
 .ghv-panel.open{display:block}
 .ghv-skupina-nadpis{padding:8px 14px 4px;font-size:0.68rem;font-weight:700;color:var(--text-light);text-transform:uppercase;letter-spacing:0.04em}
-.ghv-polozka{padding:9px 14px;cursor:pointer;font-size:0.85rem;color:var(--brown);border-top:1px solid var(--tan-light)}
+.ghv-polozka{display:block;width:100%;text-align:left;background:none;border:0;border-top:1px solid var(--tan-light);font-family:'Nunito',sans-serif;padding:9px 14px;cursor:pointer;font-size:0.85rem;color:var(--brown)}
 .ghv-polozka:hover,.ghv-polozka:focus{background:var(--cream);outline:none}
 .ghv-polozka small{display:block;color:var(--text-light);font-size:0.75rem;margin-top:2px}
 .ghv-prazdno{padding:14px;color:var(--text-light);font-size:0.82rem;text-align:center}
@@ -76,7 +101,7 @@ body{font-family:'Nunito',sans-serif;background:var(--cream);color:var(--text);m
 .zvonek-btn{position:relative;background:none;border:none;font-size:1.25rem;cursor:pointer;color:var(--brown);padding:6px;line-height:1}
 .zvonek-badge{position:absolute;top:0;right:0;background:var(--red);color:#fff;border-radius:10px;padding:1px 5px;font-size:0.62rem;font-weight:700}
 .zvonek-panel{left:auto;right:0;width:300px}
-.zvonek-radek{padding:10px 14px;cursor:pointer;font-size:0.85rem;color:var(--brown);border-top:1px solid var(--tan-light);display:flex;justify-content:space-between;align-items:center}
+.zvonek-radek{width:100%;text-align:left;background:none;border:0;border-top:1px solid var(--tan-light);font-family:'Nunito',sans-serif;padding:10px 14px;cursor:pointer;font-size:0.85rem;color:var(--brown);display:flex;justify-content:space-between;align-items:center}
 .zvonek-radek:first-child{border-top:none}
 .zvonek-radek:hover,.zvonek-radek:focus{background:var(--cream);outline:none}
 .zvonek-pocet{background:var(--tan-light);color:var(--brown);border-radius:10px;padding:1px 8px;font-size:0.75rem;font-weight:700}
@@ -102,7 +127,8 @@ body{font-family:'Nunito',sans-serif;background:var(--cream);color:var(--text);m
   .sidebar.collapsed .logout-btn .nav-text{display:none}
   .sidebar.collapsed .logout-btn .icon{display:inline-block!important}
   .main.sidebar-collapsed-layout{margin-left:64px}
-  .topbar.sidebar-collapsed-layout{left:64px}
+  /* topbar je teď vždy přes celou šířku (viz .topbar výš) — už nezávisí na
+     sbalení menu, proto tu dřív bylo .topbar.sidebar-collapsed-layout{left:64px} */
 }
 .page.active{display:block}
 .page-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:12px}
@@ -113,11 +139,21 @@ body{font-family:'Nunito',sans-serif;background:var(--cream);color:var(--text);m
 .stat-card{background:#fff;border-radius:16px;padding:18px;border:1px solid var(--tan-light);transition:all 0.2s;cursor:default}
 .stat-card:hover{box-shadow:0 4px 20px rgba(92,58,30,0.1);transform:translateY(-2px)}
 .stat-card-click{cursor:pointer}
-.stat-card-click:hover{border-color:var(--tan)}
+.stat-card-click:hover{border-color:var(--sb-akcent)}
 .stat-label{font-size:0.7rem;color:var(--text-light);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px}
 .stat-value{font-size:1.8rem;font-weight:700;color:var(--brown);font-family:'Cormorant',serif}
 .stat-green{color:var(--sage)!important}
 .stat-orange{color:var(--orange)!important}
+
+/* ETAPA 3 — barevný proužek karet na Přehledu podle významu (stejná logika
+   jako stat-orange/stat-green výš na hodnotách, jen navíc jako proužek nad
+   celou kartou). Schválně jen #page-prehled .stat-card, ne .stat-card obecně
+   — karty na jiných stránkách (Rezervace, Účetnictví…) zůstávají beze změny. */
+#page-prehled .stat-card{border-top:4px solid var(--karta-barva,transparent)}
+#page-prehled .karta-info{--karta-barva:var(--sb-bg)}
+#page-prehled .karta-pozor{--karta-barva:var(--sb-akcent)}
+#page-prehled .karta-pozitivni{--karta-barva:var(--sage-soft)}
+#page-prehled .table-wrap{border-top:4px solid var(--sb-akcent)}
 
 /* TABLE */
 .table-wrap{background:#fff;border-radius:16px;border:1px solid var(--tan-light);overflow:hidden;margin-bottom:20px}
@@ -149,7 +185,7 @@ tr:last-child td{border-bottom:none}
 .ak-den.ak-den-zavreno{cursor:not-allowed;background:repeating-linear-gradient(135deg, rgba(0,0,0,0.03) 0 6px, rgba(0,0,0,0.07) 6px 12px)}
 .ak-blok{position:absolute;left:2px;right:2px;border-radius:5px;padding:2px 5px;font-size:0.62rem;line-height:1.25;color:#fff;overflow:hidden;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,0.15)}
 .ak-blok strong{display:block;font-size:0.66rem}
-tr:hover td{background:#fffaf5}
+tr:hover td{background:var(--cream)}
 
 /* BADGES */
 .badge{padding:3px 9px;border-radius:20px;font-size:0.7rem;font-weight:700;display:inline-block}
@@ -160,31 +196,53 @@ tr:hover td{background:#fffaf5}
 
 /* BUTTONS */
 .btn{padding:7px 14px;border-radius:8px;border:none;cursor:pointer;font-family:'Nunito',sans-serif;font-weight:700;font-size:0.8rem;transition:all 0.2s;display:inline-flex;align-items:center;gap:5px}
-.btn-primary{background:linear-gradient(135deg,#d4856a,#e0a830);color:#fff}
-.btn-primary:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(92,58,30,0.3)}
+.btn-primary{background:var(--sb-bg);color:#fff}
+.btn-primary:hover{background:var(--sb-bg-2);transform:translateY(-1px);box-shadow:0 4px 12px rgba(74,52,39,0.3)}
 .btn-sm{padding:4px 9px;font-size:0.73rem}
 .btn-green{background:var(--sage);color:#fff}
 .btn-red{background:var(--red);color:#fff}
 .prodej-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px 24px}
 .btn-outline{background:none;border:2px solid var(--tan-light);color:var(--text-light)}
-.btn-outline:hover{border-color:var(--tan);color:var(--brown)}
+.btn-outline:hover{border-color:var(--sb-akcent);color:var(--sb-bg)}
 .refresh-btn{background:none;border:2px solid var(--tan-light);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:0.8rem;color:var(--text-light);font-family:'Nunito',sans-serif;transition:all 0.2s}
-.refresh-btn:hover{border-color:var(--tan);color:var(--brown)}
+.refresh-btn:hover{border-color:var(--sb-akcent);color:var(--sb-bg)}
+/* Etapa 4 — jednotné vyhledávací pole na stránkách (vedle topbar-search, to
+   je samostatné globální hledání nahoře) */
+.search-input{padding:7px 12px;border:2px solid var(--tan-light);border-radius:8px;font-family:'Nunito',sans-serif;font-size:0.82rem;outline:none;min-width:220px;background:#fff}
+.search-input:focus{border-color:var(--sb-bg)}
 
 /* FORM */
 .form-group{display:flex;flex-direction:column;gap:5px;margin-bottom:12px}
 .form-group label{font-size:0.8rem;font-weight:700;color:var(--text-light)}
 .form-group input,.form-group select,.form-group textarea{padding:9px 12px;border:2px solid var(--tan-light);border-radius:10px;font-family:'Nunito',sans-serif;font-size:0.88rem;outline:none;background:#fff}
-.form-group input:focus,.form-group select:focus{border-color:var(--tan)}
+.form-group input:focus,.form-group select:focus{border-color:var(--sb-bg)}
 .form-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .form-grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
 
 /* MODAL */
-.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.5);display:none;align-items:center;justify-content:center;z-index:500;padding:16px}
+.modal-overlay{position:fixed;inset:0;background:rgba(58,36,16,0.5);display:none;align-items:center;justify-content:center;z-index:500;padding:16px}
 .modal-overlay.open{display:flex}
-.modal{background:#fff;border-radius:20px;padding:28px;width:100%;max-width:560px;max-height:92vh;overflow-y:auto}
+.modal{background:#fff;border-radius:20px;padding:28px;width:100%;max-width:560px;max-height:92vh;overflow-y:auto;position:relative;box-shadow:0 22px 50px rgba(58,36,16,0.22)}
 .modal h3{font-family:'Cormorant',serif;color:var(--brown);margin-bottom:18px;font-size:1.2rem}
+.modal-overlay .modal > h3:first-of-type{padding-right:48px}
 .modal-footer{display:flex;gap:10px;justify-content:flex-end;margin-top:18px;padding-top:14px;border-top:1px solid var(--tan-light)}
+/* Etapa 5 — kulaté zavírací ✕ vpravo nahoře (vkládá se JS níž), přilepená
+   patička u posledního modal-footer (ať je "Uložit" vidět i u dlouhých
+   formulářů) a na mobilu okno jako panel vysouvající se od spodu. */
+.modal-zavrit{position:absolute;top:14px;right:14px;width:40px;height:40px;border:0;border-radius:50%;background:var(--cream);color:var(--text);font-size:1.05rem;line-height:1;cursor:pointer;z-index:3}
+.modal-zavrit:hover{background:var(--tan-light)}
+.modal-zavrit:focus-visible{outline:2px solid var(--sb-bg);outline-offset:2px}
+.modal-overlay .modal > .modal-footer:last-of-type{position:sticky;bottom:-28px;margin:18px -28px -28px;padding:14px 28px 18px;background:#fff;z-index:2;border-radius:0 0 20px 20px}
+@media(max-width:768px){
+  .modal-overlay{padding:0;align-items:flex-end}
+  .modal-overlay .modal{max-width:none!important;width:100%!important;max-height:94vh!important;border-radius:20px 20px 0 0;padding:22px 16px}
+  .modal-overlay .modal > .modal-footer:last-of-type{bottom:-22px;margin:18px -16px -22px;padding:12px 16px calc(14px + env(safe-area-inset-bottom,0px));border-radius:0}
+  .modal-overlay .modal > .modal-footer:last-of-type > .btn{flex:1;justify-content:center;min-height:46px}
+}
+@media(prefers-reduced-motion:no-preference){
+  .modal-overlay.open .modal{animation:modal-in 0.16s ease-out}
+  @keyframes modal-in{from{transform:translateY(12px);opacity:0.6}to{transform:none;opacity:1}}
+}
 
 /* MISC */
 .loading{text-align:center;padding:36px;color:var(--text-light)}
@@ -193,8 +251,8 @@ tr:hover td{background:#fffaf5}
 .success-msg{background:#e8f7ee;color:#27ae60;padding:10px 14px;border-radius:8px;margin-bottom:12px;font-size:0.83rem}
 .filter-pills{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
 .pill{padding:5px 12px;border-radius:16px;border:2px solid var(--tan-light);background:#fff;cursor:pointer;font-family:'Nunito',sans-serif;font-weight:700;font-size:0.75rem;color:var(--text-light);transition:all 0.2s}
-.pill.active{background:var(--tan);color:#fff;border-color:var(--tan)}
-.pill:hover:not(.active){border-color:var(--tan);color:var(--brown)}
+.pill.active{background:var(--sb-akcent);color:var(--sb-bg);border-color:var(--sb-akcent)}
+.pill:hover:not(.active){border-color:var(--sb-akcent);color:var(--sb-bg)}
 
 /* TABLET — mezikrok mezi mobilem a desktopem; dřív byl jen ostrý přechod
    mobil/desktop a tablet dostával plný desktopový layout s 230px menu i při
@@ -215,7 +273,6 @@ tr:hover td{background:#fffaf5}
   .sidebar{transform:translateX(-100%)}
   .sidebar.open{transform:translateX(0)}
   .sidebar-collapse-btn{display:none}
-  .topbar{left:0}
   .main{margin-left:0;padding:70px 14px 14px}
   .menu-toggle{display:block}
   .table-wrap{overflow-x:auto}
@@ -304,68 +361,70 @@ tr:hover td{background:#fffaf5}
       <span class="sidebar-logo-text">🌸 Masáže Alesa<span>Admin panel</span></span>
       <button class="sidebar-collapse-btn" onclick="prepnoutSbaleniMenu()" id="sidebarCollapseBtn" title="Sbalit/rozbalit menu" aria-label="Sbalit/rozbalit menu">«</button>
     </div>
-    <div class="nav-item active" onclick="showPage('prehled',this)" tabindex="0" role="button" onkeydown="navAktivovat(event)" title="Přehled"><span class="icon">📊</span><span class="nav-text"> Přehled</span></div>
+    <div class="nav-scroll">
+    <button type="button" class="nav-item active" onclick="showPage('prehled',this)" title="Přehled"><span class="icon">📊</span><span class="nav-text"> Přehled</span></button>
 
     <div class="nav-group" data-skupina="rezervace">
-      <div class="nav-group-header" onclick="prepnoutNavSkupinu(this)" tabindex="0" role="button" onkeydown="navAktivovat(event)" aria-expanded="true" title="Rezervace">
+      <button type="button" class="nav-group-header" onclick="prepnoutNavSkupinu(this)" aria-expanded="true" title="Rezervace">
         <span class="icon">📅</span><span class="nav-text">Rezervace</span>
         <span class="nav-badge" id="navBadgeRez" style="display:none">0</span>
         <span class="nav-chevron">▾</span>
-      </div>
+      </button>
       <div class="nav-subitems">
-        <div class="nav-item nav-subitem" onclick="showPage('rezervace',this)" tabindex="0" role="button" onkeydown="navAktivovat(event)" title="Kalendář"><span class="icon">🗓️</span><span class="nav-text"> Kalendář</span></div>
-        <div class="nav-item nav-subitem" onclick="showPage('rezervace',this)" tabindex="0" role="button" onkeydown="navAktivovat(event)" title="Seznam"><span class="icon">📋</span><span class="nav-text"> Seznam</span></div>
-        <div class="nav-item nav-subitem" onclick="showPage('zakaznici',this)" tabindex="0" role="button" onkeydown="navAktivovat(event)" title="Přehled klientů"><span class="icon">👥</span><span class="nav-text"> Přehled klientů</span></div>
+        <button type="button" class="nav-item nav-subitem" onclick="showPage('rezervace',this)" title="Kalendář"><span class="icon">🗓️</span><span class="nav-text"> Kalendář</span></button>
+        <button type="button" class="nav-item nav-subitem" onclick="showPage('rezervace',this)" title="Seznam"><span class="icon">📋</span><span class="nav-text"> Seznam</span></button>
+        <button type="button" class="nav-item nav-subitem" onclick="showPage('zakaznici',this)" title="Přehled klientů"><span class="icon">👥</span><span class="nav-text"> Přehled klientů</span></button>
       </div>
     </div>
 
     <div class="nav-group" data-skupina="prodej">
-      <div class="nav-group-header" onclick="prepnoutNavSkupinu(this)" tabindex="0" role="button" onkeydown="navAktivovat(event)" aria-expanded="true" title="Prodej / E-shop">
+      <button type="button" class="nav-group-header" onclick="prepnoutNavSkupinu(this)" aria-expanded="true" title="Prodej / E-shop">
         <span class="icon">🛍️</span><span class="nav-text">Prodej / E-shop</span>
         <span class="nav-chevron">▾</span>
-      </div>
+      </button>
       <div class="nav-subitems">
-        <div class="nav-item nav-subitem" onclick="showPage('masaze',this)" tabindex="0" role="button" onkeydown="navAktivovat(event)" title="Masáže"><span class="icon">🧖</span><span class="nav-text"> Masáže</span></div>
-        <div class="nav-item nav-subitem" onclick="showPage('produkty',this)" tabindex="0" role="button" onkeydown="navAktivovat(event)" title="Produkty"><span class="icon">📦</span><span class="nav-text"> Produkty</span> <span class="nav-badge" id="navBadgeProdukty" style="display:none">0</span></div>
-        <div class="nav-item nav-subitem" onclick="showPage('poukazy',this)" tabindex="0" role="button" onkeydown="navAktivovat(event)" title="Poukazy"><span class="icon">🎁</span><span class="nav-text"> Poukazy</span> <span class="nav-badge" id="navBadgePoukazy" style="display:none">0</span></div>
-        <div class="nav-item nav-subitem" onclick="showPage('kupony',this)" tabindex="0" role="button" onkeydown="navAktivovat(event)" title="Slevové kupóny"><span class="icon">🎟️</span><span class="nav-text"> Slevové kupóny</span></div>
-        <div class="nav-item nav-subitem" onclick="showPage('stromecek',this)" tabindex="0" role="button" onkeydown="navAktivovat(event)" title="Akce Stromeček"><span class="icon">🎄</span><span class="nav-text"> Akce Stromeček</span></div>
+        <button type="button" class="nav-item nav-subitem" onclick="showPage('masaze',this)" title="Masáže"><span class="icon">🧖</span><span class="nav-text"> Masáže</span></button>
+        <button type="button" class="nav-item nav-subitem" onclick="showPage('produkty',this)" title="Produkty"><span class="icon">📦</span><span class="nav-text"> Produkty</span> <span class="nav-badge" id="navBadgeProdukty" style="display:none">0</span></button>
+        <button type="button" class="nav-item nav-subitem" onclick="showPage('poukazy',this)" title="Poukazy"><span class="icon">🎁</span><span class="nav-text"> Poukazy</span> <span class="nav-badge" id="navBadgePoukazy" style="display:none">0</span></button>
+        <button type="button" class="nav-item nav-subitem" onclick="showPage('kupony',this)" title="Slevové kupóny"><span class="icon">🎟️</span><span class="nav-text"> Slevové kupóny</span></button>
+        <button type="button" class="nav-item nav-subitem" onclick="showPage('stromecek',this)" title="Akce Stromeček"><span class="icon">🎄</span><span class="nav-text"> Akce Stromeček</span></button>
       </div>
     </div>
 
     <div class="nav-group" data-skupina="financni">
-      <div class="nav-group-header" onclick="prepnoutNavSkupinu(this)" tabindex="0" role="button" onkeydown="navAktivovat(event)" aria-expanded="true" title="Finanční přehled">
+      <button type="button" class="nav-group-header" onclick="prepnoutNavSkupinu(this)" aria-expanded="true" title="Finanční přehled">
         <span class="icon">💹</span><span class="nav-text">Finanční přehled</span>
         <span class="nav-chevron">▾</span>
-      </div>
+      </button>
       <div class="nav-subitems">
-        <div class="nav-item nav-subitem" onclick="showPage('ucetnictvi',this)" tabindex="0" role="button" onkeydown="navAktivovat(event)" title="Účetnictví"><span class="icon">📈</span><span class="nav-text"> Účetnictví</span></div>
-        <div class="nav-item nav-subitem" onclick="showPage('statistiky',this)" tabindex="0" role="button" onkeydown="navAktivovat(event)" title="Statistiky"><span class="icon">📊</span><span class="nav-text"> Statistiky</span></div>
-        <div class="nav-item nav-subitem" onclick="showPage('cenik',this)" tabindex="0" role="button" onkeydown="navAktivovat(event)" title="Ceník"><span class="icon">💰</span><span class="nav-text"> Ceník</span></div>
+        <button type="button" class="nav-item nav-subitem" onclick="showPage('ucetnictvi',this)" title="Účetnictví"><span class="icon">📈</span><span class="nav-text"> Účetnictví</span></button>
+        <button type="button" class="nav-item nav-subitem" onclick="showPage('statistiky',this)" title="Statistiky"><span class="icon">📊</span><span class="nav-text"> Statistiky</span></button>
+        <button type="button" class="nav-item nav-subitem" onclick="showPage('cenik',this)" title="Ceník"><span class="icon">💰</span><span class="nav-text"> Ceník</span></button>
       </div>
     </div>
 
     <div class="nav-group" data-skupina="marketing">
-      <div class="nav-group-header" onclick="prepnoutNavSkupinu(this)" tabindex="0" role="button" onkeydown="navAktivovat(event)" aria-expanded="true" title="Marketing &amp; Emaily">
+      <button type="button" class="nav-group-header" onclick="prepnoutNavSkupinu(this)" aria-expanded="true" title="Marketing &amp; Emaily">
         <span class="icon">📣</span><span class="nav-text">Marketing &amp; Emaily</span>
         <span class="nav-chevron">▾</span>
-      </div>
+      </button>
       <div class="nav-subitems">
-        <div class="nav-item nav-subitem" onclick="showPage('newsletter',this)" tabindex="0" role="button" onkeydown="navAktivovat(event)" title="Newsletter"><span class="icon">💌</span><span class="nav-text"> Newsletter</span></div>
-        <div class="nav-item nav-subitem" onclick="showPage('sablony',this)" tabindex="0" role="button" onkeydown="navAktivovat(event)" title="Šablony e-mailů"><span class="icon">✉️</span><span class="nav-text"> Šablony e-mailů</span></div>
+        <button type="button" class="nav-item nav-subitem" onclick="showPage('newsletter',this)" title="Newsletter"><span class="icon">💌</span><span class="nav-text"> Newsletter</span></button>
+        <button type="button" class="nav-item nav-subitem" onclick="showPage('sablony',this)" title="Šablony e-mailů"><span class="icon">✉️</span><span class="nav-text"> Šablony e-mailů</span></button>
       </div>
     </div>
 
     <div class="nav-group" data-skupina="nastaveni">
-      <div class="nav-group-header" onclick="prepnoutNavSkupinu(this)" tabindex="0" role="button" onkeydown="navAktivovat(event)" aria-expanded="true" title="Nastavení">
+      <button type="button" class="nav-group-header" onclick="prepnoutNavSkupinu(this)" aria-expanded="true" title="Nastavení">
         <span class="icon">⚙️</span><span class="nav-text">Nastavení</span>
         <span class="nav-chevron">▾</span>
-      </div>
+      </button>
       <div class="nav-subitems">
-        <div class="nav-item nav-subitem" onclick="showPage('profil-salonu',this)" tabindex="0" role="button" onkeydown="navAktivovat(event)" title="Profil salonu"><span class="icon">🏢</span><span class="nav-text"> Profil salonu</span></div>
-        <div class="nav-item nav-subitem" onclick="showPage('retence',this)" tabindex="0" role="button" onkeydown="navAktivovat(event)" title="GDPR / Retence"><span class="icon">🗂️</span><span class="nav-text"> GDPR</span></div>
-        <div class="nav-item nav-subitem" onclick="showPage('system',this)" tabindex="0" role="button" onkeydown="navAktivovat(event)" title="Systém"><span class="icon">🔧</span><span class="nav-text"> Systém</span></div>
+        <button type="button" class="nav-item nav-subitem" onclick="showPage('profil-salonu',this)" title="Profil salonu"><span class="icon">🏢</span><span class="nav-text"> Profil salonu</span></button>
+        <button type="button" class="nav-item nav-subitem" onclick="showPage('retence',this)" title="GDPR / Retence"><span class="icon">🗂️</span><span class="nav-text"> GDPR</span></button>
+        <button type="button" class="nav-item nav-subitem" onclick="showPage('system',this)" title="Systém"><span class="icon">🔧</span><span class="nav-text"> Systém</span></button>
       </div>
+    </div>
     </div>
 
     <div class="sidebar-footer">
@@ -393,18 +452,18 @@ tr:hover td{background:#fffaf5}
     <div class="page active" id="page-prehled">
       <div class="page-header"><div class="page-title">📊 Přehled</div></div>
       <div class="stats-grid">
-        <div class="stat-card stat-card-click" onclick="prehledJdiNa('rezervace','vse')"><div class="stat-label">Rezervace celkem</div><div class="stat-value" id="stCelkem">—</div></div>
-        <div class="stat-card stat-card-click" onclick="prehledJdiNa('rezervace','cekajici')"><div class="stat-label">Čekající rezervace</div><div class="stat-value stat-orange" id="stCekajici">—</div></div>
-        <div class="stat-card stat-card-click" onclick="prehledJdiNa('rezervace','vse')"><div class="stat-label">Budoucí rezervace</div><div class="stat-value stat-green" id="stVolne">—</div></div>
-        <div class="stat-card stat-card-click" onclick="prehledJdiNa('poukazy')"><div class="stat-label">Aktivní poukazy</div><div class="stat-value" id="stPoukazy">—</div></div>
+        <div class="stat-card stat-card-click karta-info" onclick="prehledJdiNa('rezervace','vse')"><div class="stat-label">Rezervace celkem</div><div class="stat-value" id="stCelkem">—</div></div>
+        <div class="stat-card stat-card-click karta-pozor" onclick="prehledJdiNa('rezervace','cekajici')"><div class="stat-label">Čekající rezervace</div><div class="stat-value stat-orange" id="stCekajici">—</div></div>
+        <div class="stat-card stat-card-click karta-pozitivni" onclick="prehledJdiNa('rezervace','vse')"><div class="stat-label">Budoucí rezervace</div><div class="stat-value stat-green" id="stVolne">—</div></div>
+        <div class="stat-card stat-card-click karta-info" onclick="prehledJdiNa('poukazy')"><div class="stat-label">Aktivní poukazy</div><div class="stat-value" id="stPoukazy">—</div></div>
       </div>
       <div class="stats-grid" style="grid-template-columns:repeat(3,1fr)">
-        <div class="stat-card stat-card-click" onclick="prehledJdiNa('poukazy')"><div class="stat-label">Hodnota aktivních poukazů</div><div class="stat-value" id="stPoukazyHodnota">—</div></div>
-        <div class="stat-card stat-card-click" onclick="prehledJdiNa('poukazy','zadosti')"><div class="stat-label">Nové žádosti o poukaz</div><div class="stat-value stat-orange" id="stZadosti">—</div></div>
-        <div class="stat-card stat-card-click" onclick="prehledJdiNa('poukazy','expiruji')"><div class="stat-label">Poukazy brzy expirují</div><div class="stat-value stat-orange" id="stPoukazyExpiruji">—</div></div>
+        <div class="stat-card stat-card-click karta-info" onclick="prehledJdiNa('poukazy')"><div class="stat-label">Hodnota aktivních poukazů</div><div class="stat-value" id="stPoukazyHodnota">—</div></div>
+        <div class="stat-card stat-card-click karta-pozor" onclick="prehledJdiNa('poukazy','zadosti')"><div class="stat-label">Nové žádosti o poukaz</div><div class="stat-value stat-orange" id="stZadosti">—</div></div>
+        <div class="stat-card stat-card-click karta-pozor" onclick="prehledJdiNa('poukazy','expiruji')"><div class="stat-label">Poukazy brzy expirují</div><div class="stat-value stat-orange" id="stPoukazyExpiruji">—</div></div>
       </div>
       <div class="stats-grid" style="grid-template-columns:1fr">
-        <div class="stat-card stat-card-click" onclick="prehledJdiNa('ucetnictvi')"><div class="stat-label">Tržby za dokončené služby tento měsíc</div><div class="stat-value stat-green" id="stTrzbyMesic">—</div></div>
+        <div class="stat-card stat-card-click karta-pozitivni" onclick="prehledJdiNa('ucetnictvi')"><div class="stat-label">Tržby za dokončené služby tento měsíc</div><div class="stat-value stat-green" id="stTrzbyMesic">—</div></div>
       </div>
       <div class="table-wrap">
         <div class="table-header"><h3>📅 Dnešní program</h3></div>
@@ -483,12 +542,12 @@ tr:hover td{background:#fffaf5}
         <div class="table-header">
           <h3>📋 Příchozí rezervace</h3>
           <div class="filter-pills" style="margin:0">
-            <span class="pill active" onclick="filtrovatRez('vse',this)">Vše</span>
-            <span class="pill" onclick="filtrovatRez('cekajici',this)">⏳ Čekající</span>
-            <span class="pill" onclick="filtrovatRez('potvrzena',this)">✅ Potvrzené</span>
-            <span class="pill" onclick="filtrovatRez('dokoncena',this)">🌸 Dokončené</span>
-            <span class="pill" onclick="filtrovatRez('nedostavila_se',this)">🚫 Nedostavila se</span>
-            <span class="pill" onclick="filtrovatRez('zrusena',this)">❌ Zrušené</span>
+            <button type="button" class="pill active" onclick="filtrovatRez('vse',this)">Vše</button>
+            <button type="button" class="pill" onclick="filtrovatRez('cekajici',this)">⏳ Čekající</button>
+            <button type="button" class="pill" onclick="filtrovatRez('potvrzena',this)">✅ Potvrzené</button>
+            <button type="button" class="pill" onclick="filtrovatRez('dokoncena',this)">🌸 Dokončené</button>
+            <button type="button" class="pill" onclick="filtrovatRez('nedostavila_se',this)">🚫 Nedostavila se</button>
+            <button type="button" class="pill" onclick="filtrovatRez('zrusena',this)">❌ Zrušené</button>
           </div>
         </div>
         <div id="rezervaceTable"><div class="loading">Načítám...</div></div>
@@ -612,7 +671,7 @@ tr:hover td{background:#fffaf5}
       <div class="table-wrap">
         <div class="table-header">
           <h3>📋 Seznam zákaznic</h3>
-          <input type="text" id="zakazniciHledat" placeholder="Hledat podle jména, telefonu nebo e-mailu…" oninput="vykreslitZakazniky()" style="padding:7px 12px;border:2px solid var(--tan-light);border-radius:8px;font-family:'Nunito',sans-serif;font-size:0.85rem;outline:none;min-width:220px">
+          <input type="text" id="zakazniciHledat" class="search-input" placeholder="Hledat podle jména, telefonu nebo e-mailu…" oninput="vykreslitZakazniky()">
         </div>
         <div id="zakazniciTable"><div class="loading">Načítám...</div></div>
       </div>
@@ -1484,10 +1543,12 @@ if (sessionStorage.getItem('adminHeslo')) {
 }
 
 function toggleSidebar() { document.getElementById('sidebar').classList.toggle('open'); }
-// Klávesnicová aktivace položek menu (Rozvoj administrace, bod 6) — nav-item
-// jsou z vzhledových důvodů <div>, ne <button>/<a> (přepsání by riskovalo
-// nečekanou změnu stylu z výchozího vzhledu tlačítka), proto mají tabindex
-// a tuhle ruční obsluhu Enter/mezerníku, aby šly ovládat i jen klávesnicí.
+// Dřív (Rozvoj administrace, bod 6) byly nav-item z vzhledových důvodů <div
+// role="button"> s manuální obsluhou Enter/mezerníku tady. Od Etapy 2 jsou
+// nav-item/nav-group-header skutečná <button> (vzhled ověřen resety v CSS,
+// stejně jako už dřív funguje .logout-btn) — klávesnici obsluhují nativně,
+// tahle funkce se už nikde nevolá. Zůstává (nemazat nepoužité funkce), pro
+// případ, že by se ještě někde hodila.
 function navAktivovat(event) {
   if (event.key !== 'Enter' && event.key !== ' ') return;
   event.preventDefault();
@@ -1560,8 +1621,38 @@ function showPage(name, el) {
   document.getElementById('sidebar').classList.remove('open');
 }
 
-function openModal(id) { document.getElementById(id).classList.add('open'); }
-function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+// Etapa 5: pořadí otevřených oken se hlídá kvůli Esc (ne vždy je "poslední v
+// DOM" i "poslední otevřené" — např. z náhledu poukazu lze otevřít účtenku
+// nad ním). openModal/closeModal dál jen přidávají/odebírají třídu 'open',
+// přesně jako dřív — nic na stávajícím zavírání se neměnilo.
+var otevreneModaly = [];
+function openModal(id) {
+  document.getElementById(id).classList.add('open');
+  const i = otevreneModaly.indexOf(id);
+  if (i >= 0) otevreneModaly.splice(i, 1);
+  otevreneModaly.push(id);
+}
+function closeModal(id) {
+  document.getElementById(id).classList.remove('open');
+  const i = otevreneModaly.indexOf(id);
+  if (i >= 0) otevreneModaly.splice(i, 1);
+}
+document.querySelectorAll('.modal-overlay > .modal').forEach(okno => {
+  const id = okno.parentElement.id;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'modal-zavrit no-print';
+  btn.setAttribute('aria-label', 'Zavřít okno');
+  btn.textContent = '✕';
+  btn.addEventListener('click', () => closeModal(id));
+  okno.insertBefore(btn, okno.firstChild);
+  okno.parentElement.setAttribute('role', 'dialog');
+  okno.parentElement.setAttribute('aria-modal', 'true');
+});
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape' || !otevreneModaly.length) return;
+  closeModal(otevreneModaly[otevreneModaly.length - 1]);
+});
 
 // ── GLOBÁLNÍ VYHLEDÁVÁNÍ (horní lišta) ──
 let ghvCasovac = null;
@@ -1589,24 +1680,24 @@ function globalniHledaniVykreslit(v) {
   let html = '';
   if (v.klientky.length) {
     html += '<div class="ghv-skupina-nadpis">Klientky</div>';
-    html += v.klientky.map(k => `<div class="ghv-polozka" tabindex="0" onclick="ghvOtevritKlientku(${k.id})">
+    html += v.klientky.map(k => `<button type="button" class="ghv-polozka" onclick="ghvOtevritKlientku(${k.id})">
       <strong>${escapeHtml(k.jmeno) || '—'}</strong>
       <small>${escapeHtml(k.telefon) || ''}${k.telefon && k.email ? ' · ' : ''}${escapeHtml(k.email) || ''}</small>
-    </div>`).join('');
+    </button>`).join('');
   }
   if (v.rezervace.length) {
     html += '<div class="ghv-skupina-nadpis">Rezervace</div>';
-    html += v.rezervace.map(r => `<div class="ghv-polozka" tabindex="0" onclick="ghvOtevritRezervaci(${r.id})">
+    html += v.rezervace.map(r => `<button type="button" class="ghv-polozka" onclick="ghvOtevritRezervaci(${r.id})">
       <strong>${escapeHtml(r.jmeno) || '—'}</strong>
       <small>${new Date(r.datum).toLocaleDateString('cs-CZ')} ${r.cas_od || ''} · ${escapeHtml(r.masaz) || ''} · ${stavBadgeRez[r.stav] || r.stav}</small>
-    </div>`).join('');
+    </button>`).join('');
   }
   if (v.poukazy.length) {
     html += '<div class="ghv-skupina-nadpis">Poukazy</div>';
-    html += v.poukazy.map(p => `<div class="ghv-polozka" tabindex="0" onclick="ghvOtevritPoukaz(${p.id})">
+    html += v.poukazy.map(p => `<button type="button" class="ghv-polozka" onclick="ghvOtevritPoukaz(${p.id})">
       <strong>${escapeHtml(p.kod)}</strong>
       <small>${escapeHtml(p.kupujici_jmeno) || '—'} · ${Number(p.hodnota).toLocaleString('cs-CZ')} Kč · ${poukazZobrazenyStav(p).text}</small>
-    </div>`).join('');
+    </button>`).join('');
   }
   panel.innerHTML = html;
   panel.classList.add('open');
@@ -1655,9 +1746,9 @@ function vykreslitZvonecek() {
   if (celkem > 0) { badge.textContent = celkem; badge.style.display = 'inline-block'; }
   else badge.style.display = 'none';
   panel.innerHTML = polozky.length
-    ? polozky.map(p => `<div class="zvonek-radek" tabindex="0" onclick="prepnoutZvonecek();${p.akce}">
+    ? polozky.map(p => `<button type="button" class="zvonek-radek" onclick="prepnoutZvonecek();${p.akce}">
         <span>${escapeHtml(p.text)}</span><span class="zvonek-pocet">${p.pocet}</span>
-      </div>`).join('')
+      </button>`).join('')
     : '<div class="ghv-prazdno">Žádná nová upozornění.</div>';
 }
 
@@ -4327,7 +4418,7 @@ async function loadUcetnictvi() {
     ['Den', 'Mesic', 'Rok'].forEach(t => document.getElementById('uzaverkaBtn' + t).style.cssText = '');
     if (ucetAktivniObdobi) {
       const aktivni = document.getElementById('uzaverkaBtn' + ucetAktivniObdobi.charAt(0).toUpperCase() + ucetAktivniObdobi.slice(1));
-      if (aktivni) aktivni.style.cssText = 'background:linear-gradient(135deg,#d4856a,#e0a830);color:#fff;border-color:transparent';
+      if (aktivni) aktivni.style.cssText = 'background:var(--sb-bg);color:#fff;border-color:transparent';
     }
     document.getElementById('uzaverkaTiskUctenkaBtn').style.display = (ucetAktivniObdobi === 'den' || ucetAktivniObdobi === 'mesic') ? 'inline-flex' : 'none';
     document.getElementById('uzaverkaTiskA4Btn').style.display = ucetAktivniObdobi === 'rok' ? 'inline-flex' : 'none';
