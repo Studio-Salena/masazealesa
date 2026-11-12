@@ -371,8 +371,8 @@ tr:hover td{background:var(--cream)}
         <span class="nav-chevron">▾</span>
       </button>
       <div class="nav-subitems">
-        <button type="button" class="nav-item nav-subitem" onclick="showPage('rezervace',this)" title="Kalendář"><span class="icon">🗓️</span><span class="nav-text"> Kalendář</span></button>
-        <button type="button" class="nav-item nav-subitem" onclick="showPage('rezervace',this)" title="Seznam"><span class="icon">📋</span><span class="nav-text"> Seznam</span></button>
+        <button type="button" class="nav-item nav-subitem" onclick="showPage('rezervace',this);prepnoutRezPohled('kalendar')" title="Kalendář"><span class="icon">🗓️</span><span class="nav-text"> Kalendář</span></button>
+        <button type="button" class="nav-item nav-subitem" onclick="showPage('rezervace',this);prepnoutRezPohled('seznam')" title="Seznam"><span class="icon">📋</span><span class="nav-text"> Seznam</span></button>
         <button type="button" class="nav-item nav-subitem" onclick="showPage('zakaznici',this)" title="Přehled klientů"><span class="icon">👥</span><span class="nav-text"> Přehled klientů</span></button>
       </div>
     </div>
@@ -520,7 +520,7 @@ tr:hover td{background:var(--cream)}
         </div>
         <div id="vyjimkyTable"><div class="loading">Načítám...</div></div>
       </div>
-      <div class="table-wrap">
+      <div class="table-wrap" id="rezPohledKalendar" style="display:none">
         <div class="table-header">
           <h3>📆 Přehled kalendáře</h3>
           <div style="display:flex;align-items:center;gap:10px">
@@ -538,7 +538,7 @@ tr:hover td{background:var(--cream)}
           <span><i style="display:inline-block;width:11px;height:11px;border-radius:3px;background:#b0a89f;margin-right:4px;vertical-align:middle"></i>Nedostavila se</span>
         </div>
       </div>
-      <div class="table-wrap">
+      <div class="table-wrap" id="rezPohledSeznam">
         <div class="table-header">
           <h3>📋 Příchozí rezervace</h3>
           <div class="filter-pills" style="margin:0">
@@ -1797,9 +1797,15 @@ async function loadPrehled() {
 // aplikovaným filtrem/scrollem, ne jen na celou sekci naslepo. Znovupoužívá
 // showPage()/filtrovatRez()/loadPoukazy() — žádná nová filtrovací logika.
 async function prehledJdiNa(stranka, akce) {
-  const navEl = document.querySelector(`.nav-item[onclick^="showPage('${stranka}'"]`);
+  // U rezervací vedou prokliky z dashboardu/zvonečku vždy na filtrovaný Seznam,
+  // ne na Kalendář (který by filtrovanou tabulku schovával) — proto se tu
+  // nav-prvek nehledá obecně podle showPage(), ale cíleně přes title="Seznam".
+  const navEl = stranka === 'rezervace'
+    ? document.querySelector('.nav-item[title="Seznam"]')
+    : document.querySelector(`.nav-item[onclick^="showPage('${stranka}'"]`);
   showPage(stranka, navEl);
   if (stranka === 'rezervace') {
+    prepnoutRezPohled('seznam');
     await loadRezervace();
     const pill = akce && document.querySelector(`#page-rezervace .pill[onclick^="filtrovatRez('${akce}'"]`);
     if (pill) filtrovatRez(akce, pill);
@@ -1849,6 +1855,16 @@ async function loadRezervace() {
   nacistPracovniDobu();
   loadNastaveni();
   loadVyjimky();
+}
+
+// Kalendář a Seznam jsou dvě zobrazení téže načtené množiny vsechnyRezervace
+// (viz loadRezervace výše) — přepíná se jen viditelnost bloků, data i filtry
+// zůstávají společné pro obě zobrazení.
+let rezAktivniPohled = 'seznam';
+function prepnoutRezPohled(pohled) {
+  rezAktivniPohled = pohled;
+  document.getElementById('rezPohledKalendar').style.display = pohled === 'kalendar' ? '' : 'none';
+  document.getElementById('rezPohledSeznam').style.display = pohled === 'seznam' ? '' : 'none';
 }
 
 // ── PŘEHLED KALENDÁŘE (jak je zaplněný týden) ──
