@@ -757,14 +757,15 @@ function vygenerovatKod(ucel) {
 // musela objevit tady, na jednom místě, ne nezávisle v každé kopii zvlášť.
 async function vytvoritPoukaz(client, {
   hodnota, platnostMesicu, zakoupenoKde, kupujiciJmeno, kupujiciEmail, kupujiciTelefon,
-  proKoho = null, konkretniMasaz = null, zpusobPlatby = null, klientkaId = null, ucel
+  proKoho = null, konkretniMasaz = null, zpusobPlatby = null, klientkaId = null, ucel,
+  slevaKc = 0 // akce „Stromeček“: o kolik méně se za poukaz zaplatilo (hodnota/zůstatek zůstává plná)
 }) {
   const platnostDo = new Date();
   platnostDo.setMonth(platnostDo.getMonth() + platnostMesicu);
   const { rows: [poukaz] } = await client.query(
-    `INSERT INTO poukazy (kod, hodnota, zustatek, platnost_do, zakoupeno_kde, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, konkretni_masaz, zpusob_platby, stav, klientka_id, ucel)
-     VALUES ($1,$2,$2,$3,$4,$5,$6,$7,$8,$9,$10,'aktivni',$11,$12) RETURNING *`,
-    [vygenerovatKod(ucel), hodnota, platnostDo.toISOString().slice(0, 10), zakoupenoKde, kupujiciJmeno || null, kupujiciEmail || null, kupujiciTelefon || null, proKoho, konkretniMasaz, zpusobPlatby, klientkaId, ucel]
+    `INSERT INTO poukazy (kod, hodnota, zustatek, platnost_do, zakoupeno_kde, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, konkretni_masaz, zpusob_platby, stav, klientka_id, ucel, sleva_kc)
+     VALUES ($1,$2,$2,$3,$4,$5,$6,$7,$8,$9,$10,'aktivni',$11,$12,$13) RETURNING *`,
+    [vygenerovatKod(ucel), hodnota, platnostDo.toISOString().slice(0, 10), zakoupenoKde, kupujiciJmeno || null, kupujiciEmail || null, kupujiciTelefon || null, proKoho, konkretniMasaz, zpusobPlatby, klientkaId, ucel, Number(slevaKc) || 0]
   );
   return poukaz;
 }
@@ -776,6 +777,62 @@ function vygenerovatKuponKod() {
   let kod = 'AKCE-';
   for (let i = 0; i < 6; i++) kod += znaky[Math.floor(Math.random() * znaky.length)];
   return kod;
+}
+
+// ── Vánoční akce „Stromeček 2026“ — veřejný slevový kód (stromecek_2026.sql) ──
+// Kód je veřejný (visí na stromečku na náměstí), sleva se odečte jen při
+// skutečně uložené rezervaci / žádosti o poukaz z webu. Jedna sleva na nákup,
+// strop počtu použití, platnost od–do. Záznam o využití (promo_poukaz_vyuziti)
+// vzniká VE STEJNÉ transakci jako rezervace/žádost — buď se uloží obojí, nebo
+// nic. Řádek kódu se zamyká (FOR UPDATE), takže strop nejde přetáhnout ani při
+// souběžných požadavcích (stejný princip jako advisory zámek u rezervací).
+// Záznamy se nikdy nemažou — storno = status 'vraceno' (do limitů se nepočítá).
+const PROMO_VYCHOZI_KOD = 'STROMECEK2026';
+const PROMO_CHYBY = {
+  NEPLATNY: 'Tento slevový kód neznáme. Zkontrolujte prosím, jestli je napsaný správně.',
+  NEAKTIVNI: 'Tento slevový kód teď nejde použít.',
+  JESTE_NEPLATI: 'Akce ještě nezačala.',
+  VYPRSEL: 'Platnost slevového kódu už skončila.',
+  VYCERPANO: 'Je nám líto, slevy už vyčerpali první zákazníci.',
+  S_POUKAZEM: 'Slevový kód nejde kombinovat s dárkovým poukazem.'
+};
+// „stromeček 2026“ → „STROMECEK2026“ (bez mezer, bez diakritiky, velkými)
+function normalizovatPromoKod(kod) {
+  return String(kod || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/\s+/g, '');
+}
+// Ověří kód a (pokud jenOverit=false) zapíše využití 'pouzito' — VŽDY volat
+// s klientem uvnitř transakce, když se zapisuje. Vrací { ok, chyba?, sleva, vyuzitiId?, zbyva }.
+async function uplatnitPromoKod(client, { kod, typ, cena, jenOverit = false }) {
+  const kodNorm = normalizovatPromoKod(kod);
+  const { rows: [akce] } = await client.query(
+    `SELECT *, (plati_od IS NOT NULL AND now() < plati_od) AS jeste_neplati, now() > plati_do AS vyprsel
+     FROM promo_kody WHERE kod = $1${jenOverit ? '' : ' FOR UPDATE'}`, [kodNorm]
+  );
+  if (!akce) return { ok: false, chyba: 'NEPLATNY' };
+  if (!akce.aktivni) return { ok: false, chyba: 'NEAKTIVNI' };
+  if (akce.jeste_neplati) return { ok: false, chyba: 'JESTE_NEPLATI' };
+  if (akce.vyprsel) return { ok: false, chyba: 'VYPRSEL' };
+  const { rows: [{ pocet }] } = await client.query(
+    "SELECT count(*)::int AS pocet FROM promo_poukaz_vyuziti WHERE kod = $1 AND status = 'pouzito'", [akce.kod]
+  );
+  if (akce.strop !== null && pocet >= akce.strop) return { ok: false, chyba: 'VYCERPANO' };
+  const sleva = Math.min(Number(akce.sleva_kc), Math.max(0, Number(cena) || 0)); // sleva nikdy nepřesáhne cenu
+  const zbyva = akce.strop === null ? null : akce.strop - pocet;
+  if (jenOverit || sleva <= 0) return { ok: true, sleva, kod: akce.kod, zbyva };
+  const { rows: [vyuziti] } = await client.query(
+    'INSERT INTO promo_poukaz_vyuziti (kod, typ, cena_puvodni, sleva_kc) VALUES ($1,$2,$3,$4) RETURNING id',
+    [akce.kod, typ, Number(cena), sleva]
+  );
+  return { ok: true, sleva, kod: akce.kod, vyuzitiId: vyuziti.id, zbyva: zbyva === null ? null : zbyva - 1 };
+}
+// Storno/vrácení: 'pouzito' → 'vraceno' (UPDATE, nikdy DELETE). Uvolní místo ve stropu.
+async function vratitPromoVyuziti(client, typ, objednavkaId, poznamka) {
+  const { rowCount } = await client.query(
+    `UPDATE promo_poukaz_vyuziti SET status = 'vraceno', vraceno_kdy = now(), poznamka = $3
+     WHERE typ = $1 AND objednavka_id = $2 AND status = 'pouzito'`,
+    [typ, objednavkaId, poznamka || null]
+  );
+  return rowCount;
 }
 
 function casNaMinuty(cas) { const [h, m] = cas.split(':').map(Number); return h * 60 + m; }
@@ -1161,7 +1218,7 @@ app.get('/api/rezervace/kalendar', async (req, res) => {
 
 // Vytvoření rezervace klientkou
 app.post('/api/rezervace', async (req, res) => {
-  const { datum, cas_od, jmeno, telefon, email, cenik_id, poznamka, poukaz_kod, alergie, preference, souhlas_gdpr, souhlas_newsletter } = req.body || {};
+  const { datum, cas_od, jmeno, telefon, email, cenik_id, poznamka, poukaz_kod, alergie, preference, souhlas_gdpr, souhlas_newsletter, promo_kod } = req.body || {};
   if (!datum || !cas_od || !jmeno || !telefon || !email || !cenik_id) {
     return res.status(400).json({ chyba: 'Vyplňte prosím jméno, telefon, e-mail, masáž, datum a čas.' });
   }
@@ -1182,6 +1239,10 @@ app.post('/api/rezervace', async (req, res) => {
   }
   if (!souhlas_gdpr) {
     return res.status(400).json({ chyba: 'Pro odeslání rezervace je potřeba souhlasit se zpracováním osobních údajů.' });
+  }
+  const promoKod = normalizovatPromoKod(promo_kod);
+  if (promoKod && poukaz_kod && poukaz_kod.trim()) {
+    return res.status(400).json({ chyba: PROMO_CHYBY.S_POUKAZEM });
   }
   // Celý blok (kontrola kolize + zápis) běží v jedné transakci uzamčené na dané datum,
   // aby se dvě rezervace odeslané prakticky současně nemohly obě protlačit na stejný
@@ -1269,14 +1330,26 @@ app.post('/api/rezervace', async (req, res) => {
     // STEJNÉ transakci jako rezervace, takže buď se zapíše obojí, nebo nic.
     // "zakaznici" (starší tabulka) se od téhle fáze už dál nezapisuje — nový
     // zdroj pravdy pro alergie/preference je "klientky" (viz Fáze 6C/6D).
+    // Akce „Stromeček“ — slevový kód se ověří a zapíše VE STEJNÉ transakci
+    // (neplatný kód = nic se neuloží, klientka dostane hlášku a může to opravit)
+    let promo = null;
+    if (promoKod) {
+      promo = await uplatnitPromoKod(client, { kod: promoKod, typ: 'rezervace', cena: polozkaCeniku.cena });
+      if (!promo.ok) { await client.query('ROLLBACK'); return res.status(400).json({ chyba: PROMO_CHYBY[promo.chyba] || PROMO_CHYBY.NEPLATNY, promoChyba: promo.chyba }); }
+    }
+    const slevaKc = promo ? promo.sleva : 0;
+
     const klientkaId = await najitNeboVytvoritKlientku(client, { jmeno, telefon, email, alergie, preference });
 
     const celaPoznamka = ((poznamka || '') + poukazPoznamka).trim() || null;
     const { rows: [rezervace] } = await client.query(
-      `INSERT INTO rezervace (cenik_id, datum, cas_od, cas_do, jmeno, telefon, email, masaz, poznamka, poukaz_kod, stav, cena, klientka_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'cekajici',$11,$12) RETURNING *`,
-      [cenik_id, datum, cas_od, cas_do, jmeno, telefon, email || null, nazevMasaze, celaPoznamka, poukaz_kod || null, polozkaCeniku.cena, klientkaId]
+      `INSERT INTO rezervace (cenik_id, datum, cas_od, cas_do, jmeno, telefon, email, masaz, poznamka, poukaz_kod, stav, cena, klientka_id, sleva_kc, promo_kod)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'cekajici',$11,$12,$13,$14) RETURNING *`,
+      [cenik_id, datum, cas_od, cas_do, jmeno, telefon, email || null, nazevMasaze, celaPoznamka, poukaz_kod || null, polozkaCeniku.cena - slevaKc, klientkaId, slevaKc, slevaKc ? promo.kod : null]
     );
+    if (promo && promo.vyuzitiId) {
+      await client.query('UPDATE promo_poukaz_vyuziti SET objednavka_id = $1 WHERE id = $2', [rezervace.id, promo.vyuzitiId]);
+    }
 
     await client.query('COMMIT');
 
@@ -1310,6 +1383,7 @@ app.post('/api/rezervace', async (req, res) => {
           <strong>Masáž:</strong> ${nazevMasaze}<br>
           <strong>Datum:</strong> ${formatDatumCz(datum)}<br>
           <strong>Čas:</strong> ${cas_od}–${cas_do}
+          ${slevaKc ? '<br><strong>Sleva ' + promo.kod + ':</strong> −' + slevaKc + ' Kč (cena ' + (polozkaCeniku.cena - slevaKc) + ' Kč)' : ''}
           ${celaPoznamka ? '<br><strong>Poznámka:</strong> ' + celaPoznamka : ''}
         </td></tr>
       </table>
@@ -1329,7 +1403,7 @@ app.post('/api/rezervace', async (req, res) => {
 
 // Žádost o dárkový poukaz z webového formuláře
 app.post('/api/poukazy/zadost', async (req, res) => {
-  const { hodnota, poukaz_typ_id, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, vzkaz, konkretni_masaz, zpusob_platby } = req.body || {};
+  const { hodnota, poukaz_typ_id, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, vzkaz, konkretni_masaz, zpusob_platby, promo_kod } = req.body || {};
   if (hodnota === undefined || hodnota === null || hodnota === '' || !kupujici_jmeno || !kupujici_email) {
     return res.status(400).json({ chyba: 'Vyplňte prosím hodnotu poukazu, jméno a e-mail.' });
   }
@@ -1378,12 +1452,26 @@ app.post('/api/poukazy/zadost', async (req, res) => {
   if (zpusob_platby !== 'pri_prevzeti') {
     return res.status(400).json({ chyba: 'Online platba je momentálně nedostupná — poukaz je možné koupit jen s platbou při převzetí v salonu.' });
   }
+  // Akce „Stromeček“ — žádost i záznam o využití slevy v jedné transakci
+  const promoKod = normalizovatPromoKod(promo_kod);
+  const client = await db.connect();
   try {
-    const { rows: [zadost] } = await db.query(
-      `INSERT INTO poukazy_zadosti (hodnota, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, vzkaz, konkretni_masaz, zpusob_platby, platnost_mesicu, stav)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'nova') RETURNING *`,
-      [hodnotaCislo, kupujici_jmeno, kupujici_email, kupujici_telefon || null, pro_koho || null, vzkaz || null, konkretni_masaz || null, zpusob_platby, platnostMesicu]
+    await client.query('BEGIN');
+    let promo = null;
+    if (promoKod) {
+      promo = await uplatnitPromoKod(client, { kod: promoKod, typ: 'poukaz', cena: hodnotaCislo });
+      if (!promo.ok) { await client.query('ROLLBACK'); return res.status(400).json({ chyba: PROMO_CHYBY[promo.chyba] || PROMO_CHYBY.NEPLATNY, promoChyba: promo.chyba }); }
+    }
+    const slevaKc = promo ? promo.sleva : 0;
+    const { rows: [zadost] } = await client.query(
+      `INSERT INTO poukazy_zadosti (hodnota, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, vzkaz, konkretni_masaz, zpusob_platby, platnost_mesicu, stav, sleva_kc, promo_kod)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'nova',$10,$11) RETURNING *`,
+      [hodnotaCislo, kupujici_jmeno, kupujici_email, kupujici_telefon || null, pro_koho || null, vzkaz || null, konkretni_masaz || null, zpusob_platby, platnostMesicu, slevaKc, slevaKc ? promo.kod : null]
     );
+    if (promo && promo.vyuzitiId) {
+      await client.query('UPDATE promo_poukaz_vyuziti SET objednavka_id = $1 WHERE id = $2', [zadost.id, promo.vyuzitiId]);
+    }
+    await client.query('COMMIT');
     res.json({ ok: true, zadost });
 
     // Upozornění majitelce na novou žádost o poukaz z webu.
@@ -1398,13 +1486,20 @@ app.post('/api/poukazy/zadost', async (req, res) => {
           <strong>Pro koho:</strong> ${pro_koho || '—'}<br>
           <strong>Vzkaz:</strong> ${vzkaz || '—'}<br>
           <strong>Způsob platby:</strong> ${zpusob_platby}
+          ${zadost.sleva_kc > 0 ? '<br><strong>Sleva ' + zadost.promo_kod + ':</strong> −' + zadost.sleva_kc + ' Kč — k úhradě ' + (hodnotaCislo - zadost.sleva_kc) + ' Kč' : ''}
         </td></tr>
       </table>
       <p>Vyřiď v administraci v záložce Dárkové poukazy → Žádosti o poukaz z webu.</p>
     `)).then(uspech => {
       if (!uspech) console.error('Upozornění majitelce na žádost o poukaz ' + zadost.id + ' se nepodařilo odeslat.');
     });
-  } catch (e) { console.error('POST /api/poukazy/zadost selhalo:', e); res.status(500).json({ chyba: 'Interní chyba serveru.' }); }
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch {}
+    console.error('POST /api/poukazy/zadost selhalo:', e);
+    if (!res.headersSent) res.status(500).json({ chyba: 'Interní chyba serveru.' });
+  } finally {
+    client.release();
+  }
 });
 
 // Přihlášení k newsletteru z webového formuláře ("Tipy a novinky přímo do e-mailu")
@@ -1451,6 +1546,44 @@ app.get('/api/klientky/odhlasit-marketing', async (req, res) => {
       <h2>${rowCount ? 'Byli jste odhlášeni z hromadných e-mailů salónu.' : 'Odkaz nenalezen (možná už jste odhlášeni).'}</h2>
     </body></html>`);
   } catch (e) { res.status(500).send('Chyba serveru.'); }
+});
+
+// ── Vánoční akce „Stromeček“ — veřejné endpointy ──
+// Stav akce pro stránku stromečku a pro rezervační formulář. Kód samotný se
+// vrací JEN během akce — před jejím začátkem není nikde vidět (ani ve
+// zdrojovém kódu stránky stromečku, ta si ho bere odsud).
+app.get('/api/promo/stav', async (req, res) => {
+  const kod = normalizovatPromoKod(req.query.kod) || PROMO_VYCHOZI_KOD;
+  try {
+    const { rows: [a] } = await db.query(
+      `SELECT k.*, (k.plati_od IS NOT NULL AND now() < k.plati_od) AS jeste_neplati, now() > k.plati_do AS vyprsel,
+              (SELECT count(*)::int FROM promo_poukaz_vyuziti v WHERE v.kod = k.kod AND v.status = 'pouzito') AS pouzito
+       FROM promo_kody k WHERE k.kod = $1`, [kod]
+    );
+    if (!a) return res.json({ stav: 'neznamy' });
+    const vycerpano = a.strop !== null && a.pouzito >= a.strop;
+    const stav = a.vyprsel ? 'skoncila' : a.jeste_neplati ? 'brzy' : !a.aktivni ? 'pozastaveno' : vycerpano ? 'vycerpano' : 'aktivni';
+    res.json({
+      stav, zacina: a.plati_od, konci: a.plati_do, sleva_kc: Number(a.sleva_kc),
+      zbyva: a.strop === null ? null : Math.max(0, a.strop - a.pouzito),
+      ...(stav === 'aktivni' ? { kod: a.kod } : {})
+    });
+  } catch (e) { console.error('GET /api/promo/stav selhalo:', e); res.status(500).json({ chyba: 'Interní chyba serveru.' }); }
+});
+
+// Ověření kódu ve formuláři (nic neukládá) — skutečné uplatnění dělá až
+// POST /api/rezervace nebo /api/poukazy/zadost v transakci se zápisem
+app.post('/api/promo/overit', async (req, res) => {
+  const { kod, typ, cena } = req.body || {};
+  if (!normalizovatPromoKod(kod)) return res.status(400).json({ ok: false, chyba: PROMO_CHYBY.NEPLATNY });
+  try {
+    const vysledek = await uplatnitPromoKod(db, {
+      kod, typ: typ === 'poukaz' ? 'poukaz' : 'rezervace',
+      cena: Number(cena) > 0 ? Number(cena) : 1000000, jenOverit: true
+    });
+    if (!vysledek.ok) return res.status(400).json({ ok: false, chyba: PROMO_CHYBY[vysledek.chyba] || PROMO_CHYBY.NEPLATNY, promoChyba: vysledek.chyba });
+    res.json({ ok: true, kod: vysledek.kod, sleva_kc: vysledek.sleva });
+  } catch (e) { console.error('POST /api/promo/overit selhalo:', e); res.status(500).json({ ok: false, chyba: 'Interní chyba serveru.' }); }
 });
 
 // ══════════════ ADMIN ENDPOINTY (heslo v hlavičce x-admin-heslo) ══════════════
@@ -1683,7 +1816,8 @@ app.patch('/api/admin/rezervace/:id', async (req, res) => {
 
     await client.query(
       `UPDATE rezervace SET cenik_id=$1, datum=$2, cas_od=$3, cas_do=$4, jmeno=$5, telefon=$6, email=$7, masaz=$8, poznamka=$9, cena=$10, klientka_id=$11${terminSeMeni ? ', pripomenuto=false, pripomenuto_pokus_kdy=NULL' : ''} WHERE id=$12`,
-      [cenik_id, datum, cas_od, cas_do, jmeno, telefon, email || null, nazevMasaze, poznamka || null, polozkaCeniku.cena, klientkaId, req.params.id]
+      // Sleva z akce „Stromeček“ (sleva_kc) zůstává i po změně masáže — cena = nová cena ceníku − sleva
+      [cenik_id, datum, cas_od, cas_do, jmeno, telefon, email || null, nazevMasaze, poznamka || null, Math.max(0, polozkaCeniku.cena - (Number(puvodni.sleva_kc) || 0)), klientkaId, req.params.id]
     );
     // Cena se mohla změnit (jiná masáž) — uhrazeno se nedotýká, jen se z něj a
     // z (nové) ceny přepočte stav_platby (viz komentář u funkce výš).
@@ -1718,10 +1852,41 @@ app.patch('/api/admin/rezervace/:id/stav', async (req, res) => {
   if (!['cekajici', 'potvrzena', 'dokoncena', 'nedostavila_se', 'zrusena'].includes(stav)) {
     return res.status(400).json({ chyba: 'Neplatný stav.' });
   }
+  // Změna stavu + případné vrácení/obnovení slevy z akce „Stromeček“ v jedné transakci
+  const client = await db.connect();
+  let predtim;
+  let promoZprava = null;
   try {
-    const { rows: [predtim] } = await db.query('SELECT * FROM rezervace WHERE id = $1', [req.params.id]);
-    if (!predtim) return res.status(404).json({ chyba: 'Rezervace nebyla nalezena.' });
-    await db.query('UPDATE rezervace SET stav = $1 WHERE id = $2', [stav, req.params.id]);
+    await client.query('BEGIN');
+    ({ rows: [predtim] } = await client.query('SELECT * FROM rezervace WHERE id = $1 FOR UPDATE', [req.params.id]));
+    if (!predtim) { await client.query('ROLLBACK'); return res.status(404).json({ chyba: 'Rezervace nebyla nalezena.' }); }
+    await client.query('UPDATE rezervace SET stav = $1 WHERE id = $2', [stav, req.params.id]);
+    if (Number(predtim.sleva_kc) > 0 && predtim.promo_kod) {
+      if (stav === 'zrusena' && predtim.stav !== 'zrusena') {
+        // Zrušená rezervace → sleva se vrací do stropu (záznam zůstává jako 'vraceno')
+        await vratitPromoVyuziti(client, 'rezervace', predtim.id, 'Rezervace zrušena');
+      } else if (predtim.stav === 'zrusena' && stav !== 'zrusena') {
+        // Obnovení zrušené rezervace → slevu zkusit uplatnit znovu; když už
+        // nejde (vyčerpáno / akce skončila), rezervace se vrátí na plnou cenu
+        const plnaCena = Number(predtim.cena) + Number(predtim.sleva_kc);
+        const promo = await uplatnitPromoKod(client, { kod: predtim.promo_kod, typ: 'rezervace', cena: plnaCena });
+        if (promo.ok && promo.vyuzitiId) {
+          await client.query('UPDATE promo_poukaz_vyuziti SET objednavka_id = $1 WHERE id = $2', [predtim.id, promo.vyuzitiId]);
+        } else {
+          await client.query('UPDATE rezervace SET cena = $1, sleva_kc = 0, promo_kod = NULL WHERE id = $2', [plnaCena, predtim.id]);
+          await prepocitatSouhrnRezervace(client, predtim.id);
+          promoZprava = 'Sleva ' + predtim.promo_kod + ' už nešla znovu uplatnit (' + (PROMO_CHYBY[promo.chyba] || promo.chyba) + ') — rezervace je na plnou cenu ' + plnaCena + ' Kč.';
+        }
+      }
+    }
+    await client.query('COMMIT');
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch {}
+    return res.status(500).json({ chyba: e.message });
+  } finally {
+    client.release();
+  }
+  try {
     // E-maily o potvrzení/zrušení se posílají jen při SKUTEČNÉM přechodu do daného
     // stavu (ne při každém uložení / opakovaném zrušení už zrušené rezervace), ať
     // se neposílají opakovaně. emailOdeslan v odpovědi ať jde ověřit i bez
@@ -1737,7 +1902,7 @@ app.patch('/api/admin/rezervace/:id/stav', async (req, res) => {
         .then(({ predmet, html }) => odeslatEmail(predtim.email, predmet, html));
       emailOdeslan = true;
     }
-    res.json({ ok: true, emailOdeslan });
+    res.json({ ok: true, emailOdeslan, ...(promoZprava ? { promoZprava } : {}) });
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
@@ -1895,6 +2060,8 @@ app.delete('/api/admin/rezervace/:id', async (req, res) => {
     if (platbyPoukazem.length) {
       await client.query('DELETE FROM poukazy_historie WHERE rezervace_id = $1', [req.params.id]);
     }
+    // Sleva z akce „Stromeček“ se vrací do stropu (záznam zůstává jako 'vraceno')
+    await vratitPromoVyuziti(client, 'rezervace', rezervace.id, 'Rezervace smazána');
     await client.query('DELETE FROM rezervace WHERE id = $1', [req.params.id]);
     await client.query('COMMIT');
     res.json({ ok: true });
@@ -2325,6 +2492,10 @@ app.patch('/api/admin/poukazy/zadosti/:id/stav', async (req, res) => {
     }
 
     await client.query('UPDATE poukazy_zadosti SET stav = $1 WHERE id = $2', [stav, req.params.id]);
+    if (stav === 'zamitnuta') {
+      // Zamítnutá žádost → sleva z akce „Stromeček“ se vrací do stropu
+      await vratitPromoVyuziti(client, 'poukaz', zadost.id, 'Žádost o poukaz zamítnuta');
+    }
 
     if (stav === 'vyrizena') {
       // platnost_mesicu je snímek z poukazy_typy v době žádosti (viz POST
@@ -2338,7 +2509,7 @@ app.patch('/api/admin/poukazy/zadosti/:id/stav', async (req, res) => {
         hodnota: zadost.hodnota, platnostMesicu: zadost.platnost_mesicu || 12, zakoupenoKde: 'web',
         kupujiciJmeno: zadost.kupujici_jmeno, kupujiciEmail: zadost.kupujici_email, kupujiciTelefon: zadost.kupujici_telefon,
         proKoho: zadost.pro_koho, konkretniMasaz: zadost.konkretni_masaz, zpusobPlatby: zadost.zpusob_platby,
-        klientkaId, ucel: 'prodej'
+        klientkaId, ucel: 'prodej', slevaKc: Number(zadost.sleva_kc) || 0
       });
       await client.query('COMMIT');
       return res.json({ ok: true, poukaz });
@@ -2354,10 +2525,22 @@ app.patch('/api/admin/poukazy/zadosti/:id/stav', async (req, res) => {
 });
 
 app.delete('/api/admin/poukazy/zadosti/:id', async (req, res) => {
+  const client = await db.connect();
   try {
-    await db.query('DELETE FROM poukazy_zadosti WHERE id = $1', [req.params.id]);
+    await client.query('BEGIN');
+    // Nevyřízená žádost se slevou → sleva se vrací do stropu. U vyřízené
+    // žádosti už existuje (zaplacený) poukaz, takže sleva platí dál.
+    const { rows: [zadost] } = await client.query('SELECT id, stav FROM poukazy_zadosti WHERE id = $1 FOR UPDATE', [req.params.id]);
+    if (zadost && zadost.stav !== 'vyrizena') await vratitPromoVyuziti(client, 'poukaz', zadost.id, 'Žádost o poukaz smazána');
+    await client.query('DELETE FROM poukazy_zadosti WHERE id = $1', [req.params.id]);
+    await client.query('COMMIT');
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ chyba: e.message }); }
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch {}
+    res.status(500).json({ chyba: e.message });
+  } finally {
+    client.release();
+  }
 });
 
 // -- Klientky (Fáze 6D) — zdroj pravdy pro CRM (starý model "zakaznici" +
@@ -3253,7 +3436,8 @@ app.get('/api/admin/ucetnictvi', async (req, res) => {
     const [rez, prod, pouk, plat, prodProd] = await Promise.all([
       db.query("SELECT cena, datum FROM rezervace WHERE stav IN ('potvrzena', 'dokoncena')"),
       db.query('SELECT cena, zpusob_platby, poukaz_castka, vytvoreno FROM prodeje'),
-      db.query("SELECT id, hodnota, vytvoreno FROM poukazy WHERE ucel = 'prodej'"),
+      // hodnota - sleva_kc = kolik se za poukaz skutečně zaplatilo (akce „Stromeček“)
+      db.query("SELECT id, hodnota - COALESCE(sleva_kc, 0) AS hodnota, vytvoreno FROM poukazy WHERE ucel = 'prodej'"),
       db.query('SELECT id, rezervace_id, castka, typ, zpusob_platby, vytvoreno FROM platby'),
       db.query('SELECT id, nazev, mnozstvi, cena_celkem, zpusob_platby, vytvoreno FROM prodeje_produktu')
     ]);
@@ -3584,6 +3768,154 @@ app.post('/api/cron/retence', async (req, res) => {
   try {
     const report = await sestavitRetenciReport(db);
     res.json({ ok: true, ...report });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
+// -- Vánoční akce „Stromeček“ (veřejný slevový kód) --
+// Přehled: nastavení akcí + všechna využití i se jménem z rezervace/žádosti
+app.get('/api/admin/promo', async (req, res) => {
+  try {
+    const [akce, vyuziti] = await Promise.all([
+      db.query(`SELECT k.*,
+          (SELECT count(*)::int FROM promo_poukaz_vyuziti v WHERE v.kod = k.kod AND v.status = 'pouzito') AS pouzito,
+          (SELECT count(*)::int FROM promo_poukaz_vyuziti v WHERE v.kod = k.kod AND v.status = 'vraceno') AS vraceno,
+          (SELECT COALESCE(SUM(v.sleva_kc), 0) FROM promo_poukaz_vyuziti v WHERE v.kod = k.kod AND v.status = 'pouzito') AS sleva_celkem
+        FROM promo_kody k ORDER BY k.vytvoreno DESC`),
+      db.query(`SELECT v.*,
+          r.jmeno AS rez_jmeno, r.datum AS rez_datum, r.cas_od AS rez_cas_od, r.masaz AS rez_masaz, r.stav AS rez_stav,
+          z.kupujici_jmeno AS zad_jmeno, z.hodnota AS zad_hodnota, z.stav AS zad_stav
+        FROM promo_poukaz_vyuziti v
+        LEFT JOIN rezervace r ON v.typ = 'rezervace' AND r.id = v.objednavka_id
+        LEFT JOIN poukazy_zadosti z ON v.typ = 'poukaz' AND z.id = v.objednavka_id
+        WHERE v.objednavka_id IS NOT NULL
+        ORDER BY v.vytvoreno DESC`)
+    ]);
+    res.json({
+      akce: akce.rows.map(a => ({ ...a, zbyva: a.strop === null ? null : Math.max(0, a.strop - a.pouzito) })),
+      vyuziti: vyuziti.rows
+    });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
+// Nová akce (pro další akce v budoucnu, a pro testy)
+app.post('/api/admin/promo', async (req, res) => {
+  const { kod, nazev, sleva_kc, plati_od, plati_do, strop } = req.body || {};
+  const kodNorm = normalizovatPromoKod(kod);
+  if (!kodNorm || kodNorm.length > 40 || !/^[A-Z0-9-]+$/.test(kodNorm)) return res.status(400).json({ chyba: 'Zadejte prosím kód akce — jen písmena, číslice a pomlčky, max. 40 znaků.' });
+  if (!(Number(sleva_kc) > 0)) return res.status(400).json({ chyba: 'Zadejte prosím kladnou výši slevy v Kč.' });
+  if (!plati_do || isNaN(Date.parse(plati_do))) return res.status(400).json({ chyba: 'Zadejte prosím platné datum konce akce.' });
+  if (plati_od && isNaN(Date.parse(plati_od))) return res.status(400).json({ chyba: 'Neplatné datum začátku akce.' });
+  if (strop !== undefined && strop !== null && strop !== '' && !(Number.isInteger(Number(strop)) && Number(strop) >= 0)) {
+    return res.status(400).json({ chyba: 'Strop musí být celé číslo, nebo prázdný (bez limitu).' });
+  }
+  try {
+    const { rows: [akce] } = await db.query(
+      `INSERT INTO promo_kody (kod, nazev, sleva_kc, plati_od, plati_do, strop) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [kodNorm, nazev || null, Number(sleva_kc), plati_od || null, plati_do, strop === undefined || strop === null || strop === '' ? null : Number(strop)]
+    );
+    res.json({ ok: true, akce });
+  } catch (e) {
+    if (e.code === '23505') return res.status(409).json({ chyba: 'Akce s tímto kódem už existuje.' });
+    res.status(500).json({ chyba: e.message });
+  }
+});
+
+// Úprava akce: strop, aktivni (pauza), plati_od, plati_do, sleva_kc, nazev
+app.patch('/api/admin/promo/:kod', async (req, res) => {
+  const b = req.body || {};
+  const sloupce = [];
+  const hodnoty = [];
+  const pridat = (sloupec, hodnota) => { hodnoty.push(hodnota); sloupce.push(`${sloupec} = $${hodnoty.length}`); };
+  if ('aktivni' in b) pridat('aktivni', !!b.aktivni);
+  if ('nazev' in b) pridat('nazev', b.nazev || null);
+  if ('strop' in b) {
+    if (b.strop === null || b.strop === '') pridat('strop', null);
+    else if (Number.isInteger(Number(b.strop)) && Number(b.strop) >= 0) pridat('strop', Number(b.strop));
+    else return res.status(400).json({ chyba: 'Strop musí být celé číslo, nebo prázdný (bez limitu).' });
+  }
+  if ('sleva_kc' in b) {
+    if (!(Number(b.sleva_kc) > 0)) return res.status(400).json({ chyba: 'Sleva musí být kladné číslo.' });
+    pridat('sleva_kc', Number(b.sleva_kc));
+  }
+  if ('plati_od' in b) {
+    if (b.plati_od && isNaN(Date.parse(b.plati_od))) return res.status(400).json({ chyba: 'Neplatné datum začátku.' });
+    pridat('plati_od', b.plati_od || null);
+  }
+  if ('plati_do' in b) {
+    if (!b.plati_do || isNaN(Date.parse(b.plati_do))) return res.status(400).json({ chyba: 'Neplatné datum konce.' });
+    pridat('plati_do', b.plati_do);
+  }
+  if (!sloupce.length) return res.status(400).json({ chyba: 'Nic ke změně.' });
+  try {
+    hodnoty.push(normalizovatPromoKod(req.params.kod));
+    const { rows: [akce] } = await db.query(
+      `UPDATE promo_kody SET ${sloupce.join(', ')} WHERE kod = $${hodnoty.length} RETURNING *`, hodnoty
+    );
+    if (!akce) return res.status(404).json({ chyba: 'Akce nebyla nalezena.' });
+    res.json({ ok: true, akce });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
+// Ruční „Vrátit (storno)“ u jednoho využití → status 'vraceno' (UPDATE, ne DELETE).
+// Když rezervace/žádost dál platí, sleva se z ní odebere (cena zpět na plnou),
+// ať účetnictví sedí. Běžně to ale není potřeba — zrušení rezervace nebo
+// zamítnutí žádosti slevu vrací automaticky.
+app.post('/api/admin/promo/vyuziti/:id/vratit', async (req, res) => {
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: [v] } = await client.query('SELECT * FROM promo_poukaz_vyuziti WHERE id = $1 FOR UPDATE', [req.params.id]);
+    if (!v) { await client.query('ROLLBACK'); return res.status(404).json({ chyba: 'Záznam nebyl nalezen.' }); }
+    if (v.status !== 'pouzito') { await client.query('ROLLBACK'); return res.status(400).json({ chyba: 'Tato sleva už je vrácená.' }); }
+    await client.query(
+      `UPDATE promo_poukaz_vyuziti SET status = 'vraceno', vraceno_kdy = now(), poznamka = 'Vráceno v administraci' WHERE id = $1`, [v.id]
+    );
+    let upraveno = null;
+    if (v.typ === 'rezervace') {
+      const { rows: [r] } = await client.query('SELECT * FROM rezervace WHERE id = $1 FOR UPDATE', [v.objednavka_id]);
+      if (r && r.stav !== 'zrusena' && Number(r.sleva_kc) > 0) {
+        await client.query('UPDATE rezervace SET cena = cena + sleva_kc, sleva_kc = 0, promo_kod = NULL WHERE id = $1', [r.id]);
+        await prepocitatSouhrnRezervace(client, r.id);
+        upraveno = 'rezervace';
+      }
+    } else {
+      const { rows: [z] } = await client.query('SELECT * FROM poukazy_zadosti WHERE id = $1 FOR UPDATE', [v.objednavka_id]);
+      if (z && z.stav === 'nova' && Number(z.sleva_kc) > 0) {
+        await client.query('UPDATE poukazy_zadosti SET sleva_kc = 0, promo_kod = NULL WHERE id = $1', [z.id]);
+        upraveno = 'zadost';
+      }
+    }
+    await client.query('COMMIT');
+    res.json({ ok: true, upraveno });
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch {}
+    res.status(500).json({ chyba: e.message });
+  } finally {
+    client.release();
+  }
+});
+
+// Export využití do CSV (středník, UTF-8 s BOM — otevře se rovnou v Excelu)
+app.get('/api/admin/promo/export.csv', async (req, res) => {
+  try {
+    const { rows } = await db.query(`SELECT v.*,
+        COALESCE(r.jmeno, z.kupujici_jmeno) AS jmeno, r.masaz, r.datum AS termin, z.hodnota AS hodnota_poukazu
+      FROM promo_poukaz_vyuziti v
+      LEFT JOIN rezervace r ON v.typ = 'rezervace' AND r.id = v.objednavka_id
+      LEFT JOIN poukazy_zadosti z ON v.typ = 'poukaz' AND z.id = v.objednavka_id
+      WHERE v.objednavka_id IS NOT NULL ORDER BY v.vytvoreno`);
+    const esc = v => '"' + String(v === null || v === undefined ? '' : v).replace(/"/g, '""') + '"';
+    const dt = d => (d ? new Date(d).toLocaleString('cs-CZ', { timeZone: 'Europe/Prague' }) : '');
+    const hlavicka = ['Datum', 'Kód', 'Typ', 'ID', 'Jméno', 'Masáž / poukaz', 'Termín', 'Původní cena', 'Sleva', 'Status', 'Vráceno', 'Poznámka'];
+    const radky = rows.map(v => [
+      dt(v.vytvoreno), v.kod, v.typ === 'poukaz' ? 'Poukaz' : 'Rezervace', v.objednavka_id, v.jmeno || '(smazáno)',
+      v.typ === 'poukaz' ? (v.hodnota_poukazu ? 'Poukaz ' + v.hodnota_poukazu + ' Kč' : '') : (v.masaz || ''),
+      v.termin ? formatDatumCz(v.termin) : '', v.cena_puvodni, v.sleva_kc,
+      v.status === 'pouzito' ? 'Použito' : 'Vráceno', dt(v.vraceno_kdy), v.poznamka
+    ].map(esc).join(';'));
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="stromecek-slevy.csv"');
+    res.send('\uFEFF' + [hlavicka.map(esc).join(';'), ...radky].join('\r\n'));
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 

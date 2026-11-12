@@ -42,3 +42,25 @@ URL z Render (bez lomítka na konci) patří na dvě místa:
 5. Administrace bude na `https://studio-salena.github.io/masazealesa/admin.html`
 
 ⚠️ **Poznámka k free tieru Renderu:** zdarma server po ~15 minutách nečinnosti "usne" a první požadavek po probuzení trvá pár sekund déle.
+
+## 6. Vánoční akce „Stromeček 2026“ (slevový kód STROMECEK2026)
+**Pořadí je důležité: nejdřív databáze, pak teprve nahrát kód.** Nový server.js
+počítá s novými sloupci — kdyby se nahrál dřív, rezervace z webu by nešly odeslat.
+
+1. **Supabase → SQL Editor → New query** → vlož celý soubor `stromecek_2026.sql` → **Run**
+   (jde spustit i opakovaně, nic nesmaže)
+2. Nahraj změny na GitHub (commit + push). Render si nový `server.js` nasadí sám,
+   GitHub Pages web (`index.html`, `admin.html`, `stromecek.html`) taky.
+3. Za pár minut ověř:
+   - `https://www.masazealesa.cz/stromecek` → „Dárek se rozbalí 30. listopadu“ (kód tam do té doby není)
+   - administrace → **Akce Stromeček** → akce STROMECEK2026, začátek 30. 11. 2026
+4. 30. 11. 2026 v 0:00 se akce spustí sama — stránka ukáže kód a v rezervaci
+   i objednávce poukazu se objeví políčko „Slevový kód“.
+
+Pravidla: sleva 100 Kč, jedna na rezervaci / poukaz, strop 50 použití, do 31. 12. 2026.
+Zrušení rezervace nebo zamítnutí žádosti o poukaz slevu vrací samo (záznam zůstane
+jako „Vráceno“, nic se nemaže). Strop, termíny a pauzu jde změnit v administraci.
+Poukaz se slevou má plnou hodnotu (zůstatek), v účetnictví se počítá skutečně
+zaplacená částka (hodnota − sleva).
+
+Test: `ADMIN_HESLO=... TEST_API_BASE=http://localhost:3001/api node tests/stromecek.test.js`

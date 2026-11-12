@@ -329,6 +329,7 @@ tr:hover td{background:#fffaf5}
         <div class="nav-item nav-subitem" onclick="showPage('produkty',this)" tabindex="0" role="button" onkeydown="navAktivovat(event)" title="Produkty"><span class="icon">📦</span><span class="nav-text"> Produkty</span> <span class="nav-badge" id="navBadgeProdukty" style="display:none">0</span></div>
         <div class="nav-item nav-subitem" onclick="showPage('poukazy',this)" tabindex="0" role="button" onkeydown="navAktivovat(event)" title="Poukazy"><span class="icon">🎁</span><span class="nav-text"> Poukazy</span> <span class="nav-badge" id="navBadgePoukazy" style="display:none">0</span></div>
         <div class="nav-item nav-subitem" onclick="showPage('kupony',this)" tabindex="0" role="button" onkeydown="navAktivovat(event)" title="Slevové kupóny"><span class="icon">🎟️</span><span class="nav-text"> Slevové kupóny</span></div>
+        <div class="nav-item nav-subitem" onclick="showPage('stromecek',this)" tabindex="0" role="button" onkeydown="navAktivovat(event)" title="Akce Stromeček"><span class="icon">🎄</span><span class="nav-text"> Akce Stromeček</span></div>
       </div>
     </div>
 
@@ -750,6 +751,23 @@ tr:hover td{background:#fffaf5}
         <div id="kuponyTable"><div class="loading">Načítám...</div></div>
       </div>
       <p style="padding:0 4px;font-size:0.78rem;color:var(--text-light)">Kupón se zadává přímo ve formuláři "Rychlý prodej" na stránce Masáže — sleva se tam automaticky odečte z ceny a kupón se spotřebuje až skutečným potvrzením prodeje.</p>
+    </div>
+
+    <!-- AKCE STROMEČEK (veřejný slevový kód z webu) -->
+    <div class="page" id="page-stromecek">
+      <div class="page-header">
+        <div class="page-title">🎄 Akce Stromeček</div>
+        <div class="table-actions">
+          <button class="btn btn-outline" onclick="exportStromecek()">⬇️ Stáhnout CSV</button>
+          <button class="refresh-btn" onclick="loadStromecek()">↻ Obnovit</button>
+        </div>
+      </div>
+      <div id="stromecekAkce"><div class="loading">Načítám...</div></div>
+      <div class="table-wrap">
+        <div class="table-header"><h3>📋 Rezervace a poukazy se slevou</h3></div>
+        <div id="stromecekTable"><div class="loading">Načítám...</div></div>
+      </div>
+      <p style="padding:0 4px;font-size:0.78rem;color:var(--text-light)">Kód je veřejný (visí na stromečku a na stránce masazealesa.cz/stromecek). Sleva se odečte jen při rezervaci nebo objednávce poukazu z webu. Zrušení rezervace nebo zamítnutí žádosti vrací slevu automaticky. Záznamy se nemažou, vrácené zůstávají v historii i v CSV.</p>
     </div>
 
     <!-- ÚČETNICTVÍ -->
@@ -1532,6 +1550,7 @@ function showPage(name, el) {
   if (name === 'cenik') loadCenik();
   if (name === 'produkty') loadProdukty();
   if (name === 'kupony') loadKupony();
+  if (name === 'stromecek') loadStromecek();
   if (name === 'masaze') loadProdejna();
   if (name === 'ucetnictvi') loadUcetnictvi();
   if (name === 'statistiky') loadStatistiky();
@@ -2273,7 +2292,7 @@ function vykreslitDetailRezervace(r) {
   document.getElementById('detailRezervaceObsah').innerHTML = `
     <div class="form-group"><label>Termín</label><div>${new Date(r.datum).toLocaleDateString('cs-CZ')}, ${r.cas_od.slice(0,5)}–${r.cas_do.slice(0,5)}</div></div>
     <div class="form-group"><label>Masáž</label><div>${escapeHtml(r.masaz)}</div></div>
-    <div class="form-group"><label>Cena</label><div>${cena.toLocaleString('cs-CZ')} Kč</div></div>
+    <div class="form-group"><label>Cena</label><div>${cena.toLocaleString('cs-CZ')} Kč${Number(r.sleva_kc) > 0 ? ` <span class="badge badge-ok" title="Sleva z akce ${escapeHtml(r.promo_kod)}">🎄 −${Number(r.sleva_kc).toLocaleString('cs-CZ')} Kč (${escapeHtml(r.promo_kod)})</span>` : ''}</div></div>
     <div class="form-group"><label>Jméno</label><div>${escapeHtml(r.jmeno)}</div></div>
     <div class="form-group"><label>Telefon</label><div>${escapeHtml(r.telefon) || '—'}</div></div>
     <div class="form-group"><label>E-mail</label><div>${escapeHtml(r.email) || '—'}</div></div>
@@ -2407,13 +2426,110 @@ function filtrovatRez(f, el) {
   vykreslitRezervace(f);
 }
 async function zmenitStavRez(id, stav) {
-  await adminFetch(API + '/admin/rezervace/' + id + '/stav', { method: 'PATCH', body: JSON.stringify({ stav }) });
+  const res = await adminFetch(API + '/admin/rezervace/' + id + '/stav', { method: 'PATCH', body: JSON.stringify({ stav }) });
+  // Akce „Stromeček“: při obnovení zrušené rezervace už sleva nemusela jít uplatnit
+  try { const data = await res.json(); if (data.promoZprava) alert(data.promoZprava); } catch (e) {}
   loadRezervace();
 }
 async function smazatRezervaci(id) {
   if (!confirm('Trvale smazat tuto rezervaci?')) return;
   await adminFetch(API + '/admin/rezervace/' + id, { method: 'DELETE' });
   loadRezervace();
+}
+
+// ── AKCE STROMEČEK (veřejný slevový kód) ──
+async function loadStromecek() {
+  try {
+    const d = await adminFetch(API + '/admin/promo').then(r => r.json());
+    const datumCas = v => v ? new Date(v).toLocaleString('cs-CZ', { day: 'numeric', month: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+    const naDatum = v => v ? new Date(v).toLocaleDateString('sv-SE', { timeZone: 'Europe/Prague' }) : '';
+    const akceAktivni = d.akce.filter(a => !a.kod.startsWith('TEST-'));
+    document.getElementById('stromecekAkce').innerHTML = akceAktivni.length ? akceAktivni.map(a => {
+      const ted = new Date();
+      const stav = new Date(a.plati_do) < ted ? '<span class="badge badge-zruseno">Skončila</span>'
+        : (a.plati_od && new Date(a.plati_od) > ted) ? '<span class="badge badge-cekajici">Začne ' + datumCas(a.plati_od) + '</span>'
+        : !a.aktivni ? '<span class="badge badge-zruseno">Pozastaveno</span>'
+        : (a.strop !== null && a.zbyva <= 0) ? '<span class="badge badge-zruseno">Vyčerpáno</span>'
+        : '<span class="badge badge-ok">Běží</span>';
+      return `
+      <div class="table-wrap" data-promo-kod="${escapeHtml(a.kod)}">
+        <div class="table-header"><h3><code style="background:var(--cream);padding:2px 6px;border-radius:4px">${escapeHtml(a.kod)}</code> · −${Number(a.sleva_kc).toLocaleString('cs-CZ')} Kč ${stav}</h3></div>
+        <div style="padding:0 16px 16px">
+          <div class="stats-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:12px">
+            <div class="stat-card"><div class="stat-label">Použito</div><div class="stat-value">${a.pouzito}${a.strop !== null ? ' / ' + a.strop : ''}</div></div>
+            <div class="stat-card"><div class="stat-label">Zbývá</div><div class="stat-value stat-green">${a.zbyva === null ? '∞' : a.zbyva}</div></div>
+            <div class="stat-card"><div class="stat-label">Sleva celkem</div><div class="stat-value">${Number(a.sleva_celkem).toLocaleString('cs-CZ')} Kč</div></div>
+            <div class="stat-card"><div class="stat-label">Vráceno (storno)</div><div class="stat-value">${a.vraceno}</div></div>
+          </div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+            <label style="font-size:0.8rem">Strop<br><input type="number" min="0" data-pk-strop value="${a.strop ?? ''}" placeholder="bez limitu" style="width:110px"></label>
+            <label style="font-size:0.8rem">Začátek<br><input type="date" data-pk-od value="${naDatum(a.plati_od)}"></label>
+            <label style="font-size:0.8rem">Konec<br><input type="date" data-pk-do value="${naDatum(a.plati_do)}"></label>
+            <button class="btn btn-green btn-sm" onclick="ulozitStromecek('${escapeJsAttr(a.kod)}')">💾 Uložit</button>
+            <button class="btn btn-outline btn-sm" onclick="pozastavitStromecek('${escapeJsAttr(a.kod)}', ${!a.aktivni})">${a.aktivni ? '⏸️ Pozastavit' : '▶️ Spustit'}</button>
+          </div>
+          <div style="font-size:0.78rem;color:var(--text-light);margin-top:6px">Platí od ${datumCas(a.plati_od)} do ${datumCas(a.plati_do)}. Začátek platí od 0:00, konec do 23:59.</div>
+        </div>
+      </div>`;
+    }).join('') : '<div class="empty">Žádná akce</div>';
+
+    const seznam = d.vyuziti.filter(v => !v.kod.startsWith('TEST-'));
+    if (!seznam.length) { document.getElementById('stromecekTable').innerHTML = '<div class="empty">Zatím nikdo slevu nevyužil</div>'; return; }
+    const stavRez = { cekajici: '⏳ Čeká', potvrzena: '✅ Potvrzena', dokoncena: '🌸 Dokončena', nedostavila_se: '🚫 Nedostavila se', zrusena: '❌ Zrušena' };
+    const stavZad = { nova: '🆕 Nová žádost', vyrizena: '✅ Vyřízena', zamitnuta: '❌ Zamítnuta' };
+    document.getElementById('stromecekTable').innerHTML = `
+      <table><thead><tr><th>Datum</th><th>Co</th><th>Jméno</th><th>Cena</th><th>Sleva</th><th>Status</th><th></th></tr></thead>
+      <tbody>${seznam.map(v => {
+        const co = v.typ === 'rezervace'
+          ? (v.rez_jmeno !== null ? `<a href="#" onclick="zobrazitRezervaciZPrehledu(${v.objednavka_id});return false;">🗓️ ${escapeHtml(v.rez_masaz || 'Rezervace')}</a><br><small>${v.rez_datum ? new Date(v.rez_datum).toLocaleDateString('cs-CZ') + ' ' + String(v.rez_cas_od).slice(0,5) : ''} · ${stavRez[v.rez_stav] || ''}</small>` : '🗓️ Rezervace #' + v.objednavka_id + ' <small>(smazána)</small>')
+          : (v.zad_jmeno !== null ? `🎁 Poukaz ${Number(v.zad_hodnota).toLocaleString('cs-CZ')} Kč<br><small>${stavZad[v.zad_stav] || ''}</small>` : '🎁 Žádost #' + v.objednavka_id + ' <small>(smazána)</small>');
+        return `<tr>
+          <td>${new Date(v.vytvoreno).toLocaleDateString('cs-CZ')}</td>
+          <td>${co}</td>
+          <td>${escapeHtml(v.rez_jmeno || v.zad_jmeno) || '—'}</td>
+          <td>${Number(v.cena_puvodni).toLocaleString('cs-CZ')} Kč</td>
+          <td>−${Number(v.sleva_kc).toLocaleString('cs-CZ')} Kč</td>
+          <td>${v.status === 'pouzito' ? '<span class="badge badge-ok">Použito</span>' : '<span class="badge badge-zruseno">Vráceno</span><br><small>' + new Date(v.vraceno_kdy).toLocaleDateString('cs-CZ') + (v.poznamka ? ' · ' + escapeHtml(v.poznamka) : '') + '</small>'}</td>
+          <td>${v.status === 'pouzito' ? `<button class="btn btn-outline btn-sm" onclick="vratitStromecekVyuziti(${v.id})" title="Vrátit slevu (storno)">↩️ Vrátit</button>` : ''}</td>
+        </tr>`; }).join('')}</tbody></table>`;
+  } catch (e) {
+    document.getElementById('stromecekAkce').innerHTML = '';
+    document.getElementById('stromecekTable').innerHTML = '<div class="error-msg">Chyba načítání.</div>';
+  }
+}
+async function ulozitStromecek(kod) {
+  const box = document.querySelector(`[data-promo-kod="${CSS.escape(kod)}"]`);
+  const strop = box.querySelector('[data-pk-strop]').value;
+  const od = box.querySelector('[data-pk-od]').value;
+  const doDne = box.querySelector('[data-pk-do]').value;
+  if (!doDne) { alert('Vyplňte prosím konec akce.'); return; }
+  // datum z kalendáře → začátek 0:00 / konec 23:59 českého času
+  const res = await adminFetch(API + '/admin/promo/' + encodeURIComponent(kod), { method: 'PATCH', body: JSON.stringify({
+    strop: strop === '' ? null : Number(strop),
+    plati_od: od ? od + 'T00:00:00+01:00' : null,
+    plati_do: doDne + 'T23:59:59+01:00'
+  }) });
+  if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.chyba || 'Uložení se nepovedlo.'); }
+  loadStromecek();
+}
+async function pozastavitStromecek(kod, spustit) {
+  await adminFetch(API + '/admin/promo/' + encodeURIComponent(kod), { method: 'PATCH', body: JSON.stringify({ aktivni: spustit }) });
+  loadStromecek();
+}
+async function vratitStromecekVyuziti(id) {
+  if (!confirm('Vrátit slevu (storno)? Místo ve stropu se uvolní a záznam zůstane v historii jako „Vráceno“. Pokud rezervace nebo nevyřízená žádost dál platí, vrátí se na plnou cenu.\n\nPoznámka: zrušení rezervace nebo zamítnutí žádosti slevu vrací samo — tohle tlačítko je jen pro výjimky.')) return;
+  const res = await adminFetch(API + '/admin/promo/vyuziti/' + id + '/vratit', { method: 'POST' });
+  if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.chyba || 'Vrácení se nepovedlo.'); }
+  loadStromecek();
+}
+async function exportStromecek() {
+  const res = await adminFetch(API + '/admin/promo/export.csv');
+  if (!res.ok) { alert('Export se nepovedl.'); return; }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(await res.blob());
+  a.download = 'stromecek-slevy.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 
 // ── POUKAZY ──
@@ -2523,7 +2639,7 @@ async function loadPoukazyZadosti() {
       <table><thead><tr><th>Datum</th><th>Hodnota</th><th>Kupující</th><th>Pro koho</th><th>Platba</th><th>Stav</th><th>Akce</th></tr></thead>
       <tbody>${seznam.map(z => `<tr>
         <td>${new Date(z.vytvoreno).toLocaleDateString('cs-CZ')}</td>
-        <td><strong>${Number(z.hodnota).toLocaleString('cs-CZ')} Kč</strong>${z.konkretni_masaz ? `<br><small style="color:var(--text-light)">🧖 ${escapeHtml(z.konkretni_masaz)}</small>` : `<br><small style="color:var(--text-light)">platnost ${z.platnost_mesicu || 12} měsíců</small>`}</td>
+        <td><strong>${Number(z.hodnota).toLocaleString('cs-CZ')} Kč</strong>${Number(z.sleva_kc) > 0 ? `<br><span class="badge badge-ok">🎄 k úhradě ${(Number(z.hodnota) - Number(z.sleva_kc)).toLocaleString('cs-CZ')} Kč</span>` : ''}${z.konkretni_masaz ? `<br><small style="color:var(--text-light)">🧖 ${escapeHtml(z.konkretni_masaz)}</small>` : `<br><small style="color:var(--text-light)">platnost ${z.platnost_mesicu || 12} měsíců</small>`}</td>
         <td>${escapeHtml(z.kupujici_jmeno)}<br><small>${escapeHtml(z.kupujici_email)}${z.kupujici_telefon ? ' | ' + escapeHtml(z.kupujici_telefon) : ''}</small></td>
         <td>${escapeHtml(z.pro_koho) || '—'}</td>
         <td>${platbaLabel[z.zpusob_platby] || '—'}</td>

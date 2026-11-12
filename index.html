@@ -843,6 +843,10 @@
   .form-msg { margin-top: 0.9rem; font-size: 0.9rem; font-weight: 600; text-align: center; }
   .form-msg.ok { color: #3a7a4a; }
   .form-msg.err { color: #b8402a; }
+  /* Vánoční akce „Stromeček“ — políčko na slevový kód */
+  .sleva-info { display: block; margin-top: 0.3rem; font-size: 0.8rem; font-weight: 700; min-height: 1em; }
+  .sleva-info.ok { color: #3a7a4a; }
+  .sleva-info.err { color: #b8402a; }
 
   .rez-slots {
     display: flex;
@@ -1849,6 +1853,12 @@
         <label for="pkTelefon">Telefon</label>
         <input type="tel" id="pkTelefon" class="form-input" placeholder="Nepovinné" maxlength="30">
       </div>
+      <!-- Vánoční akce „Stromeček“ — zobrazí se jen během akce (viz nacistStavSlevy) -->
+      <div class="form-field" id="pkSlevaWrap" style="display:none">
+        <label for="pkSlevovyKod">Slevový kód</label>
+        <input type="text" id="pkSlevovyKod" class="form-input" placeholder="např. STROMECEK2026" maxlength="40" autocomplete="off" onchange="pkOveritSlevu()">
+        <small id="pkSlevaInfo" class="sleva-info" aria-live="polite"></small>
+      </div>
       <div class="form-field form-field-full">
         <label for="pkVzkaz">Vzkaz</label>
         <textarea id="pkVzkaz" class="form-textarea" placeholder="Nepovinné" maxlength="500"></textarea>
@@ -1996,6 +2006,12 @@
         <div class="form-field">
           <label for="rezPoukazKod">Kód dárkového poukazu</label>
           <input type="text" id="rezPoukazKod" class="form-input" placeholder="Nepovinné">
+        </div>
+        <!-- Vánoční akce „Stromeček“ — zobrazí se jen během akce (viz nacistStavSlevy) -->
+        <div class="form-field" id="rezSlevaWrap" style="display:none">
+          <label for="rezSlevovyKod">Slevový kód</label>
+          <input type="text" id="rezSlevovyKod" class="form-input" placeholder="např. STROMECEK2026" maxlength="40" autocomplete="off" onchange="rezOveritSlevu()">
+          <small id="rezSlevaInfo" class="sleva-info" aria-live="polite"></small>
         </div>
         <div class="form-field">
           <label for="rezAlergie">Alergie (např. na oleje)</label>
@@ -2525,6 +2541,7 @@ async function rezOdeslat() {
   var poznamka = document.getElementById('rezPoznamka').value.trim();
   var souhlasNewsletter = document.getElementById('rezSouhlasNewsletter').checked;
   var souhlasGdpr = document.getElementById('rezSouhlasGdpr').checked;
+  var promoKod = document.getElementById('rezSlevovyKod').value.trim();
 
   if (!rezVybranyCas || !rezVybranyDatum || !cenikId) { zprava.textContent = 'Vyberte prosím masáž a čas v kalendáři.'; zprava.className = 'form-msg err'; return; }
   if (!jmeno || !telefon || !email) { zprava.textContent = 'Vyplňte prosím jméno, telefon a e-mail.'; zprava.className = 'form-msg err'; return; }
@@ -2536,7 +2553,7 @@ async function rezOdeslat() {
     var res = await fetch(API + '/rezervace', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ datum: rezVybranyDatum, cas_od: rezVybranyCas, jmeno: jmeno, telefon: telefon, email: email, cenik_id: cenikId, poznamka: poznamka, poukaz_kod: poukazKod, alergie: alergie, preference: preference, souhlas_gdpr: souhlasGdpr, souhlas_newsletter: souhlasNewsletter })
+      body: JSON.stringify({ datum: rezVybranyDatum, cas_od: rezVybranyCas, jmeno: jmeno, telefon: telefon, email: email, cenik_id: cenikId, poznamka: poznamka, poukaz_kod: poukazKod, alergie: alergie, preference: preference, souhlas_gdpr: souhlasGdpr, souhlas_newsletter: souhlasNewsletter, promo_kod: promoKod })
     });
     var vysledek = await res.json();
     if (!res.ok) {
@@ -2550,12 +2567,16 @@ async function rezOdeslat() {
     var r = vysledek.rezervace;
     var [rok, mesic, den] = r.datum.split('-');
     var datumCz = Number(den) + '. ' + Number(mesic) + '. ' + rok;
-    zprava.textContent = '🌸 Rezervace na ' + datumCz + ' od ' + r.cas_od.slice(0, 5) + ' do ' + r.cas_do.slice(0, 5) + ' byla odeslána! Ozveme se vám s potvrzením.';
+    zprava.textContent = '🌸 Rezervace na ' + datumCz + ' od ' + r.cas_od.slice(0, 5) + ' do ' + r.cas_do.slice(0, 5) + ' byla odeslána!'
+      + (Number(r.sleva_kc) > 0 ? ' Sleva ' + Number(r.sleva_kc) + ' Kč je uplatněna — cena ' + Number(r.cena).toLocaleString('cs-CZ') + ' Kč.' : '')
+      + ' Ozveme se vám s potvrzením.';
     zprava.className = 'form-msg ok';
     document.getElementById('rezJmeno').value = '';
     document.getElementById('rezTelefon').value = '';
     document.getElementById('rezEmail').value = '';
     document.getElementById('rezPoukazKod').value = '';
+    document.getElementById('rezSlevovyKod').value = '';
+    document.getElementById('rezSlevaInfo').textContent = '';
     document.getElementById('rezAlergie').value = '';
     document.getElementById('rezPreference').value = '';
     document.getElementById('rezPoznamka').value = '';
@@ -2772,6 +2793,7 @@ async function pkOdeslat() {
   var email = document.getElementById('pkEmail').value.trim();
   var telefon = document.getElementById('pkTelefon').value.trim();
   var vzkaz = document.getElementById('pkVzkaz').value.trim();
+  var promoKod = document.getElementById('pkSlevovyKod').value.trim();
 
   if (!pkVybranaHodnota) { zprava.textContent = 'Vyberte prosím hodnotu poukazu, nebo konkrétní masáž.'; zprava.className = 'form-msg err'; return; }
   if (!jmeno || !email) { zprava.textContent = 'Vyplňte prosím jméno a e-mail.'; zprava.className = 'form-msg err'; return; }
@@ -2781,17 +2803,21 @@ async function pkOdeslat() {
     var res = await fetch(API + '/poukazy/zadost', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ hodnota: pkVybranaHodnota, poukaz_typ_id: pkVybranyTypId, kupujici_jmeno: jmeno, kupujici_email: email, kupujici_telefon: telefon, pro_koho: proKoho, vzkaz: vzkaz, konkretni_masaz: pkVybranyKonkretniMasaz, zpusob_platby: pkVybranyZpusobPlatby })
+      body: JSON.stringify({ hodnota: pkVybranaHodnota, poukaz_typ_id: pkVybranyTypId, kupujici_jmeno: jmeno, kupujici_email: email, kupujici_telefon: telefon, pro_koho: proKoho, vzkaz: vzkaz, konkretni_masaz: pkVybranyKonkretniMasaz, zpusob_platby: pkVybranyZpusobPlatby, promo_kod: promoKod })
     });
     var vysledek = await res.json();
     if (!res.ok) { zprava.textContent = vysledek.chyba || 'Žádost se nepodařilo odeslat.'; zprava.className = 'form-msg err'; return; }
-    zprava.textContent = '🌸 Objednávka odeslána! Jakmile přijmeme platbu, pošleme poukaz na e-mail.';
+    var zadost = vysledek.zadost || {};
+    zprava.textContent = '🌸 Objednávka odeslána! Jakmile přijmeme platbu, pošleme poukaz na e-mail.'
+      + (Number(zadost.sleva_kc) > 0 ? ' Sleva ' + Number(zadost.sleva_kc) + ' Kč je uplatněna — k úhradě ' + (Number(zadost.hodnota) - Number(zadost.sleva_kc)).toLocaleString('cs-CZ') + ' Kč.' : '');
     zprava.className = 'form-msg ok';
     document.getElementById('pkProKoho').value = '';
     document.getElementById('pkJmeno').value = '';
     document.getElementById('pkEmail').value = '';
     document.getElementById('pkTelefon').value = '';
     document.getElementById('pkVzkaz').value = '';
+    document.getElementById('pkSlevovyKod').value = '';
+    document.getElementById('pkSlevaInfo').textContent = '';
     document.getElementById('pkMasazWrap').style.display = 'none';
     pkOznacitTlacitko('pkHodnotaSlots', null);
     pkOznacitTlacitko('pkPlatbaSlots', null);
@@ -2804,6 +2830,53 @@ async function pkOdeslat() {
     zprava.textContent = 'Žádost se nepodařilo odeslat, zkuste to prosím znovu nebo zavolejte.';
     zprava.className = 'form-msg err';
   }
+}
+
+// ── Vánoční akce „Stromeček“: políčko na slevový kód ──
+// Políčko se ukáže jen během akce (stav z API). Kód z odkazu ze stránky
+// stromečku (?kod=STROMECEK2026#rezervace / #poukazy) se předvyplní a rovnou
+// se otevře příslušný formulář. Skutečné uplatnění hlídá server při odeslání.
+async function nacistStavSlevy() {
+  var params = new URLSearchParams(location.search);
+  var kodZOdkazu = (params.get('kod') || '').trim();
+  try {
+    var res = await fetch(API + '/promo/stav' + (kodZOdkazu ? '?kod=' + encodeURIComponent(kodZOdkazu) : ''));
+    var stav = await res.json();
+    if (stav.stav !== 'aktivni') return;
+    document.getElementById('rezSlevaWrap').style.display = '';
+    document.getElementById('pkSlevaWrap').style.display = '';
+    if (kodZOdkazu) {
+      document.getElementById('rezSlevovyKod').value = kodZOdkazu.toUpperCase();
+      document.getElementById('pkSlevovyKod').value = kodZOdkazu.toUpperCase();
+      if (location.hash === '#rezervace') otevritRezForm();
+      if (location.hash === '#poukazy') otevritPkForm();
+    }
+  } catch (e) { /* bez akce web funguje normálně */ }
+}
+document.addEventListener('DOMContentLoaded', nacistStavSlevy);
+
+async function overitSlevu(kod, typ, cena, infoId) {
+  var info = document.getElementById(infoId);
+  info.className = 'sleva-info'; info.textContent = '';
+  if (!kod) return;
+  info.textContent = 'Ověřuji…';
+  try {
+    var res = await fetch(API + '/promo/overit', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kod: kod, typ: typ, cena: cena })
+    });
+    var v = await res.json();
+    info.className = 'sleva-info ' + (v.ok ? 'ok' : 'err');
+    info.textContent = v.ok ? '✓ Sleva ' + v.sleva_kc + ' Kč se odečte po odeslání' : (v.chyba || 'Kód nejde použít.');
+  } catch (e) { info.textContent = ''; }
+}
+function rezOveritSlevu() {
+  var cenikId = document.getElementById('rezMasaz').value;
+  var masaz = cenikData.filter(function(c) { return String(c.id) === cenikId; })[0];
+  overitSlevu(document.getElementById('rezSlevovyKod').value.trim(), 'rezervace', masaz ? masaz.cena : null, 'rezSlevaInfo');
+}
+function pkOveritSlevu() {
+  overitSlevu(document.getElementById('pkSlevovyKod').value.trim(), 'poukaz', pkVybranaHodnota, 'pkSlevaInfo');
 }
 
 function toggleMenu() {
