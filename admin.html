@@ -450,7 +450,8 @@ tr:hover td{background:var(--cream)}
 
     <!-- PŘEHLED -->
     <div class="page active" id="page-prehled">
-      <div class="page-header"><div class="page-title">📊 Přehled</div></div>
+      <div class="page-header"><div class="page-title">📊 Přehled</div><div class="table-actions"><button class="refresh-btn" onclick="loadPrehled()">↻ Obnovit</button></div></div>
+      <div id="prehledChyba" class="error-msg" style="display:none"></div>
       <div class="stats-grid">
         <div class="stat-card stat-card-click karta-info" onclick="prehledJdiNa('rezervace','vse')"><div class="stat-label">Rezervace celkem</div><div class="stat-value" id="stCelkem">—</div></div>
         <div class="stat-card stat-card-click karta-pozor" onclick="prehledJdiNa('rezervace','cekajici')"><div class="stat-label">Čekající rezervace</div><div class="stat-value stat-orange" id="stCekajici">—</div></div>
@@ -559,7 +560,7 @@ tr:hover td{background:var(--cream)}
       <div class="page-header">
         <div class="page-title">🎁 Dárkové poukazy</div>
         <div class="table-actions">
-          <button class="btn btn-primary" onclick="openModal('modalNovyPoukaz')">+ Vydat poukaz</button>
+          <button class="btn btn-primary" onclick="openModal('modalNovyPoukaz');prepnoutNpUhradu()">+ Vydat poukaz</button>
           <button class="btn btn-outline" onclick="otevritPrazdnePoukazy()">🖨️ Tisk prázdných poukazů</button>
           <button class="refresh-btn" onclick="loadPoukazy()">↻ Obnovit</button>
         </div>
@@ -663,6 +664,7 @@ tr:hover td{background:var(--cream)}
           <button class="refresh-btn" onclick="loadZakaznici()">↻ Obnovit</button>
         </div>
       </div>
+      <div id="zakazniciChyba" class="error-msg" style="display:none"></div>
       <div class="stats-grid" style="grid-template-columns:repeat(3,1fr)">
         <div class="stat-card"><div class="stat-label">Celkem zákaznic</div><div class="stat-value" id="zakCelkem">—</div></div>
         <div class="stat-card"><div class="stat-label">Průměrně utraceno (na klientku)</div><div class="stat-value" id="zakPrumer">—</div></div>
@@ -848,6 +850,7 @@ tr:hover td{background:var(--cream)}
           <button class="btn btn-outline btn-sm" onclick="document.getElementById('ucetOd').value='';document.getElementById('ucetDo').value='';loadUcetnictvi()">Celé období</button>
         </div>
       </div>
+      <div id="ucetnictviChyba" class="error-msg" style="display:none"></div>
       <p style="padding:0 4px;font-size:0.78rem;color:var(--text-light)">Pět různých věcí, záměrně oddělené — nejde o jedno číslo. <strong>Tržby za služby</strong> = hodnota odvedené práce podle data masáže (produkty sem nepatří). <strong>Přijaté platby</strong> = skutečný pohyb peněz, včetně prodeje produktů (poukaz se tu nepočítá znovu, ten už je v „Prodej poukazů“). <strong>Prodej poukazů</strong> / <strong>Prodej produktů</strong> = kdy se co prodalo. <strong>Vráceno</strong> = kolik se vrátilo klientkám.</p>
       <div class="stats-grid" style="grid-template-columns:repeat(5,1fr)">
         <div class="stat-card"><div class="stat-label">🌸 Tržby za služby</div><div class="stat-value" id="ucetTrzbySluzby">—</div></div>
@@ -890,6 +893,7 @@ tr:hover td{background:var(--cream)}
       <div class="form-grid-2">
         <div class="table-wrap">
           <div class="table-header"><h3>🎁 C) Prodej poukazů — podle dnů</h3></div>
+          <div id="ucetProdejPoukazuRozpad" style="padding:8px 16px 0;font-size:0.8rem;color:var(--text-light)"></div>
           <div id="ucetProdejPoukazuDny"><div class="loading">Načítám...</div></div>
         </div>
         <div class="table-wrap">
@@ -922,6 +926,7 @@ tr:hover td{background:var(--cream)}
           <button class="btn btn-outline btn-sm" onclick="document.getElementById('statOd').value='';document.getElementById('statDo').value='';loadStatistiky()">Celé období</button>
         </div>
       </div>
+      <div id="statistikyChyba" class="error-msg" style="display:none"></div>
       <p style="padding:0 4px;font-size:0.78rem;color:var(--text-light)"><strong>Tržby podle měsíců</strong> počítají stejně jako Účetnictví (A) — potvrzené i dokončené rezervace podle data masáže + prodejna. <strong>Počet masáží</strong>, <strong>nejžádanější masáže</strong> a <strong>průměrná cena</strong> už počítají jen z <strong>dokončených</strong> — skutečně odvedené, ne jen objednané. <strong>Míra zrušení/nedostavení</strong> je ze všech rezervací v období bez ohledu na aktuální stav (včetně zatím nerozhodnutých budoucích).</p>
       <div class="stats-grid" style="grid-template-columns:repeat(4,1fr)">
         <div class="stat-card"><div class="stat-label">🌸 Dokončené masáže</div><div class="stat-value" id="statPocetDokoncenych">—</div></div>
@@ -1102,14 +1107,53 @@ tr:hover td{background:var(--cream)}
     </div>
     <div class="form-group">
       <label>Účel poukazu</label>
-      <select id="npUcel">
+      <select id="npUcel" onchange="prepnoutNpUhradu()">
         <option value="prodej">🛍️ K prodeji (zaplacený, počítá se do tržeb)</option>
         <option value="dar">🎁 K daru (např. tombola — bez peněz, do tržeb se nepočítá)</option>
+      </select>
+    </div>
+    <div class="form-group" id="npUhradaWrap">
+      <label>Úhrada</label>
+      <select id="npZaplaceno" onchange="prepnoutNpUhradu()">
+        <option value="1">✅ Zaplaceno hned</option>
+        <option value="0">⏳ Zatím nezaplaceno (zaplatí se při vyzvednutí)</option>
+      </select>
+    </div>
+    <div class="form-group" id="npZpusobWrap">
+      <label>Způsob platby</label>
+      <select id="npZpusobPlatby">
+        <option value="hotove">Hotově</option>
+        <option value="kartou">Kartou</option>
+        <option value="qr">QR kód / bankovní převod</option>
       </select>
     </div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal('modalNovyPoukaz')">Zrušit</button>
       <button class="btn btn-primary" onclick="vydatPoukaz()">Vydat poukaz</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Potvrdit/doplnit platbu poukazu (Etapa 2) -->
+<div class="modal-overlay" id="modalPotvrditPlatbuPoukazu">
+  <div class="modal">
+    <h3 id="ppPoukazTitulek">Potvrdit platbu</h3>
+    <p id="ppPoukazPopis" style="font-size:0.82rem;color:var(--text-light);margin:-6px 0 12px"></p>
+    <div id="ppPoukazMsg"></div>
+    <div class="form-group"><label>Způsob platby</label>
+      <select id="ppPoukazZpusob">
+        <option value="hotove">Hotově</option>
+        <option value="kartou">Kartou</option>
+        <option value="qr">QR kód / bankovní převod</option>
+      </select>
+    </div>
+    <div class="form-group" id="ppPoukazDatumWrap" style="display:none">
+      <label>Datum skutečné platby</label>
+      <input type="date" id="ppPoukazDatum">
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modalPotvrditPlatbuPoukazu')">Zrušit</button>
+      <button class="btn btn-primary" onclick="potvrditPlatbuPoukazuOdeslat()">Potvrdit</button>
     </div>
   </div>
 </div>
@@ -1509,6 +1553,13 @@ function adminFetch(url, options = {}) {
   const headers = Object.assign({}, options.headers || {}, { 'x-admin-heslo': heslo, 'Content-Type': 'application/json' });
   return fetch(url, Object.assign({}, options, { headers }));
 }
+// Přečte chybovou hlášku ze serverové odpovědi, když res.ok je false — používají
+// všechny hlavní finanční načítací funkce níže (Přehled/Rezervace/Účetnictví/
+// Statistiky/Zákaznice), ať se vždy zobrazí konkrétní důvod ze serveru místo
+// nejasné/tiché chyby.
+async function chybaZOdpovedi(res, vychozi) {
+  try { const data = await res.json(); return data.chyba || vychozi; } catch (e) { return vychozi; }
+}
 
 async function login() {
   const zadaneHeslo = document.getElementById('passwordInput').value;
@@ -1758,11 +1809,16 @@ function vykreslitZvonecek() {
 // místa vždy ukazují stejná čísla místo dvou nezávislých dotazů na server.
 let posledniPrehledSouhrn = null;
 async function loadPrehled() {
+  const chybaEl = document.getElementById('prehledChyba');
+  if (chybaEl) chybaEl.style.display = 'none';
   try {
-    const [d, produkty] = await Promise.all([
-      adminFetch(API + '/admin/prehled').then(r => r.json()),
-      adminFetch(API + '/admin/produkty').then(r => r.json())
+    const [resPrehled, resProdukty] = await Promise.all([
+      adminFetch(API + '/admin/prehled'),
+      adminFetch(API + '/admin/produkty')
     ]);
+    if (!resPrehled.ok) throw new Error(await chybaZOdpovedi(resPrehled, 'Přehled se nepodařilo načíst.'));
+    if (!resProdukty.ok) throw new Error(await chybaZOdpovedi(resProdukty, 'Stav skladu se nepodařilo načíst.'));
+    const [d, produkty] = await Promise.all([resPrehled.json(), resProdukty.json()]);
     document.getElementById('stCelkem').textContent = d.rezervaceCelkem;
     document.getElementById('stCekajici').textContent = d.rezervaceCekajici;
     document.getElementById('stVolne').textContent = d.rezervaceBudouci;
@@ -1790,7 +1846,18 @@ async function loadPrehled() {
       nizkySklad
     };
     vykreslitZvonecek();
-  } catch (e) { /* tichá chyba na přehledu */ }
+  } catch (e) {
+    // Etapa 1: při chybě nesmí zůstat staré finanční částky zobrazené jako
+    // aktuální — všechny dlaždice se nahradí jasným varováním, ne tichem.
+    ['stCelkem', 'stCekajici', 'stVolne', 'stPoukazy', 'stPoukazyHodnota', 'stZadosti', 'stPoukazyExpiruji', 'stTrzbyMesic'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.textContent = '⚠️';
+    });
+    document.getElementById('dnesniProgramTable').innerHTML = '<div class="empty">Nelze zobrazit — data se nenačetla.</div>';
+    if (chybaEl) {
+      chybaEl.innerHTML = `⚠️ ${escapeHtml(e.message || 'Přehled se nepodařilo načíst.')} <button class="btn btn-outline btn-sm" onclick="loadPrehled()">🔄 Zkusit znovu</button>`;
+      chybaEl.style.display = 'block';
+    }
+  }
 }
 
 // Proklik z dlaždic na Přehledu rovnou do cílové sekce — případně i s
@@ -1844,13 +1911,18 @@ const NAZVY_DNU = ['Neděle', 'Pondělí', 'Úterý', 'Středa', 'Čtvrtek', 'P�
 
 async function loadRezervace() {
   try {
-    vsechnyRezervace = await adminFetch(API + '/admin/rezervace').then(r => r.json());
+    const res = await adminFetch(API + '/admin/rezervace');
+    if (!res.ok) throw new Error(await chybaZOdpovedi(res, 'Rezervace se nepodařilo načíst.'));
+    vsechnyRezervace = await res.json();
     document.getElementById('rezStatCelkem').textContent = vsechnyRezervace.length;
     document.getElementById('rezStatCekajici').textContent = vsechnyRezervace.filter(r => r.stav === 'cekajici').length;
     vykreslitRezervace('vse');
     vykreslitAdminKalendar();
   } catch (e) {
-    document.getElementById('rezervaceTable').innerHTML = '<div class="error-msg">Chyba načítání — zkontroluj, že je vyplněná adresa API a backend běží.</div>';
+    // Etapa 1: ⚠️ místo starého čísla, ne tiché ponechání předchozí hodnoty.
+    document.getElementById('rezStatCelkem').textContent = '⚠️';
+    document.getElementById('rezStatCekajici').textContent = '⚠️';
+    document.getElementById('rezervaceTable').innerHTML = `<div class="error-msg">⚠️ ${escapeHtml(e.message || 'Chyba načítání.')} <button class="btn btn-outline btn-sm" onclick="loadRezervace()">🔄 Zkusit znovu</button></div>`;
   }
   nacistPracovniDobu();
   loadNastaveni();
@@ -2659,7 +2731,7 @@ async function loadPoukazy() {
     if (!seznam.length) { document.getElementById('poukazyTable').innerHTML = '<div class="empty">Zatím žádné vydané poukazy</div>'; }
     else {
       document.getElementById('poukazyTable').innerHTML = `
-        <table><thead><tr><th>Kód</th><th>Účel</th><th>Hodnota</th><th>Zůstatek</th><th>Platnost do</th><th>Kupující</th><th>Stav</th><th>Akce</th></tr></thead>
+        <table><thead><tr><th>Kód</th><th>Účel</th><th>Hodnota</th><th>Zůstatek</th><th>Platnost do</th><th>Kupující</th><th>Stav</th><th>Úhrada</th><th>Akce</th></tr></thead>
         <tbody>${seznam.map(p => { const stav = poukazZobrazenyStav(p); const badgeTrida = { aktivni: 'badge-ok', castecne_vyuzity: 'badge-cekajici', prosly: 'badge-zruseno', pouzity: 'badge-zruseno', zruseny: 'badge-zruseno' }[stav.klic] || ''; return `<tr>
           <td><code style="background:var(--cream);padding:2px 6px;border-radius:4px">${escapeHtml(p.kod)}</code></td>
           <td>${ { dar: '<span class="badge badge-cekajici">🎁 Dar</span>', vratka: '<span class="badge badge-cekajici">↺ Vratka</span>' }[p.ucel] || '<span class="badge badge-ok">🛍️ Prodej</span>' }</td>
@@ -2668,6 +2740,7 @@ async function loadPoukazy() {
           <td>${new Date(p.platnost_do).toLocaleDateString('cs-CZ')}</td>
           <td>${escapeHtml(p.kupujici_jmeno) || '—'}</td>
           <td><span class="badge ${badgeTrida}">${stav.text}</span></td>
+          <td>${vykreslitUhradaPoukazu(p)}</td>
           <td style="display:flex;gap:4px">
             <button class="btn btn-outline btn-sm" onclick="zobrazitPoukaz(${p.id})" title="Zobrazit / vytisknout">🖨️</button>
             <button class="btn btn-outline btn-sm" onclick="zobrazitHistoriiPoukazu(${p.id})" title="Historie čerpání">📜</button>
@@ -2679,6 +2752,55 @@ async function loadPoukazy() {
   } catch (e) { document.getElementById('poukazyTable').innerHTML = '<div class="error-msg">Chyba načítání.</div>'; }
   loadPoukazyZadosti();
   loadPoukazyTypy();
+}
+
+// Etapa 2 — zobrazí stav úhrady poukazu + příslušné akce. Dar/vratka úhradu
+// vůbec neřeší. "Nezaplaceno" nabízí jen "potvrdit platbu" (víme jistě, že se
+// ještě nic nezaplatilo). Historický poukaz (stav_uhrady NULL) nabízí OBĚ
+// akce zvlášť, nikdy sloučené — buď šlo o skutečně novou platbu právě teď,
+// nebo o dodatečné doplnění dávno proběhlé platby, a admin musí vybrat, které.
+const uhradaZpusobLabelKratky = { hotove: 'hotově', kartou: 'kartou', qr: 'QR/převodem' };
+function vykreslitUhradaPoukazu(p) {
+  if (p.ucel !== 'prodej') return '—';
+  if (p.stav_uhrady === 'zaplaceno') {
+    return `<span class="badge badge-ok">✅ Zaplaceno</span><br><small>${escapeHtml(uhradaZpusobLabelKratky[p.zpusob_platby] || p.zpusob_platby || '')}${p.zaplaceno_zpetne ? ' · doplněno zpětně' : ''}</small>`;
+  }
+  if (p.stav_uhrady === 'nezaplaceno') {
+    return `<span class="badge badge-cekajici">⏳ Nezaplaceno</span><br><button class="btn btn-primary btn-sm" onclick="otevritPotvrzeniPlatbyPoukazu(${p.id},'nova')">💳 Potvrdit platbu</button>`;
+  }
+  return `<span class="badge">❔ Neznámé</span><br><div style="display:flex;flex-direction:column;gap:4px;margin-top:4px">
+    <button class="btn btn-outline btn-sm" onclick="otevritPotvrzeniPlatbyPoukazu(${p.id},'nova')">💳 Platí se teď</button>
+    <button class="btn btn-outline btn-sm" onclick="otevritPotvrzeniPlatbyPoukazu(${p.id},'historicka')">🕰️ Dřív zaplaceno</button>
+  </div>`;
+}
+let ppPoukazId = null, ppPoukazMod = 'nova';
+function otevritPotvrzeniPlatbyPoukazu(id, mod) {
+  ppPoukazId = id; ppPoukazMod = mod;
+  const p = posledniPoukazy.find(x => x.id === id);
+  document.getElementById('ppPoukazTitulek').textContent = mod === 'historicka' ? 'Doplnit historickou platbu' : 'Potvrdit platbu';
+  document.getElementById('ppPoukazPopis').textContent = mod === 'historicka'
+    ? 'Poukaz byl zaplacený už dřív — jen o tom chybí záznam. Nejde o nový příjem, nezapočítá se do přijatých plateb ani uzávěrky.'
+    : 'Peníze za tento poukaz přicházejí právě teď.';
+  document.getElementById('ppPoukazDatumWrap').style.display = mod === 'historicka' ? '' : 'none';
+  if (mod === 'historicka' && p) document.getElementById('ppPoukazDatum').value = String(p.vytvoreno).slice(0, 10);
+  document.getElementById('ppPoukazMsg').innerHTML = '';
+  openModal('modalPotvrditPlatbuPoukazu');
+}
+async function potvrditPlatbuPoukazuOdeslat() {
+  const zpusob_platby = document.getElementById('ppPoukazZpusob').value;
+  const msg = document.getElementById('ppPoukazMsg');
+  const url = ppPoukazMod === 'historicka'
+    ? API + '/admin/poukazy/' + ppPoukazId + '/doplnit-historickou-platbu'
+    : API + '/admin/poukazy/' + ppPoukazId + '/potvrdit-platbu';
+  const body = { zpusob_platby };
+  if (ppPoukazMod === 'historicka') body.zaplaceno_kdy = document.getElementById('ppPoukazDatum').value;
+  try {
+    const res = await adminFetch(url, { method: 'PATCH', body: JSON.stringify(body) });
+    const data = await res.json();
+    if (!res.ok) { msg.innerHTML = '<div class="error-msg">' + escapeHtml(data.chyba || 'Nepodařilo se uložit.') + '</div>'; return; }
+    closeModal('modalPotvrditPlatbuPoukazu');
+    loadPoukazy();
+  } catch (e) { msg.innerHTML = '<div class="error-msg">Nejde se připojit k serveru.</div>'; }
 }
 
 // -- Varianty poukazů (částka + platnost) --
@@ -2768,6 +2890,16 @@ async function smazatZadost(id) {
   await adminFetch(API + '/admin/poukazy/zadosti/' + id, { method: 'DELETE' });
   loadPoukazy();
 }
+// Etapa 2 — u daru se úhrada vůbec neřeší (žádné peníze, žádná tržba); u
+// prodeje se podle volby "Zaplaceno hned"/"Zatím nezaplaceno" zobrazí nebo
+// skryje výběr způsobu platby. Volá se při změně obou polí i při otevření
+// modálu, ať je zobrazení od začátku v souladu s vybranou hodnotou.
+function prepnoutNpUhradu() {
+  const dar = document.getElementById('npUcel').value === 'dar';
+  const zaplaceno = document.getElementById('npZaplaceno').value === '1';
+  document.getElementById('npUhradaWrap').style.display = dar ? 'none' : '';
+  document.getElementById('npZpusobWrap').style.display = (!dar && zaplaceno) ? '' : 'none';
+}
 async function vydatPoukaz() {
   const vybrano = document.getElementById('npTyp').value;
   const kupujici_jmeno = document.getElementById('npJmeno').value;
@@ -2781,6 +2913,10 @@ async function vydatPoukaz() {
   const [druh, id] = vybrano.split(':');
   const body = { kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, zakoupeno_kde, ucel };
   if (druh === 'masaz') body.cenik_id = id; else body.poukaz_typ_id = id;
+  if (ucel === 'prodej') {
+    body.zaplaceno = document.getElementById('npZaplaceno').value === '1';
+    if (body.zaplaceno) body.zpusob_platby = document.getElementById('npZpusobPlatby').value;
+  }
   try {
     const res = await adminFetch(API + '/admin/poukazy', { method: 'POST', body: JSON.stringify(body) });
     const data = await res.json();
@@ -2788,7 +2924,7 @@ async function vydatPoukaz() {
       closeModal('modalNovyPoukaz');
       await loadPoukazy();
       zobrazitPoukaz(data.poukaz.id); // rovnou náhled k tisku, ať ho majitelka vidí ještě než poukaz vytiskne
-    } else msg.innerHTML = '<div class="error-msg">Nepodařilo se vydat poukaz.</div>';
+    } else msg.innerHTML = '<div class="error-msg">' + escapeHtml(data.chyba || 'Nepodařilo se vydat poukaz.') + '</div>';
   } catch (e) { msg.innerHTML = '<div class="error-msg">Nejde se připojit k serveru — backend ještě neběží nebo není doplněná jeho adresa v proměnné API.</div>'; }
 }
 async function smazatPoukaz(id) {
@@ -3283,15 +3419,26 @@ function otevritUctenkuTest() {
 let posledniZakaznici = [];
 let aktualniZakaznice = null; // poslední načtený detail karty klientky (pro reset editačního formuláře při "Zrušit")
 async function loadZakaznici() {
+  const chybaEl = document.getElementById('zakazniciChyba');
+  if (chybaEl) chybaEl.style.display = 'none';
   try {
-    posledniZakaznici = await adminFetch(API + '/admin/klientky').then(r => r.json());
+    const res = await adminFetch(API + '/admin/klientky');
+    if (!res.ok) throw new Error(await chybaZOdpovedi(res, 'Zákaznice se nepodařilo načíst.'));
+    posledniZakaznici = await res.json();
     const sAktivnim = posledniZakaznici.filter(z => z.aktivniPoukazy > 0).length;
     const celkemUtraceno = posledniZakaznici.reduce((s, z) => s + Number(z.celkemUtraceno), 0);
     document.getElementById('zakCelkem').textContent = posledniZakaznici.length;
     document.getElementById('zakPrumer').textContent = posledniZakaznici.length ? Math.round(celkemUtraceno / posledniZakaznici.length).toLocaleString('cs-CZ') + ' Kč' : '0 Kč';
     document.getElementById('zakAktivniPoukaz').textContent = sAktivnim;
     vykreslitZakazniky();
-  } catch (e) { document.getElementById('zakazniciTable').innerHTML = '<div class="error-msg">Chyba načítání.</div>'; }
+  } catch (e) {
+    ['zakCelkem', 'zakPrumer', 'zakAktivniPoukaz'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = '⚠️'; });
+    document.getElementById('zakazniciTable').innerHTML = '';
+    if (chybaEl) {
+      chybaEl.innerHTML = `⚠️ ${escapeHtml(e.message || 'Zákaznice se nepodařilo načíst.')} <button class="btn btn-outline btn-sm" onclick="loadZakaznici()">🔄 Zkusit znovu</button>`;
+      chybaEl.style.display = 'block';
+    }
+  }
 }
 function vykreslitZakazniky() {
   const hledat = document.getElementById('zakazniciHledat').value.trim().toLowerCase();
@@ -3370,12 +3517,14 @@ async function otevritDetailZakaznice(id) {
       <div class="stats-grid" style="grid-template-columns:repeat(3,1fr);margin:12px 0">
         <div class="stat-card"><div class="stat-label">Návštěvy (dokončené)</div><div class="stat-value">${z.pocetNavstev}</div></div>
         <div class="stat-card"><div class="stat-label">Celkem uhrazeno</div><div class="stat-value">${Number(z.celkemUtraceno).toLocaleString('cs-CZ')} Kč</div></div>
+        <div class="stat-card"><div class="stat-label">Zálohy na budoucích rezervacích</div><div class="stat-value stat-green">${Number(z.zalohyNaBudoucich || 0).toLocaleString('cs-CZ')} Kč</div></div>
         <div class="stat-card"><div class="stat-label">Průměr / návštěvu</div><div class="stat-value">${z.prumernaNavsteva === null ? '—' : Number(z.prumernaNavsteva).toLocaleString('cs-CZ') + ' Kč'}</div></div>
         <div class="stat-card"><div class="stat-label">Poslední návštěva</div><div class="stat-value" style="font-size:1.1rem">${z.posledniNavstiva ? new Date(z.posledniNavstiva).toLocaleDateString('cs-CZ') : '—'}</div></div>
         <div class="stat-card"><div class="stat-label">Další rezervace</div><div class="stat-value" style="font-size:1rem">${z.dalsiRezervace ? new Date(z.dalsiRezervace.datum).toLocaleDateString('cs-CZ') + ' ' + String(z.dalsiRezervace.cas_od).slice(0,5) : 'Žádná další rezervace'}</div></div>
         <div class="stat-card"><div class="stat-label">Aktivní poukazy</div><div class="stat-value stat-green">${z.aktivniPoukazy}</div></div>
         <div class="stat-card"><div class="stat-label">Zrušeno / nedostavila se</div><div class="stat-value stat-orange">${z.pocetZrusenych} / ${z.pocetNedostavenaSe}</div></div>
       </div>
+      <p style="font-size:0.75rem;color:var(--text-light);margin:-6px 0 10px">„Celkem uhrazeno" je jen za dokončené návštěvy. „Zálohy na budoucích rezervacích" jsou peníze už přijaté na ještě neproběhlé termíny — samostatně, aby se nesmíchaly.</p>
       ${z.dalsiRezervace ? `<div style="font-size:0.82rem;color:var(--text-light);margin:-6px 0 12px">Další: ${escapeHtml(z.dalsiRezervace.masaz)} (${stavBadge[z.dalsiRezervace.stav] || z.dalsiRezervace.stav})</div>` : ''}
 
       <div class="form-group" style="background:var(--tan-light);border-radius:10px;padding:10px 14px;margin:0 0 16px">
@@ -4378,13 +4527,17 @@ function tabulkaPodleDne(data, prazdnyText) {
     <tbody>${data.slice(0, 60).map(d => `<tr><td>${new Date(d.den).toLocaleDateString('cs-CZ')}</td><td><strong>${Math.round(d.castka).toLocaleString('cs-CZ')} Kč</strong></td></tr>`).join('')}</tbody></table>`;
 }
 async function loadUcetnictvi() {
+  const chybaEl = document.getElementById('ucetnictviChyba');
+  if (chybaEl) chybaEl.style.display = 'none';
   try {
     const od = document.getElementById('ucetOd').value;
     const doDat = document.getElementById('ucetDo').value;
     const params = new URLSearchParams();
     if (od) params.set('od', od);
     if (doDat) params.set('do', doDat);
-    const d = await adminFetch(API + '/admin/ucetnictvi' + (params.toString() ? '?' + params.toString() : '')).then(r => r.json());
+    const res = await adminFetch(API + '/admin/ucetnictvi' + (params.toString() ? '?' + params.toString() : ''));
+    if (!res.ok) throw new Error(await chybaZOdpovedi(res, 'Účetnictví se nepodařilo načíst.'));
+    const d = await res.json();
     posledniUcetnictvi = d;
 
     document.getElementById('ucetTrzbySluzby').textContent = Math.round(d.trzbyZaSluzby.celkem).toLocaleString('cs-CZ') + ' Kč';
@@ -4397,17 +4550,24 @@ async function loadUcetnictvi() {
     document.getElementById('ucetPrijatePlatbyDny').innerHTML = tabulkaPodleDne(d.prijatePlatby.podleDne, 'Zatím žádné platby v tomto období');
     document.getElementById('ucetProdejPoukazuDny').innerHTML = tabulkaPodleDne(d.prodejPoukazu.podleDne, 'Zatím žádné prodané poukazy v tomto období');
     document.getElementById('ucetProdejProduktuDny').innerHTML = tabulkaPodleDne(d.prodejProduktu.podleDne, 'Zatím žádné prodané produkty v tomto období');
+    // Etapa 2 — C) odděleně zobrazit nově potvrzené platby (jdou i do B/F) a
+    // historické/dodatečně doplněné záznamy (jen tady, nikdy v B/F) — ať je
+    // vidět, že nejde o jedno slité číslo.
+    document.getElementById('ucetProdejPoukazuRozpad').textContent =
+      `Z toho nově potvrzené platby: ${Math.round(d.prodejPoukazu.nove.celkem).toLocaleString('cs-CZ')} Kč (${d.prodejPoukazu.nove.pocet}×) — počítají se i do B/F. ` +
+      `Historické/dodatečně doplněné: ${Math.round(d.prodejPoukazu.historicke.celkem).toLocaleString('cs-CZ')} Kč (${d.prodejPoukazu.historicke.pocet}×) — jen tady, ne v B/F.`;
 
-    const zpusobLabel = { hotove: 'Hotově', kartou: 'Kartou', online: 'Online', poukaz: 'Poukaz' };
+    const zpusobLabel = { hotove: 'Hotově', kartou: 'Kartou', online: 'Online', qr: 'QR/převodem', poukaz: 'Poukaz' };
+    const typLabel = { vratka: '↺ vratka', prodej_poukazu: '🎁 prodej poukazu' };
     document.getElementById('ucetPrijatePlatbySeznam').innerHTML = !d.prijatePlatby.seznam.length ? '<div class="empty">Zatím žádné platby v tomto období</div>' : `
       <table><thead><tr><th>Datum</th><th>Typ</th><th>Způsob</th><th>Rezervace</th><th>Částka</th><th>Tisk</th></tr></thead>
       <tbody>${d.prijatePlatby.seznam.slice(0, 100).map(p => `<tr>
         <td>${new Date(p.vytvoreno).toLocaleDateString('cs-CZ')}</td>
-        <td>${p.typ === 'vratka' ? '↺ vratka' : '✅ platba'}</td>
+        <td>${typLabel[p.typ] || '✅ platba'}</td>
         <td>${zpusobLabel[p.zpusob_platby] || p.zpusob_platby}</td>
         <td>${p.rezervace_id ? '<a href="#" onclick="zobrazitRezervaciZUcetnictvi(' + p.rezervace_id + ');return false;">#' + p.rezervace_id + '</a>' : '—'}</td>
         <td>${Number(p.castka) > 0 ? '+' : ''}${Math.round(p.castka).toLocaleString('cs-CZ')} Kč</td>
-        <td><button class="btn btn-outline btn-sm" onclick="vytisknoutUctenkuZPlatby(${p.id})" title="Vytisknout účtenku zpětně">🧾</button></td>
+        <td>${p.typ === 'prodej_poukazu' ? '—' : `<button class="btn btn-outline btn-sm" onclick="vytisknoutUctenkuZPlatby(${p.id})" title="Vytisknout účtenku zpětně">🧾</button>`}</td>
       </tr>`).join('')}</tbody></table>`;
 
     document.getElementById('ucetVratkySeznam').innerHTML = !d.vratky.seznam.length ? '<div class="empty">Zatím žádné vratky v tomto období</div>' : `
@@ -4438,7 +4598,20 @@ async function loadUcetnictvi() {
     }
     document.getElementById('uzaverkaTiskUctenkaBtn').style.display = (ucetAktivniObdobi === 'den' || ucetAktivniObdobi === 'mesic') ? 'inline-flex' : 'none';
     document.getElementById('uzaverkaTiskA4Btn').style.display = ucetAktivniObdobi === 'rok' ? 'inline-flex' : 'none';
-  } catch (e) { document.getElementById('ucetTrzbySluzbyDny').innerHTML = '<div class="error-msg">Chyba načítání.</div>'; }
+  } catch (e) {
+    // Etapa 1: žádná z pěti hlavních Kč dlaždic ani navazujících tabulek nesmí
+    // zůstat na starém čísle — vše se vyprázdní/⚠️ a nahoře je jasné varování.
+    ['ucetTrzbySluzby', 'ucetPrijatePlatby', 'ucetProdejPoukazu', 'ucetProdejProduktu', 'ucetVratky'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.textContent = '⚠️';
+    });
+    ['ucetTrzbySluzbyDny', 'ucetPrijatePlatbyDny', 'ucetProdejPoukazuDny', 'ucetProdejProduktuDny', 'ucetPrijatePlatbySeznam', 'ucetVratkySeznam', 'uzaverkaZpusoby', 'ucetProdejPoukazuRozpad'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.innerHTML = '';
+    });
+    if (chybaEl) {
+      chybaEl.innerHTML = `⚠️ ${escapeHtml(e.message || 'Účetnictví se nepodařilo načíst.')} <button class="btn btn-outline btn-sm" onclick="loadUcetnictvi()">🔄 Zkusit znovu</button>`;
+      chybaEl.style.display = 'block';
+    }
+  }
 }
 // Vrátí 'den'/'mesic'/'rok', když od–do přesně odpovídá jednomu takovému
 // období (i zpětně, libovolný minulý den/měsíc/rok), jinak null.
@@ -4568,13 +4741,17 @@ function exportCsvUcetnictvi() {
 // jako Účetnictví (A), zbytek jen z dokončených — viz komentář v server.js.
 let posledniStatistiky = null;
 async function loadStatistiky() {
+  const chybaEl = document.getElementById('statistikyChyba');
+  if (chybaEl) chybaEl.style.display = 'none';
   try {
     const od = document.getElementById('statOd').value;
     const doDat = document.getElementById('statDo').value;
     const params = new URLSearchParams();
     if (od) params.set('od', od);
     if (doDat) params.set('do', doDat);
-    const d = await adminFetch(API + '/admin/statistiky' + (params.toString() ? '?' + params.toString() : '')).then(r => r.json());
+    const res = await adminFetch(API + '/admin/statistiky' + (params.toString() ? '?' + params.toString() : ''));
+    if (!res.ok) throw new Error(await chybaZOdpovedi(res, 'Statistiky se nepodařilo načíst.'));
+    const d = await res.json();
     posledniStatistiky = d;
 
     document.getElementById('statPocetDokoncenych').textContent = d.pocetDokoncenychMasazi;
@@ -4591,7 +4768,15 @@ async function loadStatistiky() {
       <table><thead><tr><th>Masáž</th><th>Počet</th><th>Tržba</th></tr></thead>
       <tbody>${d.nejzadanejsiMasaze.map(m => `<tr><td>${escapeHtml(m.masaz)}</td><td>${m.pocet}</td><td>${Math.round(m.trzba).toLocaleString('cs-CZ')} Kč</td></tr>`).join('')}</tbody></table>`;
   } catch (e) {
-    document.getElementById('statTrzbyMesice').innerHTML = '<div class="error-msg">Chyba načítání.</div>';
+    // Etapa 1: žádné staré číslo nesmí zůstat viditelné jako aktuální.
+    ['statPocetDokoncenych', 'statPrumernaUtrata', 'statPodilZrusenych', 'statPodilNedostavenaSe'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.textContent = '⚠️';
+    });
+    ['statTrzbyMesice', 'statNejzadanejsi'].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ''; });
+    if (chybaEl) {
+      chybaEl.innerHTML = `⚠️ ${escapeHtml(e.message || 'Statistiky se nepodařilo načíst.')} <button class="btn btn-outline btn-sm" onclick="loadStatistiky()">🔄 Zkusit znovu</button>`;
+      chybaEl.style.display = 'block';
+    }
   }
 }
 function exportCsvStatistiky() {

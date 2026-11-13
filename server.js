@@ -758,14 +758,21 @@ function vygenerovatKod(ucel) {
 async function vytvoritPoukaz(client, {
   hodnota, platnostMesicu, zakoupenoKde, kupujiciJmeno, kupujiciEmail, kupujiciTelefon,
   proKoho = null, konkretniMasaz = null, zpusobPlatby = null, klientkaId = null, ucel,
-  slevaKc = 0 // akce „Stromeček“: o kolik méně se za poukaz zaplatilo (hodnota/zůstatek zůstává plná)
+  slevaKc = 0, // akce „Stromeček“: o kolik méně se za poukaz zaplatilo (hodnota/zůstatek zůstává plná)
+  // Etapa 2 (audit financnich toku) — stav_uhrady rozlišuje, zda už za poukaz
+  // skutečně přišly peníze, nezávisle na tom, že je rovnou "aktivni" a
+  // použitelný. 'zaplaceno' se tu nastavuje JEN když je platba hotová hned při
+  // vzniku (ruční vydání v adminu) — zaplaceno_zpetne vždy false, protože při
+  // samotném VZNIKU poukazu nikdy nejde o dodatečné zpětné doplnění historie
+  // (to řeší výhradně PATCH .../doplnit-historickou-platbu, ne tahle funkce).
+  stavUhrady = null, zaplacenoKdy = null
 }) {
   const platnostDo = new Date();
   platnostDo.setMonth(platnostDo.getMonth() + platnostMesicu);
   const { rows: [poukaz] } = await client.query(
-    `INSERT INTO poukazy (kod, hodnota, zustatek, platnost_do, zakoupeno_kde, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, konkretni_masaz, zpusob_platby, stav, klientka_id, ucel, sleva_kc)
-     VALUES ($1,$2,$2,$3,$4,$5,$6,$7,$8,$9,$10,'aktivni',$11,$12,$13) RETURNING *`,
-    [vygenerovatKod(ucel), hodnota, platnostDo.toISOString().slice(0, 10), zakoupenoKde, kupujiciJmeno || null, kupujiciEmail || null, kupujiciTelefon || null, proKoho, konkretniMasaz, zpusobPlatby, klientkaId, ucel, Number(slevaKc) || 0]
+    `INSERT INTO poukazy (kod, hodnota, zustatek, platnost_do, zakoupeno_kde, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, konkretni_masaz, zpusob_platby, stav, klientka_id, ucel, sleva_kc, stav_uhrady, zaplaceno_kdy, zaplaceno_zpetne)
+     VALUES ($1,$2,$2,$3,$4,$5,$6,$7,$8,$9,$10,'aktivni',$11,$12,$13,$14,$15,false) RETURNING *`,
+    [vygenerovatKod(ucel), hodnota, platnostDo.toISOString().slice(0, 10), zakoupenoKde, kupujiciJmeno || null, kupujiciEmail || null, kupujiciTelefon || null, proKoho, konkretniMasaz, zpusobPlatby, klientkaId, ucel, Number(slevaKc) || 0, stavUhrady, zaplacenoKdy]
   );
   return poukaz;
 }
@@ -2274,9 +2281,23 @@ app.get('/api/admin/poukazy', async (req, res) => {
 // na konkrétní masáž (cenik_id) — pak se hodnota poukazu vezme přímo z ceníku,
 // místo aby se vždycky vynucovala první/vybraná peněžní varianta.
 app.post('/api/admin/poukazy', async (req, res) => {
-  const { poukaz_typ_id, cenik_id, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, zakoupeno_kde, ucel } = req.body || {};
+  const { poukaz_typ_id, cenik_id, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, zakoupeno_kde, ucel, zaplaceno, zpusob_platby } = req.body || {};
   if (!poukaz_typ_id && !cenik_id) return res.status(400).json({ chyba: 'Vyberte variantu poukazu nebo konkrétní masáž.' });
   const ucelPoukazu = ucel === 'dar' ? 'dar' : 'prodej'; // výchozí "prodej", "dar" jen na výslovnou volbu v adminu
+  // Etapa 2 — u daru se platba vůbec neřeší (nikdy nevzniká tržba). U prodeje
+  // musí admin výslovně zvolit, zda je zaplaceno hned (a jakou metodou), nebo
+  // zatím ne — žádná domněnka, žádné automatické "hotove".
+  let stavUhrady = null, zaplacenoKdy = null, zpusobPlatbyFinal = null;
+  if (ucelPoukazu === 'prodej') {
+    if (zaplaceno) {
+      if (!['hotove', 'kartou', 'qr'].includes(zpusob_platby)) {
+        return res.status(400).json({ chyba: 'Vyberte prosím skutečný způsob platby.' });
+      }
+      stavUhrady = 'zaplaceno'; zaplacenoKdy = new Date(); zpusobPlatbyFinal = zpusob_platby;
+    } else {
+      stavUhrady = 'nezaplaceno';
+    }
+  }
   const client = await db.connect();
   try {
     await client.query('BEGIN');
@@ -2300,7 +2321,8 @@ app.post('/api/admin/poukazy', async (req, res) => {
     const poukaz = await vytvoritPoukaz(client, {
       hodnota, platnostMesicu, zakoupenoKde: zakoupeno_kde || 'osobne',
       kupujiciJmeno: kupujici_jmeno, kupujiciEmail: kupujici_email, kupujiciTelefon: kupujici_telefon,
-      proKoho: pro_koho || null, konkretniMasaz, klientkaId, ucel: ucelPoukazu
+      proKoho: pro_koho || null, konkretniMasaz, klientkaId, ucel: ucelPoukazu,
+      zpusobPlatby: zpusobPlatbyFinal, stavUhrady, zaplacenoKdy
     });
     await client.query('COMMIT');
     res.json({ ok: true, poukaz });
@@ -2319,6 +2341,19 @@ app.patch('/api/admin/poukazy/:id/stav', async (req, res) => {
   const { stav } = req.body || {};
   if (!['aktivni', 'castecne_vyuzity', 'pouzity', 'zruseny'].includes(stav)) return res.status(400).json({ chyba: 'Neplatný stav.' });
   try {
+    // Etapa 2 (audit financnich toku) — zrušení poukazu s nevyčerpaným
+    // zůstatkem, u kterého peníze buď skutečně přišly (stav_uhrady='zaplaceno'),
+    // nebo nevíme jistě, že nepřišly (stav_uhrady IS NULL — historický poukaz),
+    // se blokuje, dokud nebude vyřešené vrácení peněz. Jediný bezpečně volný
+    // případ je stav_uhrady='nezaplaceno' — tam je jisté, že žádná hotovost
+    // nepřišla, takže zrušení nic nevyžaduje.
+    if (stav === 'zruseny') {
+      const { rows: [existujici] } = await db.query('SELECT stav_uhrady, zustatek FROM poukazy WHERE id = $1', [req.params.id]);
+      if (!existujici) return res.status(404).json({ chyba: 'Poukaz nebyl nalezen.' });
+      if (Number(existujici.zustatek) > 0 && existujici.stav_uhrady !== 'nezaplaceno') {
+        return res.status(400).json({ chyba: `Tento poukaz má nevyčerpaný zůstatek ${existujici.zustatek} Kč a stav úhrady „${existujici.stav_uhrady || 'neznámý'}“. Zrušení je blokované, dokud nebude vyřešené vrácení peněz.` });
+      }
+    }
     const { rowCount } = await db.query(
       `UPDATE poukazy SET stav = $1, uzavreno_kdy = CASE WHEN $1 IN ('pouzity','zruseny') THEN now() ELSE NULL END WHERE id = $2`,
       [stav, req.params.id]
@@ -2326,6 +2361,80 @@ app.patch('/api/admin/poukazy/:id/stav', async (req, res) => {
     if (!rowCount) return res.status(404).json({ chyba: 'Poukaz nebyl nalezen.' });
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
+// Etapa 2 — skutečně nová platba za poukaz, zaznamenaná PRÁVĚ TEĎ. Platí pro
+// poukaz čekající na platbu (stav_uhrady='nezaplaceno', typicky vyřízená
+// žádost z webu) i pro historický poukaz (stav_uhrady IS NULL), pokud si
+// admin je jistá, že se teprve TEĎ platí poprvé — ne pro dodatečné doplnění
+// už dřív proběhlé platby (na to je samostatný endpoint níže).
+// zaplaceno_zpetne=false → počítá se v kategorii B i F (skutečný nový pohyb
+// peněz), na rozdíl od zpětného doplnění historie.
+app.patch('/api/admin/poukazy/:id/potvrdit-platbu', async (req, res) => {
+  const { zpusob_platby } = req.body || {};
+  if (!['hotove', 'kartou', 'qr'].includes(zpusob_platby)) {
+    return res.status(400).json({ chyba: 'Vyberte prosím skutečný způsob platby.' });
+  }
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: [poukaz] } = await client.query('SELECT * FROM poukazy WHERE id = $1 FOR UPDATE', [req.params.id]);
+    if (!poukaz) { await client.query('ROLLBACK'); return res.status(404).json({ chyba: 'Poukaz nebyl nalezen.' }); }
+    if (poukaz.ucel !== 'prodej') { await client.query('ROLLBACK'); return res.status(400).json({ chyba: 'Platbu lze potvrdit jen u prodaného poukazu.' }); }
+    if (poukaz.stav_uhrady === 'zaplaceno') { await client.query('ROLLBACK'); return res.status(400).json({ chyba: 'Tento poukaz je už zaznamenaný jako zaplacený.' }); }
+    const { rows: [aktualizovany] } = await client.query(
+      `UPDATE poukazy SET stav_uhrady = 'zaplaceno', zpusob_platby = $1, zaplaceno_kdy = now(), zaplaceno_zpetne = false WHERE id = $2 RETURNING *`,
+      [zpusob_platby, req.params.id]
+    );
+    await client.query('COMMIT');
+    res.json({ ok: true, poukaz: aktualizovany });
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch {}
+    res.status(500).json({ chyba: e.message });
+  } finally {
+    client.release();
+  }
+});
+
+// Etapa 2 — DOPLNĚNÍ historického údaje o platbě, která proběhla v minulosti
+// (ne teď). Jen pro poukaz se stav_uhrady IS NULL (opravdu neznámý historický
+// stav) — u 'nezaplaceno' nemá "dodatečné doplnění minulé platby" smysl, tam
+// je jistota, že se nezaplatilo. zaplaceno_kdy sem admin zadává sama (datum
+// skutečné platby v minulosti) — NIKDY se nedosazuje automaticky.
+// zaplaceno_zpetne=true → NIKDY se nepočítá do kategorie B/F (mohlo by jít o
+// peníze už započítané v dávno uzavřené uzávěrce), jen do kategorie C, a i tam
+// beze změny data (viz GET /api/admin/ucetnictvi) — žádný nový příjem nevzniká.
+app.patch('/api/admin/poukazy/:id/doplnit-historickou-platbu', async (req, res) => {
+  const { zpusob_platby, zaplaceno_kdy } = req.body || {};
+  if (!['hotove', 'kartou', 'qr'].includes(zpusob_platby)) {
+    return res.status(400).json({ chyba: 'Vyberte prosím skutečný způsob platby.' });
+  }
+  const datum = zaplaceno_kdy ? new Date(zaplaceno_kdy) : null;
+  if (!datum || Number.isNaN(datum.getTime())) {
+    return res.status(400).json({ chyba: 'Zadejte prosím platné datum skutečné platby.' });
+  }
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: [poukaz] } = await client.query('SELECT * FROM poukazy WHERE id = $1 FOR UPDATE', [req.params.id]);
+    if (!poukaz) { await client.query('ROLLBACK'); return res.status(404).json({ chyba: 'Poukaz nebyl nalezen.' }); }
+    if (poukaz.ucel !== 'prodej') { await client.query('ROLLBACK'); return res.status(400).json({ chyba: 'Tuto akci lze použít jen u prodaného poukazu.' }); }
+    if (poukaz.stav_uhrady !== null) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ chyba: 'Tuto akci lze použít jen u historického poukazu s neznámým stavem úhrady.' });
+    }
+    const { rows: [aktualizovany] } = await client.query(
+      `UPDATE poukazy SET stav_uhrady = 'zaplaceno', zpusob_platby = $1, zaplaceno_kdy = $2, zaplaceno_zpetne = true WHERE id = $3 RETURNING *`,
+      [zpusob_platby, datum.toISOString(), req.params.id]
+    );
+    await client.query('COMMIT');
+    res.json({ ok: true, poukaz: aktualizovany });
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch {}
+    res.status(500).json({ chyba: e.message });
+  } finally {
+    client.release();
+  }
 });
 
 // Skutečné uplatnění poukazu (odečtení částky ze zůstatku) — jediné místo, kde se
@@ -2355,6 +2464,14 @@ app.post('/api/admin/poukazy/:id/uplatnit', async (req, res) => {
     if (poukaz.stav === 'pouzity' || Number(poukaz.zustatek) <= 0) {
       await client.query('ROLLBACK');
       return res.status(400).json({ chyba: 'Poukaz je už plně vyčerpaný.' });
+    }
+    // Etapa 2 — poukaz čekající na platbu (typicky vyřízená žádost z webu,
+    // zákaznice ještě nezaplatila) nelze uplatnit, dokud platba není potvrzená.
+    // Historické poukazy (stav_uhrady IS NULL) touto kontrolou NEJSOU dotčené,
+    // ať se neomezí dosavadní běžné používání starých poukazů.
+    if (poukaz.ucel === 'prodej' && poukaz.stav_uhrady === 'nezaplaceno') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ chyba: 'Tento poukaz ještě nebyl zaplacen — nejdřív potvrďte platbu.' });
     }
     const dnesIso = new Date().toISOString().slice(0, 10);
     if (poukaz.platnost_do < dnesIso) {
@@ -2453,6 +2570,19 @@ app.delete('/api/admin/poukazy/:id', async (req, res) => {
       return res.status(400).json({ chyba: 'Poukaz má historii čerpání, nelze smazat — použij zrušení.' });
     }
 
+    // Etapa 2 (bezpečnostní doplnění) — fyzické smazání na rozdíl od zrušení
+    // nenávratně odstraní i evidenci PŘIJATÉ PLATBY, i když poukaz nikdy
+    // nebyl čerpaný. Prodaný poukaz (ucel='prodej') lze proto smazat jen když
+    // je prokazatelně NEZAPLACENÝ (stav_uhrady='nezaplaceno') — zaplacený
+    // (stav_uhrady='zaplaceno') i historický s neznámým stavem úhrady
+    // (stav_uhrady IS NULL) se posuzuje konzervativně jako "možná zaplacený"
+    // a smazání se odmítá, přesně jako už zaplacený. Dar/vratka (nikdy
+    // nejde o platbu) tímto pravidlem nejsou dotčené.
+    if (poukaz.ucel === 'prodej' && poukaz.stav_uhrady !== 'nezaplaceno') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ chyba: 'Poukaz má zaznamenanou nebo nejistou platbu, nelze smazat — použij zrušení.' });
+    }
+
     await client.query('DELETE FROM poukazy WHERE id = $1', [req.params.id]);
     await client.query('COMMIT');
     res.json({ ok: true });
@@ -2505,11 +2635,16 @@ app.patch('/api/admin/poukazy/zadosti/:id/stav', async (req, res) => {
       const klientkaId = await najitNeboVytvoritKlientku(client, { jmeno: zadost.kupujici_jmeno, telefon: zadost.kupujici_telefon, email: zadost.kupujici_email });
       // Žádost z webu je vždy skutečný prodej (nikdy dar/tombola — ty se
       // zadávají jen přímo v administraci), proto natvrdo ucel='prodej'.
+      // Etapa 2 — "Vyřídit" v salonu NEZNAMENÁ "zaplaceno": zákaznice platí až
+      // při vyzvednutí. zadost.zpusob_platby je dnes vždy jen 'pri_prevzeti'
+      // (web žádný jiný způsob nenabízí) — to NENÍ skutečná platební metoda,
+      // proto se sem už nepropisuje. Poukaz vzniká jako stav_uhrady='nezaplaceno'
+      // a skutečnou platbu až zaznamená samostatná akce "Potvrdit platbu".
       const poukaz = await vytvoritPoukaz(client, {
         hodnota: zadost.hodnota, platnostMesicu: zadost.platnost_mesicu || 12, zakoupenoKde: 'web',
         kupujiciJmeno: zadost.kupujici_jmeno, kupujiciEmail: zadost.kupujici_email, kupujiciTelefon: zadost.kupujici_telefon,
-        proKoho: zadost.pro_koho, konkretniMasaz: zadost.konkretni_masaz, zpusobPlatby: zadost.zpusob_platby,
-        klientkaId, ucel: 'prodej', slevaKc: Number(zadost.sleva_kc) || 0
+        proKoho: zadost.pro_koho, konkretniMasaz: zadost.konkretni_masaz,
+        klientkaId, ucel: 'prodej', slevaKc: Number(zadost.sleva_kc) || 0, stavUhrady: 'nezaplaceno'
       });
       await client.query('COMMIT');
       return res.json({ ok: true, poukaz });
@@ -2555,6 +2690,12 @@ app.delete('/api/admin/poukazy/zadosti/:id', async (req, res) => {
 // - "aktivniPoukazy" jen skutečně aktivní (stav='aktivni' A platnost_do
 //   neprošla — viz jePoukazSkutecneAktivni, Fáze 7F.1); castecne_vyuzity se
 //   do tohoto počtu záměrně nepočítá stejně jako předtím.
+// - "zalohyNaBudoucich" (Etapa 3, audit financnich toku) — SAMOSTATNY soucet,
+//   NEMENI "celkemUtraceno" vyse. Zachycuje penize uz skutecne prijate
+//   (rezervace.uhrazeno) na rezervacich, ktere jeste nejsou "dokoncena" ani
+//   zrusene/nedostavene — tedy zalohy/castecne uhrady na neco, co se jeste
+//   neodehralo. Bez tohoto cisla by takove prijate penize na karte klientky
+//   nebyly videt v zadnem souctu (jen v jednotlivem radku historie rezervaci).
 async function nacistKlientkyReal() {
   const [klienti, rez, pouk] = await Promise.all([
     db.query('SELECT * FROM klientky WHERE aktivni = true'),
@@ -2571,7 +2712,7 @@ async function nacistKlientkyReal() {
     marketing_odhlasen: k.marketing_odhlasen,
     poznamka: k.poznamka || '', alergie: k.alergie || '', preference: k.preference || '',
     pocetNavstev: 0, celkemUtraceno: 0, posledniNavstiva: null, dalsiRezervace: null,
-    pocetZrusenych: 0, pocetNedostavenaSe: 0,
+    pocetZrusenych: 0, pocetNedostavenaSe: 0, zalohyNaBudoucich: 0,
     aktivniPoukazy: 0, poukazySeznam: [], rezervace: []
   }));
 
@@ -2592,6 +2733,9 @@ async function nacistKlientkyReal() {
     }
     if (r.stav === 'zrusena') k.pocetZrusenych++;
     if (r.stav === 'nedostavila_se') k.pocetNedostavenaSe++;
+    if (!['dokoncena', 'zrusena', 'nedostavila_se'].includes(r.stav)) {
+      k.zalohyNaBudoucich += Number(r.uhrazeno) || 0;
+    }
     if (!['zrusena', 'nedostavila_se'].includes(r.stav)) {
       const terminCas = new Date(r.datum + 'T' + String(r.cas_od).slice(0, 5) + ':00');
       if (terminCas > ted) {
@@ -3120,6 +3264,12 @@ app.post('/api/admin/prodejna', async (req, res) => {
       if (!poukaz) { await client.query('ROLLBACK'); return res.status(404).json({ chyba: 'Poukaz s tímto kódem nebyl nalezen.' }); }
       if (poukaz.stav === 'zruseny') { await client.query('ROLLBACK'); return res.status(400).json({ chyba: 'Poukaz je zrušený, nelze ho uplatnit.' }); }
       if (poukaz.stav === 'pouzity' || Number(poukaz.zustatek) <= 0) { await client.query('ROLLBACK'); return res.status(400).json({ chyba: 'Poukaz je už plně vyčerpaný.' }); }
+      // Etapa 2 — stejná kontrola jako u POST .../uplatnit: čekající-na-platbu
+      // poukaz nelze uplatnit ani zde. Historické (stav_uhrady NULL) nedotčeny.
+      if (poukaz.ucel === 'prodej' && poukaz.stav_uhrady === 'nezaplaceno') {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ chyba: 'Tento poukaz ještě nebyl zaplacen — nejdřív potvrďte platbu.' });
+      }
       const dnesIso = new Date().toISOString().slice(0, 10);
       if (poukaz.platnost_do < dnesIso) { await client.query('ROLLBACK'); return res.status(400).json({ chyba: `Poukaz je prošlý (platnost do ${formatDatumCz(poukaz.platnost_do)}).` }); }
       poukazCastka = Math.min(cenaNum, Number(poukaz.zustatek));
@@ -3436,8 +3586,13 @@ app.get('/api/admin/ucetnictvi', async (req, res) => {
     const [rez, prod, pouk, plat, prodProd] = await Promise.all([
       db.query("SELECT cena, datum FROM rezervace WHERE stav IN ('potvrzena', 'dokoncena')"),
       db.query('SELECT cena, zpusob_platby, poukaz_castka, vytvoreno FROM prodeje'),
-      // hodnota - sleva_kc = kolik se za poukaz skutečně zaplatilo (akce „Stromeček“)
-      db.query("SELECT id, hodnota - COALESCE(sleva_kc, 0) AS hodnota, vytvoreno FROM poukazy WHERE ucel = 'prodej'"),
+      // hodnota - sleva_kc = kolik se za poukaz skutečně zaplatilo (akce „Stromeček“).
+      // Etapa 2 (audit financnich toku) — navíc stav_uhrady/zaplaceno_kdy/
+      // zaplaceno_zpetne/zpusob_platby, potřebné k rozlišení historických a
+      // nově potvrzených plateb (viz zpracování níže).
+      db.query(`SELECT id, hodnota - COALESCE(sleva_kc, 0) AS hodnota, vytvoreno,
+                       stav_uhrady, zaplaceno_kdy, zaplaceno_zpetne, zpusob_platby
+                FROM poukazy WHERE ucel = 'prodej'`),
       db.query('SELECT id, rezervace_id, castka, typ, zpusob_platby, vytvoreno FROM platby'),
       db.query('SELECT id, nazev, mnozstvi, cena_celkem, zpusob_platby, vytvoreno FROM prodeje_produktu')
     ]);
@@ -3460,22 +3615,43 @@ app.get('/api/admin/ucetnictvi', async (req, res) => {
       ...prodejnaPolozky.filter(p => vObdobi(p.datum))
     ];
 
-    // B) Přijaté platby — deník bez poukazových řádků (ty patří do C) + prodejna
-    // (taky bez poukazových — ty peníze už byly přijaté dřív, při prodeji
-    // poukazu, ne teď při jeho uplatnění) + produkty
+    // Deník plateb/vratek v období — sdílený základ pro kategorie B i D níž.
     const platbyFiltr = plat.rows
       .map(p => ({ ...p, den: p.vytvoreno.toISOString().slice(0, 10) }))
       .filter(p => vObdobi(p.den));
+    // C) Prodej poukazů — rozdělené na dvě navzájem VYLUČUJÍCÍ se skupiny (Etapa 2):
+    // - "nove": stav_uhrady='zaplaceno' A zaplaceno_zpetne=false — skutečně
+    //   nová platba, počítaná podle dne SKUTEČNÉ ÚHRADY (zaplaceno_kdy). Tahle
+    //   skupina navíc vstupuje i do kategorie B a F (viz níž).
+    // - "historicke": stav_uhrady IS NULL (neznámý historický stav) NEBO
+    //   zaplaceno_zpetne=true (dodatečně doplněný údaj o dávno proběhlé
+    //   platbě) — počítaná podle dne VYTVOŘENÍ poukazu (vytvoreno), NIKDY
+    //   podle zaplaceno_kdy, aby dodatečné doplnění nikdy neposunulo částku do
+    //   jiného období a nezměnilo historický součet, který už byl jednou
+    //   zobrazený. Nikdy nevstupuje do B ani F — nevíme jistě, zda tahle
+    //   hotovost nebyla už započítaná v dávno uzavřené uzávěrce z té doby.
+    // Poukaz se stav_uhrady='nezaplaceno' (čeká na platbu) není v žádné z
+    // těchto skupin — do kategorie C nevstupuje vůbec, dokud není zaplacený.
+    const poukazyNoveZaplacene = pouk.rows
+      .filter(p => p.stav_uhrady === 'zaplaceno' && p.zaplaceno_zpetne === false)
+      .map(p => ({ ...p, den: p.zaplaceno_kdy.toISOString().slice(0, 10) }))
+      .filter(p => vObdobi(p.den));
+    const poukazyHistoricke = pouk.rows
+      .filter(p => p.stav_uhrady === null || p.zaplaceno_zpetne === true)
+      .map(p => ({ ...p, den: p.vytvoreno.toISOString().slice(0, 10) }))
+      .filter(p => vObdobi(p.den));
+    const poukazyFiltr = [...poukazyNoveZaplacene, ...poukazyHistoricke];
+
+    // B) Přijaté platby — deník bez poukazových řádků (ty patří do C) + prodejna
+    // (taky bez poukazových — ty peníze už byly přijaté dřív, při prodeji
+    // poukazu, ne teď při jeho uplatnění) + produkty + nově zaplacené poukazy
+    // (Etapa 2 — jen "nove", NIKDY "historicke", viz vysvětlení u kategorie C).
     const prijatePlatbyPolozky = [
       ...platbyFiltr.filter(p => p.zpusob_platby !== 'poukaz').map(p => ({ castka: Number(p.castka), datum: p.den, zpusob_platby: p.zpusob_platby })),
       ...prodejnaPolozky.filter(p => vObdobi(p.datum) && p.zpusob_platby !== 'poukaz').map(p => ({ castka: p.hotovostCastka, datum: p.datum, zpusob_platby: p.zpusob_platby })),
-      ...produktyPolozky.filter(p => vObdobi(p.datum))
+      ...produktyPolozky.filter(p => vObdobi(p.datum)),
+      ...poukazyNoveZaplacene.map(p => ({ castka: Number(p.hodnota), datum: p.den, zpusob_platby: p.zpusob_platby }))
     ];
-
-    // C) Prodej poukazů
-    const poukazyFiltr = pouk.rows
-      .map(p => ({ ...p, den: p.vytvoreno.toISOString().slice(0, 10) }))
-      .filter(p => vObdobi(p.den));
 
     // D) Vratky — bez vratek "jako poukaz" (zpusob_platby='poukaz'): tam
     // nejde žádná hotovost z pokladny, místo toho vznikl nový poukaz (viz
@@ -3490,9 +3666,14 @@ app.get('/api/admin/ucetnictvi', async (req, res) => {
     // "přijaté platby") rozdělený podle způsobu platby, pro denní/měsíční/
     // roční uzávěrku pokladny. Poukaz je tu záměrně vynechán stejně jako v B
     // — ty peníze se počítají v den PRODEJE poukazu (C), ne při uplatnění.
+    // Etapa 2 — chybějící/neznámý způsob platby se NIKDY nepovažuje za hotové
+    // bez důkazu (na rozdíl od "hotove" výchozí hodnoty přímo u vzniku záznamu
+    // v prodejně/produktech, což je explicitní volba admina, ne hádání zde) —
+    // v praxi by se sem dnes žádný takový řádek ani nemohl dostat (každý zdroj
+    // má zpusob_platby vynucené při vzniku), tohle je jen bezpečná pojistka.
     const zpusobyMapa = {};
     prijatePlatbyPolozky.forEach(p => {
-      const z = p.zpusob_platby || 'hotove';
+      const z = p.zpusob_platby || 'neprirazeno';
       zpusobyMapa[z] = (zpusobyMapa[z] || 0) + p.castka;
     });
 
@@ -3507,17 +3688,36 @@ app.get('/api/admin/ucetnictvi', async (req, res) => {
         podleDne: seskupitPodleDne(prijatePlatbyPolozky, p => p.castka, p => p.datum),
         // I seznam jednotlivých položek musí vynechat zpusob_platby='poukaz' —
         // jinak by se ta samá platba objevila v přehledu, i když do součtu výš
-        // (celkem/podleDne) správně nevstupuje. Peníze z poukazu jsou vidět
-        // zvlášť v prodejPoukazu (v den PRODEJE poukazu, ne uplatnění).
-        seznam: platbyFiltr.filter(p => p.zpusob_platby !== 'poukaz').map(p => ({
-          id: p.id, rezervace_id: p.rezervace_id, castka: Number(p.castka), typ: p.typ,
-          zpusob_platby: p.zpusob_platby, vytvoreno: p.vytvoreno.toISOString()
-        }))
+        // (celkem/podleDne) správně nevstupuje. Peníze z UPLATNĚNÍ poukazu
+        // jsou vidět zvlášť v prodejPoukazu (v den PRODEJE poukazu, ne
+        // uplatnění) — ale peníze ze SAMOTNÉHO PRODEJE nového poukazu (Etapa
+        // 2, "nove" skupina) do tohoto seznamu patří, aby součet jednotlivých
+        // položek odpovídal celkovému součtu výš (ne jen ten součet samotný).
+        seznam: [
+          ...platbyFiltr.filter(p => p.zpusob_platby !== 'poukaz').map(p => ({
+            id: p.id, rezervace_id: p.rezervace_id, castka: Number(p.castka), typ: p.typ,
+            zpusob_platby: p.zpusob_platby, vytvoreno: p.vytvoreno.toISOString()
+          })),
+          ...poukazyNoveZaplacene.map(p => ({
+            id: p.id, rezervace_id: null, castka: Number(p.hodnota), typ: 'prodej_poukazu',
+            zpusob_platby: p.zpusob_platby, vytvoreno: p.zaplaceno_kdy.toISOString()
+          }))
+        ].sort((a, b) => b.vytvoreno.localeCompare(a.vytvoreno))
       },
       prodejPoukazu: {
         celkem: poukazyFiltr.reduce((s, p) => s + Number(p.hodnota), 0),
         pocet: poukazyFiltr.length,
-        podleDne: seskupitPodleDne(poukazyFiltr, p => Number(p.hodnota), p => p.den)
+        podleDne: seskupitPodleDne(poukazyFiltr, p => Number(p.hodnota), p => p.den),
+        // Etapa 2 — rozpad na skutečně nově potvrzené platby (jdou i do B/F)
+        // a historické/dodatečně doplněné záznamy (jen tady v C, nikdy v B/F).
+        nove: {
+          celkem: poukazyNoveZaplacene.reduce((s, p) => s + Number(p.hodnota), 0),
+          pocet: poukazyNoveZaplacene.length
+        },
+        historicke: {
+          celkem: poukazyHistoricke.reduce((s, p) => s + Number(p.hodnota), 0),
+          pocet: poukazyHistoricke.length
+        }
       },
       prodejProduktu: {
         celkem: produktyFiltr.reduce((s, p) => s + p.castka, 0),
