@@ -397,6 +397,7 @@ tr:hover td{background:var(--cream)}
         <span class="nav-chevron">▾</span>
       </button>
       <div class="nav-subitems">
+        <button type="button" class="nav-item nav-subitem" onclick="showPage('provedene-masaze',this)" title="Provedené masáže"><span class="icon">🌸</span><span class="nav-text"> Provedené masáže</span></button>
         <button type="button" class="nav-item nav-subitem" onclick="showPage('ucetnictvi',this)" title="Účetnictví"><span class="icon">📈</span><span class="nav-text"> Účetnictví</span></button>
         <button type="button" class="nav-item nav-subitem" onclick="showPage('statistiky',this)" title="Statistiky"><span class="icon">📊</span><span class="nav-text"> Statistiky</span></button>
         <button type="button" class="nav-item nav-subitem" onclick="showPage('cenik',this)" title="Ceník"><span class="icon">💰</span><span class="nav-text"> Ceník</span></button>
@@ -458,10 +459,11 @@ tr:hover td{background:var(--cream)}
         <div class="stat-card stat-card-click karta-pozitivni" onclick="prehledJdiNa('rezervace','vse')"><div class="stat-label">Budoucí rezervace</div><div class="stat-value stat-green" id="stVolne">—</div></div>
         <div class="stat-card stat-card-click karta-info" onclick="prehledJdiNa('poukazy')"><div class="stat-label">Aktivní poukazy</div><div class="stat-value" id="stPoukazy">—</div></div>
       </div>
-      <div class="stats-grid" style="grid-template-columns:repeat(3,1fr)">
+      <div class="stats-grid" style="grid-template-columns:repeat(4,1fr)">
         <div class="stat-card stat-card-click karta-info" onclick="prehledJdiNa('poukazy')"><div class="stat-label">Hodnota aktivních poukazů</div><div class="stat-value" id="stPoukazyHodnota">—</div></div>
         <div class="stat-card stat-card-click karta-pozor" onclick="prehledJdiNa('poukazy','zadosti')"><div class="stat-label">Nové žádosti o poukaz</div><div class="stat-value stat-orange" id="stZadosti">—</div></div>
         <div class="stat-card stat-card-click karta-pozor" onclick="prehledJdiNa('poukazy','expiruji')"><div class="stat-label">Poukazy brzy expirují</div><div class="stat-value stat-orange" id="stPoukazyExpiruji">—</div></div>
+        <div class="stat-card stat-card-click karta-pozor" onclick="prehledJdiNa('rezervace','dokoncena_bez_platby')"><div class="stat-label">⚠️ Dokončené bez platby</div><div class="stat-value stat-orange" id="stDokonceneBezPlatby">—</div></div>
       </div>
       <div class="stats-grid" style="grid-template-columns:1fr">
         <div class="stat-card stat-card-click karta-pozitivni" onclick="prehledJdiNa('ucetnictvi')"><div class="stat-label">Tržby za dokončené služby tento měsíc</div><div class="stat-value stat-green" id="stTrzbyMesic">—</div></div>
@@ -547,6 +549,7 @@ tr:hover td{background:var(--cream)}
             <button type="button" class="pill" onclick="filtrovatRez('cekajici',this)">⏳ Čekající</button>
             <button type="button" class="pill" onclick="filtrovatRez('potvrzena',this)">✅ Potvrzené</button>
             <button type="button" class="pill" onclick="filtrovatRez('dokoncena',this)">🌸 Dokončené</button>
+            <button type="button" class="pill" onclick="filtrovatRez('dokoncena_bez_platby',this)">⚠️ Dokončené bez platby</button>
             <button type="button" class="pill" onclick="filtrovatRez('nedostavila_se',this)">🚫 Nedostavila se</button>
             <button type="button" class="pill" onclick="filtrovatRez('zrusena',this)">❌ Zrušené</button>
           </div>
@@ -832,6 +835,43 @@ tr:hover td{background:var(--cream)}
     </div>
 
     <!-- ÚČETNICTVÍ -->
+    <!-- PROVEDENÉ MASÁŽE -->
+    <div class="page" id="page-provedene-masaze">
+      <div class="page-header">
+        <div class="page-title">🌸 Provedené masáže</div>
+        <div class="table-actions"><button class="refresh-btn" onclick="loadProvedeneMasaze()">↻ Obnovit</button></div>
+      </div>
+      <div class="table-wrap">
+        <div style="padding:14px 16px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <label style="font-size:0.82rem;color:var(--text-light)">Období od</label>
+          <input type="date" id="pmOd" style="border:1px solid var(--tan-light);border-radius:6px;padding:6px 8px">
+          <label style="font-size:0.82rem;color:var(--text-light)">do</label>
+          <input type="date" id="pmDo" style="border:1px solid var(--tan-light);border-radius:6px;padding:6px 8px">
+          <label style="font-size:0.82rem;color:var(--text-light)">Způsob úhrady</label>
+          <select id="pmZpusob" style="border:1px solid var(--tan-light);border-radius:6px;padding:6px 8px">
+            <option value="">Všechny</option>
+            <option value="hotove">Hotově</option>
+            <option value="kartou">Kartou</option>
+            <option value="online">Online</option>
+            <option value="poukaz">Poukaz</option>
+          </select>
+          <button class="btn btn-primary btn-sm" onclick="loadProvedeneMasaze()">Zobrazit</button>
+          <button class="btn btn-outline btn-sm" onclick="document.getElementById('pmOd').value='';document.getElementById('pmDo').value='';document.getElementById('pmZpusob').value='';loadProvedeneMasaze()">Celé období</button>
+        </div>
+      </div>
+      <div id="pmChyba" class="error-msg" style="display:none"></div>
+      <p style="padding:0 4px;font-size:0.78rem;color:var(--text-light)">Spojuje dokončené rezervace a prodej na místě (bez kopírování dat) — jedno místo pro všechny odvedené masáže a jejich úhrady. Tři oddělené součty, nejdou sloučit do jednoho čísla: <strong>hodnota služeb</strong> = co bylo odvedeno (podle data masáže/prodeje); <strong>úhrady k těmto službám</strong> = kolik z toho je zaplaceno, bez ohledu na to, kdy platba přišla; <strong>skutečně přijato</strong> = pohyb hotovosti podle data PLATBY (uplatnění poukazu se tu nepočítá znovu — ty peníze už byly přijaté při prodeji poukazu).</p>
+      <div class="stats-grid" style="grid-template-columns:repeat(3,1fr)">
+        <div class="stat-card"><div class="stat-label">🌸 Hodnota provedených služeb</div><div class="stat-value" id="pmHodnotaSluzeb">—</div></div>
+        <div class="stat-card"><div class="stat-label">💰 Úhrady k těmto službám</div><div class="stat-value stat-green" id="pmUhrazenoKSluzbam">—</div></div>
+        <div class="stat-card"><div class="stat-label">💵 Skutečně přijato (dle data platby)</div><div class="stat-value stat-green" id="pmSkutecnePrijato">—</div></div>
+      </div>
+      <div class="table-wrap">
+        <div class="table-header"><h3>📋 Jednotlivé položky</h3></div>
+        <div id="pmTable"><div class="loading">Načítám...</div></div>
+      </div>
+    </div>
+
     <div class="page" id="page-ucetnictvi">
       <div class="page-header">
         <div class="page-title">📈 Účetnictví</div>
@@ -1268,6 +1308,38 @@ tr:hover td{background:var(--cream)}
   </div>
 </div>
 
+<!-- MODAL: Dokončit masáž (se zápisem platby) -->
+<div class="modal-overlay" id="modalDokonceniMasaze">
+  <div class="modal">
+    <h3>🌸 Dokončit masáž</h3>
+    <div id="dmPopis" style="font-size:0.85rem;color:var(--text-light);margin:-6px 0 12px"></div>
+    <div id="dmMsg"></div>
+    <div class="form-group" id="dmVolbyWrap">
+      <label>Platba</label>
+      <div style="display:flex;flex-direction:column;gap:6px;font-weight:normal">
+        <label style="display:flex;align-items:center;gap:6px;font-weight:normal"><input type="radio" name="dmVolba" id="dmVolbaPlna" value="plna" onchange="aktualizovatDmPlatbaWrap()"> Zaznamenat platbu v plné výši</label>
+        <label style="display:flex;align-items:center;gap:6px;font-weight:normal"><input type="radio" name="dmVolba" id="dmVolbaCastecna" value="castecna" onchange="aktualizovatDmPlatbaWrap()"> Zaznamenat částečnou platbu</label>
+        <label style="display:flex;align-items:center;gap:6px;font-weight:normal"><input type="radio" name="dmVolba" id="dmVolbaBez" value="bez" onchange="aktualizovatDmPlatbaWrap()"> Dokončit bez platby (doplatek zůstane dlužný)</label>
+      </div>
+    </div>
+    <div class="form-group" id="dmPlatbaWrap" style="display:none">
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        <select id="dmZpusob" style="border:1px solid var(--tan-light);border-radius:6px;padding:6px 8px">
+          <option value="hotove">Hotově</option>
+          <option value="kartou">Kartou</option>
+          <option value="online">Online</option>
+        </select>
+        <input type="number" id="dmCastka" min="1" style="width:100px;border:1px solid var(--tan-light);border-radius:6px;padding:6px 8px">
+        <span style="font-size:0.8rem;color:var(--text-light)">Kč</span>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modalDokonceniMasaze')">Zrušit</button>
+      <button class="btn btn-primary" id="dmOdeslatBtn" onclick="dokoncitMasazOdeslat()">Dokončit</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL: Nová / upravovaná rezervace -->
 <div class="modal-overlay" id="modalNovaRezervace">
   <div class="modal">
@@ -1665,6 +1737,7 @@ function showPage(name, el) {
   if (name === 'kupony') loadKupony();
   if (name === 'stromecek') loadStromecek();
   if (name === 'masaze') loadProdejna();
+  if (name === 'provedene-masaze') loadProvedeneMasaze();
   if (name === 'ucetnictvi') loadUcetnictvi();
   if (name === 'statistiky') loadStatistiky();
   if (name === 'retence') loadRetenceNastaveni();
@@ -1827,6 +1900,7 @@ async function loadPrehled() {
     document.getElementById('stZadosti').textContent = d.poukazyZadostiNove;
     document.getElementById('stPoukazyExpiruji').textContent = d.poukazyBrzyExpirujiPocet ?? 0;
     document.getElementById('stTrzbyMesic').textContent = Number(d.trzbyTentoMesic).toLocaleString('cs-CZ') + ' Kč';
+    document.getElementById('stDokonceneBezPlatby').textContent = d.dokonceneBezPlatby ?? 0;
     vykreslitDnesniProgram(d.dnesniProgram || []);
     const rezBadge = document.getElementById('navBadgeRez');
     if (d.rezervaceCekajici > 0) { rezBadge.textContent = d.rezervaceCekajici; rezBadge.style.display = 'inline-block'; }
@@ -1849,7 +1923,7 @@ async function loadPrehled() {
   } catch (e) {
     // Etapa 1: při chybě nesmí zůstat staré finanční částky zobrazené jako
     // aktuální — všechny dlaždice se nahradí jasným varováním, ne tichem.
-    ['stCelkem', 'stCekajici', 'stVolne', 'stPoukazy', 'stPoukazyHodnota', 'stZadosti', 'stPoukazyExpiruji', 'stTrzbyMesic'].forEach(id => {
+    ['stCelkem', 'stCekajici', 'stVolne', 'stPoukazy', 'stPoukazyHodnota', 'stZadosti', 'stPoukazyExpiruji', 'stTrzbyMesic', 'stDokonceneBezPlatby'].forEach(id => {
       const el = document.getElementById(id); if (el) el.textContent = '⚠️';
     });
     document.getElementById('dnesniProgramTable').innerHTML = '<div class="empty">Nelze zobrazit — data se nenačetla.</div>';
@@ -2374,9 +2448,17 @@ async function smazatVyjimku(id) {
   loadVyjimky();
 }
 
+// Krátké varovné odznaky stavu platby pro SEZNAM rezervací (jen u dokončených
+// masáží, kde platba není uzavřená) — plný odznak s částkami je v detailu
+// (viz platbaBadge ve vykreslitDetailRezervace).
+const platbaBadgeKratky = {
+  nezaplaceno: '<span class="badge badge-zruseno" title="Dokončená masáž bez zaznamenané platby">💸 Nezaplaceno</span>',
+  castecne_zaplaceno: '<span class="badge badge-cekajici" title="Dokončená masáž s nedoplatkem">🟡 Nedoplatek</span>'
+};
 function vykreslitRezervace(filtr) {
   let seznam = [...vsechnyRezervace];
-  if (filtr !== 'vse') seznam = seznam.filter(r => r.stav === filtr);
+  if (filtr === 'dokoncena_bez_platby') seznam = seznam.filter(r => r.stav === 'dokoncena' && r.stav_platby !== 'zaplaceno');
+  else if (filtr !== 'vse') seznam = seznam.filter(r => r.stav === filtr);
   if (!seznam.length) { document.getElementById('rezervaceTable').innerHTML = '<div class="empty">Žádné rezervace</div>'; return; }
   const stavBadge = {
     cekajici: '<span class="badge badge-cekajici">⏳ Čeká</span>',
@@ -2401,10 +2483,10 @@ function vykreslitRezervace(filtr) {
       <td>${escapeHtml(r.jmeno)}</td>
       <td>${escapeHtml(r.telefon)}${r.email ? '<br><small>' + escapeHtml(r.email) + '</small>' : ''}</td>
       <td>${escapeHtml(r.masaz)}${r.poukaz_kod ? '<br><small>🎁 ' + escapeHtml(r.poukaz_kod) + '</small>' : ''}${r.poznamka ? '<br><small style="color:var(--text-light)">' + escapeHtml(r.poznamka) + '</small>' : ''}</td>
-      <td>${stavBadge[r.stav] || r.stav}</td>
+      <td>${stavBadge[r.stav] || r.stav}${r.stav === 'dokoncena' && r.stav_platby !== 'zaplaceno' ? '<br>' + (platbaBadgeKratky[r.stav_platby] || platbaBadgeKratky.nezaplaceno) : ''}</td>
       <td style="display:flex;gap:4px;flex-wrap:wrap" onclick="event.stopPropagation()">
         ${r.stav !== 'potvrzena' ? `<button class="btn btn-green btn-sm" onclick="zmenitStavRez(${r.id},'potvrzena')" title="Potvrdit">✅</button>` : ''}
-        ${r.stav !== 'dokoncena' ? `<button class="btn btn-green btn-sm" onclick="zmenitStavRez(${r.id},'dokoncena')" title="Dokončeno">🌸</button>` : ''}
+        ${r.stav !== 'dokoncena' ? `<button class="btn btn-green btn-sm" onclick="otevritDokonceniMasaze(${r.id})" title="Dokončit masáž">🌸</button>` : ''}
         ${r.stav !== 'nedostavila_se' ? `<button class="btn btn-red btn-sm" onclick="zmenitStavRez(${r.id},'nedostavila_se')" title="Nedostavila se">🚫</button>` : ''}
         ${r.stav !== 'zrusena' ? `<button class="btn btn-red btn-sm" onclick="zmenitStavRez(${r.id},'zrusena')" title="Zrušit">❌</button>` : ''}
         <button class="btn btn-red btn-sm" onclick="smazatRezervaci(${r.id})" title="Smazat">🗑️</button>
@@ -2483,6 +2565,7 @@ function vykreslitDetailRezervace(r) {
     </div>
     <div class="form-group"><label>Alergie / preference klientky</label><div id="detailRezAlergiePreference" style="font-size:0.85rem;color:var(--text-light)">Načítám...</div></div>
     <div class="form-group"><label>Stav</label><div>${stavBadge[r.stav] || r.stav}</div></div>
+    ${r.stav === 'dokoncena' && stavPlatby !== 'zaplaceno' ? `<div class="error-msg">⚠️ Masáž je dokončená, ale platba není uzavřená — zbývá doplatit ${zbyva.toLocaleString('cs-CZ')} Kč.</div>` : ''}
     <div class="form-group"><label>Platba</label>
       <div>${platbaBadge[stavPlatby] || stavPlatby}${r.zpusob_platby ? ' · ' + (platbaZpusobLabel[r.zpusob_platby] || r.zpusob_platby) : ''}</div>
       <div style="font-size:0.82rem;color:var(--text-light);margin-top:2px">Cena ${cena.toLocaleString('cs-CZ')} Kč · Uhrazeno ${uhrazeno.toLocaleString('cs-CZ')} Kč · Zbývá ${zbyva.toLocaleString('cs-CZ')} Kč</div>
@@ -2497,7 +2580,7 @@ function vykreslitDetailRezervace(r) {
         </select>
         <input type="number" id="platbaCastka" value="${zbyva}" min="1" max="${zbyva}" style="width:100px;border:1px solid var(--tan-light);border-radius:6px;padding:6px 8px">
         <span style="font-size:0.8rem;color:var(--text-light)">Kč</span>
-        <button class="btn btn-green btn-sm" onclick="zaznamenatPlatbu(${r.id})">💾 Zaznamenat</button>
+        <button class="btn btn-green btn-sm" onclick="zaznamenatPlatbu(${r.id},this)">💾 Zaznamenat</button>
       </div>
     </div>
     ${r.poukaz_kod ? `
@@ -2519,7 +2602,7 @@ function vykreslitDetailRezervace(r) {
         </select>
         <input type="number" id="vratkaCastka" value="${uhrazeno}" min="1" max="${uhrazeno}" style="width:100px;border:1px solid var(--tan-light);border-radius:6px;padding:6px 8px">
         <span style="font-size:0.8rem;color:var(--text-light)">Kč</span>
-        <button class="btn btn-outline btn-sm" onclick="vratitPlatbu(${r.id})">↺ Vrátit</button>
+        <button class="btn btn-outline btn-sm" onclick="vratitPlatbu(${r.id},this)">↺ Vrátit</button>
       </div>
     </div>` : ''}
     <div class="form-group"><label>Historie plateb</label><div id="detailPlatebniHistorie"></div></div>
@@ -2529,7 +2612,7 @@ function vykreslitDetailRezervace(r) {
   document.getElementById('detailRezervaceAkce').innerHTML = `
     ${r.stav !== 'zrusena' ? `<button class="btn btn-outline btn-sm" onclick="closeModal('modalDetailRezervace');otevritUpravitRezervaci(${r.id})">✏️ Upravit</button>` : ''}
     ${r.stav !== 'potvrzena' ? `<button class="btn btn-green btn-sm" onclick="zmenitStavRez(${r.id},'potvrzena');closeModal('modalDetailRezervace')">✅ Potvrdit</button>` : ''}
-    ${r.stav !== 'dokoncena' ? `<button class="btn btn-green btn-sm" onclick="zmenitStavRez(${r.id},'dokoncena');closeModal('modalDetailRezervace')">🌸 Dokončeno</button>` : ''}
+    ${r.stav !== 'dokoncena' ? `<button class="btn btn-green btn-sm" onclick="closeModal('modalDetailRezervace');otevritDokonceniMasaze(${r.id})">🌸 Dokončit masáž</button>` : ''}
     ${r.stav !== 'nedostavila_se' ? `<button class="btn btn-red btn-sm" onclick="zmenitStavRez(${r.id},'nedostavila_se');closeModal('modalDetailRezervace')">🚫 Nedostavila se</button>` : ''}
     ${r.stav !== 'zrusena' ? `<button class="btn btn-red btn-sm" onclick="zmenitStavRez(${r.id},'zrusena');closeModal('modalDetailRezervace')">❌ Zrušit</button>` : ''}
     <button class="btn btn-red btn-sm" onclick="smazatRezervaci(${r.id});closeModal('modalDetailRezervace')">🗑️ Smazat</button>
@@ -2555,15 +2638,36 @@ async function nacistHistoriiPlateb(id) {
     if (el) el.innerHTML = '<span class="error-msg">Historii se nepodařilo načíst.</span>';
   }
 }
-async function zaznamenatPlatbu(id) {
+// Idempotentní klíč pro samostatné tlačítko "Zaznamenat platbu" (mimo dialog
+// "Dokončit masáž") — klíčovaný podle rezervace. Stejná částka+způsob jako u
+// PŘEDCHOZÍHO neúspěšného/nejistého pokusu u téže rezervace = opakování,
+// posílá se STEJNÝ klíč; jakmile se admin+něco změní (jiná částka/způsob),
+// jde o novou samostatnou platbu a vygeneruje se nový klíč.
+const zpIdempotence = {};
+async function zaznamenatPlatbu(id, btn) {
   const castka = Number(document.getElementById('platbaCastka').value);
   const zpusob_platby = document.getElementById('platbaZpusob').value;
   if (!castka || castka <= 0) { alert('Zadejte prosím kladnou částku.'); return; }
-  const res = await adminFetch(API + '/admin/rezervace/' + id + '/platba', { method: 'PATCH', body: JSON.stringify({ castka, zpusob_platby }) });
-  const data = await res.json();
-  if (!res.ok) { alert(data.chyba || 'Zaznamenání platby se nepodařilo.'); return; }
-  await loadRezervace();
-  otevritDetailRezervace(id);
+  if (btn && btn.disabled) return; // dvojité kliknutí/odeslání se ignoruje
+  if (btn) btn.disabled = true;
+  try {
+    const predchozi = zpIdempotence[id];
+    let klic;
+    if (predchozi && predchozi.castka === castka && predchozi.zpusob_platby === zpusob_platby) {
+      klic = predchozi.klic; // stejné zadání jako minule = opakování stejného pokusu
+    } else {
+      klic = crypto.randomUUID(); // jiná částka/metoda = nová, samostatná platba
+      zpIdempotence[id] = { klic, castka, zpusob_platby };
+    }
+    const res = await adminFetch(API + '/admin/rezervace/' + id + '/platba', { method: 'PATCH', body: JSON.stringify({ castka, zpusob_platby, idempotency_klic: klic }) });
+    const data = await res.json();
+    if (!res.ok) { alert(data.chyba || 'Zaznamenání platby se nepodařilo.'); return; }
+    delete zpIdempotence[id]; // úspěch — příští zápis k téhle rezervaci bude nová platba s novým klíčem
+    await loadRezervace();
+    otevritDetailRezervace(id);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 async function ulozitPoznamkuRezervace(id) {
   const poznamka = document.getElementById('detailRezPoznamka').value;
@@ -2585,7 +2689,15 @@ async function uplatnitPoukazNaRezervaci(rezervaceId, kod) {
   await loadRezervace();
   otevritDetailRezervace(rezervaceId);
 }
-async function vratitPlatbu(id) {
+// Idempotentní klíč pro vratky — stejný princip jako zpIdempotence u
+// "Zaznamenat platbu" (viz tam): stejná částka+způsob jako u PŘEDCHOZÍHO
+// nejistého pokusu u téže rezervace = opakování (stejný klíč), jinak nová
+// samostatná vratka (nový klíč). Bez tohohle by dvojí odeslání (dvojklik,
+// ztracená odpověď) mohlo klientce vrátit peníze dvakrát — kontrola "nelze
+// vrátit víc, než je uhrazeno" dvě menší vratky nezachytí stejně, jako
+// nezachytávala dvě menší platby (viz idempotency_klic u zaznamenatPlatbu).
+const vratkaIdempotence = {};
+async function vratitPlatbu(id, btn) {
   const castka = Number(document.getElementById('vratkaCastka').value);
   const zpusob_platby = document.getElementById('vratkaZpusob').value;
   if (!castka || castka <= 0) { alert('Zadejte prosím kladnou částku.'); return; }
@@ -2593,12 +2705,27 @@ async function vratitPlatbu(id) {
     ? 'Vystavit klientce poukaz na ' + castka.toLocaleString('cs-CZ') + ' Kč místo výplaty? Žádné peníze se nevyplatí.'
     : 'Vrátit klientce ' + castka.toLocaleString('cs-CZ') + ' Kč? Platba i vratka zůstanou v historii.';
   if (!confirm(potvrzeniText)) return;
-  const res = await adminFetch(API + '/admin/rezervace/' + id + '/platba', { method: 'PATCH', body: JSON.stringify({ castka, zpusob_platby, typ: 'vratka' }) });
-  const data = await res.json();
-  if (!res.ok) { alert(data.chyba || 'Vrácení platby se nepodařilo.'); return; }
-  if (data.poukaz) { alert('Vystaven poukaz ' + data.poukaz.kod + ' na ' + castka.toLocaleString('cs-CZ') + ' Kč — dej ho prosím klientce.'); loadPoukazy(); }
-  await loadRezervace();
-  otevritDetailRezervace(id);
+  if (btn && btn.disabled) return; // dvojité kliknutí/odeslání se ignoruje
+  if (btn) btn.disabled = true;
+  try {
+    const predchozi = vratkaIdempotence[id];
+    let klic;
+    if (predchozi && predchozi.castka === castka && predchozi.zpusob_platby === zpusob_platby) {
+      klic = predchozi.klic; // stejné zadání jako minule = opakování stejného pokusu
+    } else {
+      klic = crypto.randomUUID(); // jiná částka/metoda = nová, samostatná vratka
+      vratkaIdempotence[id] = { klic, castka, zpusob_platby };
+    }
+    const res = await adminFetch(API + '/admin/rezervace/' + id + '/platba', { method: 'PATCH', body: JSON.stringify({ castka, zpusob_platby, typ: 'vratka', idempotency_klic: klic }) });
+    const data = await res.json();
+    if (!res.ok) { alert(data.chyba || 'Vrácení platby se nepodařilo.'); return; }
+    delete vratkaIdempotence[id]; // úspěch — příští vratka k téhle rezervaci bude nová, s novým klíčem
+    if (data.poukaz) { alert('Vystaven poukaz ' + data.poukaz.kod + ' na ' + castka.toLocaleString('cs-CZ') + ' Kč — dej ho prosím klientce.'); loadPoukazy(); }
+    await loadRezervace();
+    otevritDetailRezervace(id);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 function filtrovatRez(f, el) {
   document.querySelectorAll('#page-rezervace .table-wrap:last-child .pill').forEach(p => p.classList.remove('active'));
@@ -2611,6 +2738,121 @@ async function zmenitStavRez(id, stav) {
   try { const data = await res.json(); if (data.promoZprava) alert(data.promoZprava); } catch (e) {}
   loadRezervace();
 }
+
+// ── Dokončit masáž (se zápisem platby) ──────────────────────────────────────
+// Na rozdíl od ostatních přechodů stavu (zmenitStavRez výš) přechod na
+// "dokoncena" NIKDY nejde přímo — dokončení masáže sama o sobě nic neříká o
+// platbě (viz PATCH /rezervace/:id/stav na serveru, který mění jen stav).
+// Proto se tu nejdřív zeptá na platbu a teprve POTOM, v samostatném kroku,
+// změní stav. Pořadí (platba → stav) je záměrné: když platba uspěje a až
+// POTOM selže zápis stavu, peníze jsou bezpečně zapsané a jde jen zopakovat
+// krok 2; v obráceném pořadí by hrozilo tiché "dokončeno, ale nezaplaceno".
+let dmId = null, dmPlatbaZapsana = false, dmIdempotencyKlic = null;
+function otevritDokonceniMasaze(id) {
+  const r = vsechnyRezervace.find(x => x.id === id);
+  if (!r) return;
+  dmId = id;
+  dmPlatbaZapsana = false;
+  // Nové otevření dialogu = nový, samostatný pokus o platbu → nový klíč (viz
+  // dokoncitMasazOdeslat, kde se vygeneruje při prvním odeslání a PŘI
+  // OPAKOVÁNÍ PO CHYBĚ se stejný klíč záměrně nemění).
+  dmIdempotencyKlic = null;
+  const cena = Number(r.cena) || 0;
+  const uhrazeno = Number(r.uhrazeno) || 0;
+  const zbyva = Math.max(0, cena - uhrazeno);
+  document.getElementById('dmPopis').textContent =
+    'Cena po slevě ' + cena.toLocaleString('cs-CZ') + ' Kč · Dosavadní úhrady ' + uhrazeno.toLocaleString('cs-CZ') + ' Kč · Zbývá doplatit ' + zbyva.toLocaleString('cs-CZ') + ' Kč';
+  document.getElementById('dmMsg').innerHTML = '';
+  const btn = document.getElementById('dmOdeslatBtn');
+  btn.disabled = false;
+  btn.textContent = 'Dokončit';
+  const volbyWrap = document.getElementById('dmVolbyWrap');
+  if (zbyva <= 0) {
+    // Nic nezbývá doplatit — "potvrzení, že je už zaplaceno" je tu jen
+    // informativní stav, žádná volba platby se nenabízí.
+    volbyWrap.style.display = 'none';
+    document.getElementById('dmPlatbaWrap').style.display = 'none';
+  } else {
+    volbyWrap.style.display = '';
+    document.getElementById('dmVolbaPlna').checked = true;
+    aktualizovatDmPlatbaWrap();
+  }
+  openModal('modalDokonceniMasaze');
+}
+function aktualizovatDmPlatbaWrap() {
+  const r = vsechnyRezervace.find(x => x.id === dmId);
+  const zbyva = r ? Math.max(0, (Number(r.cena) || 0) - (Number(r.uhrazeno) || 0)) : 0;
+  const volba = document.querySelector('input[name="dmVolba"]:checked')?.value;
+  const platbaWrap = document.getElementById('dmPlatbaWrap');
+  const castkaEl = document.getElementById('dmCastka');
+  if (volba === 'plna' || volba === 'castecna') {
+    platbaWrap.style.display = '';
+    castkaEl.max = zbyva;
+    castkaEl.readOnly = (volba === 'plna');
+    castkaEl.value = volba === 'plna' ? zbyva : Math.min(zbyva, Math.max(1, Math.round(zbyva / 2)));
+  } else {
+    platbaWrap.style.display = 'none';
+  }
+}
+async function dokoncitMasazOdeslat() {
+  const btn = document.getElementById('dmOdeslatBtn');
+  const msg = document.getElementById('dmMsg');
+  if (btn.disabled) return; // dvojité kliknutí/odeslání se ignoruje
+  btn.disabled = true;
+  try {
+    const r = vsechnyRezervace.find(x => x.id === dmId);
+    if (!r) { msg.innerHTML = '<div class="error-msg">Rezervace nebyla nalezena — zkuste seznam obnovit.</div>'; btn.disabled = false; return; }
+    const cena = Number(r.cena) || 0;
+    const zbyva = Math.max(0, cena - (Number(r.uhrazeno) || 0));
+    const volba = zbyva > 0 ? document.querySelector('input[name="dmVolba"]:checked')?.value : null;
+
+    // Krok 1: platba — jen pokud ještě NEBYLA v TÉTO relaci dialogu úspěšně
+    // zapsaná (při opakování po chybě kroku 2 se už neopakuje). Server navíc
+    // při zápisu znovu ověří aktuální zbývající dluh ze zamčeného řádku
+    // rezervace (viz PATCH /rezervace/:id/platba), takže ani zcela nový
+    // pokus nemůže zaplatit víc, než doopravdy zbývá.
+    if (!dmPlatbaZapsana && (volba === 'plna' || volba === 'castecna')) {
+      const castka = Number(document.getElementById('dmCastka').value);
+      if (!castka || castka <= 0) { msg.innerHTML = '<div class="error-msg">Zadejte prosím kladnou částku.</div>'; btn.disabled = false; return; }
+      if (castka > zbyva) { msg.innerHTML = '<div class="error-msg">Částka převyšuje zbývající dluh (zbývá ' + zbyva.toLocaleString('cs-CZ') + ' Kč).</div>'; btn.disabled = false; return; }
+      const zpusob_platby = document.getElementById('dmZpusob').value;
+      // Klíč se generuje JEDNOU za pokus a při opakování (po chybě kroku 2
+      // nebo po chybě spojení v tomhle kroku) se posílá STEJNÝ — server tak
+      // pozná skutečné opakování stejného požadavku a druhou platbu nezapíše
+      // (viz zkontrolovatIdempotentniPlatbu na serveru).
+      if (!dmIdempotencyKlic) dmIdempotencyKlic = crypto.randomUUID();
+      const resPlatba = await adminFetch(API + '/admin/rezervace/' + dmId + '/platba', { method: 'PATCH', body: JSON.stringify({ castka, zpusob_platby, idempotency_klic: dmIdempotencyKlic }) });
+      const dataPlatba = await resPlatba.json();
+      if (!resPlatba.ok) { msg.innerHTML = '<div class="error-msg">' + escapeHtml(dataPlatba.chyba || 'Zaznamenání platby se nepodařilo.') + '</div>'; btn.disabled = false; return; }
+      dmPlatbaZapsana = true;
+      // Lokální kopie v paměti se rovnou aktualizuje, ať případné opakování
+      // (po chybě kroku 2, bez zavření dialogu) počítá se SPRÁVNÝM novým
+      // stavem, ne se starým — i kdyby loadRezervace() ještě neproběhlo.
+      if (dataPlatba.rezervace) Object.assign(r, dataPlatba.rezervace);
+    }
+
+    // Krok 2: změna stavu na "dokoncena".
+    const resStav = await adminFetch(API + '/admin/rezervace/' + dmId + '/stav', { method: 'PATCH', body: JSON.stringify({ stav: 'dokoncena' }) });
+    let dataStav = {};
+    try { dataStav = await resStav.json(); } catch (e) {}
+    if (!resStav.ok) {
+      msg.innerHTML = '<div class="error-msg">⚠️ ' + (dmPlatbaZapsana ? 'Platba už BYLA úspěšně zaznamenána. ' : '') +
+        'Dokončení masáže se nepodařilo uložit (' + escapeHtml(dataStav.chyba || 'neznámá chyba') + '). Zkuste to prosím znovu — platba se při opakování znovu nezapíše.</div>';
+      btn.textContent = 'Zkusit dokončit znovu';
+      btn.disabled = false;
+      return;
+    }
+    if (dataStav.promoZprava) alert(dataStav.promoZprava);
+    closeModal('modalDokonceniMasaze');
+    await loadRezervace();
+  } catch (e) {
+    msg.innerHTML = '<div class="error-msg">⚠️ ' + (dmPlatbaZapsana ? 'Platba už BYLA úspěšně zaznamenána. ' : '') +
+      'Nejde se připojit k serveru. Zkuste to prosím znovu — platba se při opakování znovu nezapíše.</div>';
+    btn.textContent = 'Zkusit dokončit znovu';
+    btn.disabled = false;
+  }
+}
+
 async function smazatRezervaci(id) {
   if (!confirm('Trvale smazat tuto rezervaci?')) return;
   await adminFetch(API + '/admin/rezervace/' + id, { method: 'DELETE' });
@@ -4512,6 +4754,65 @@ async function vratitVychoziObrazekKuponu() {
   await adminFetch(API + '/admin/nastaveni/kupon_obrazek', { method: 'DELETE' });
   document.getElementById('kgNahledObrazku').src = 'assets/kupon.jpg';
   document.getElementById('kgObrazekMsg').innerHTML = '';
+}
+
+// ── PROVEDENÉ MASÁŽE — jednotný, READ-ONLY přehled dokončených rezervací +
+// prodejny (viz GET /api/admin/provedene-masaze pro definici tří oddělených
+// součtů a rozpisu plateb podle metody).
+let posledniProvedeneMasaze = [];
+function popisRozpisuPlatby(p) {
+  const metody = Object.keys(p.rozpisPlatby || {});
+  if (!metody.length) return p.stav_platby === 'zaplaceno' ? '—' : '💸 Nezaplaceno';
+  const kusy = metody.map(z => (platbaZpusobLabel[z] || z) + ' ' + Number(p.rozpisPlatby[z]).toLocaleString('cs-CZ') + ' Kč');
+  return metody.length > 1 ? '🔀 Kombinovaná platba: ' + kusy.join(' + ') : kusy[0];
+}
+function vykreslitProvedeneMasaze(polozky) {
+  const el = document.getElementById('pmTable');
+  if (!polozky.length) { el.innerHTML = '<div class="empty">Žádné položky v tomto období.</div>'; return; }
+  const pmPlatbaBadge = {
+    nezaplaceno: '<span class="badge badge-zruseno">💸 Nezaplaceno</span>',
+    castecne_zaplaceno: '<span class="badge badge-cekajici">🟡 Částečně</span>',
+    zaplaceno: '<span class="badge badge-ok">✅ Zaplaceno</span>'
+  };
+  el.innerHTML = `<table><thead><tr><th>Datum</th><th>Zdroj</th><th>Jméno</th><th>Služba</th><th>Cena</th><th>Platba</th><th>Zbývá</th><th>Stav</th></tr></thead>
+    <tbody>${polozky.map(p => `<tr class="${p.zdroj === 'rezervace' ? 'row-clickable' : ''}" ${p.zdroj === 'rezervace' ? `onclick="otevritDetailRezervace(${p.id})"` : ''}>
+      <td>${new Date(p.datum).toLocaleDateString('cs-CZ')}${p.cas ? ' ' + String(p.cas).slice(0, 5) : ''}</td>
+      <td>${p.zdroj === 'rezervace' ? '📅 Rezervace' : '🧖 Prodejna'}</td>
+      <td>${p.jmeno ? escapeHtml(p.jmeno) : '—'}</td>
+      <td>${escapeHtml(p.nazev)}</td>
+      <td>${Number(p.cena).toLocaleString('cs-CZ')} Kč</td>
+      <td>${popisRozpisuPlatby(p)}</td>
+      <td>${p.zbytek > 0 ? Number(p.zbytek).toLocaleString('cs-CZ') + ' Kč' : '—'}</td>
+      <td>${pmPlatbaBadge[p.stav_platby] || p.stav_platby}</td>
+    </tr>`).join('')}</tbody></table>`;
+}
+async function loadProvedeneMasaze() {
+  const chybaEl = document.getElementById('pmChyba');
+  if (chybaEl) chybaEl.style.display = 'none';
+  const od = document.getElementById('pmOd').value;
+  const doD = document.getElementById('pmDo').value;
+  const zpusobPlatby = document.getElementById('pmZpusob').value;
+  const params = new URLSearchParams();
+  if (od) params.set('od', od);
+  if (doD) params.set('do', doD);
+  if (zpusobPlatby) params.set('zpusobPlatby', zpusobPlatby);
+  try {
+    const res = await adminFetch(API + '/admin/provedene-masaze?' + params.toString());
+    if (!res.ok) throw new Error(await chybaZOdpovedi(res, 'Přehled provedených masáží se nepodařilo načíst.'));
+    const d = await res.json();
+    posledniProvedeneMasaze = d.polozky || [];
+    document.getElementById('pmHodnotaSluzeb').textContent = Number(d.souhrn.hodnotaSluzeb).toLocaleString('cs-CZ') + ' Kč';
+    document.getElementById('pmUhrazenoKSluzbam').textContent = Number(d.souhrn.uhrazenoKSluzbam).toLocaleString('cs-CZ') + ' Kč';
+    document.getElementById('pmSkutecnePrijato').textContent = Number(d.souhrn.skutecnePrijato).toLocaleString('cs-CZ') + ' Kč';
+    vykreslitProvedeneMasaze(posledniProvedeneMasaze);
+  } catch (e) {
+    ['pmHodnotaSluzeb', 'pmUhrazenoKSluzbam', 'pmSkutecnePrijato'].forEach(id => { document.getElementById(id).textContent = '⚠️'; });
+    document.getElementById('pmTable').innerHTML = '<div class="empty">Nelze zobrazit — data se nenačetla.</div>';
+    if (chybaEl) {
+      chybaEl.innerHTML = `⚠️ ${escapeHtml(e.message || 'Přehled se nepodařilo načíst.')} <button class="btn btn-outline btn-sm" onclick="loadProvedeneMasaze()">🔄 Zkusit znovu</button>`;
+      chybaEl.style.display = 'block';
+    }
+  }
 }
 
 // ── ÚČETNICTVÍ (Fáze 3B) — 4 oddělené přehledy, ať jedno číslo nemusí
