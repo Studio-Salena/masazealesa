@@ -124,8 +124,10 @@ async function main() {
     let r4 = await vytvorRezervaci(polozka.id, '04');
     uklidRezervace.push(r4.id);
     {
+      // Etapa 2 — poukaz se tu hned uplatňuje na rezervaci, musí tedy být
+      // zaplacený, ne čekající na platbu.
       const poukazRes = await adminFetch('/admin/poukazy', {
-        method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-PLATBY-POUKAZ (smazat)' })
+        method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-PLATBY-POUKAZ (smazat)', zaplaceno: true, zpusob_platby: 'hotove' })
       });
       const poukazData = await poukazRes.json();
       assert.equal(poukazRes.status, 200, JSON.stringify(poukazData));
@@ -153,8 +155,9 @@ async function main() {
     {
       // Poukaz s hodnotou nižší než cena masáže (typ 500 Kč, pokud existuje) — jinak
       // částečné uplatnění vlastní částkou nižší než hodnota poukazu.
+      // Etapa 2 — hned se uplatňuje, musí být zaplacený.
       const poukazRes = await adminFetch('/admin/poukazy', {
-        method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-PLATBY-DOPLATEK (smazat)' })
+        method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-PLATBY-DOPLATEK (smazat)', zaplaceno: true, zpusob_platby: 'hotove' })
       });
       const poukazData = await poukazRes.json();
       assert.equal(poukazRes.status, 200, JSON.stringify(poukazData));

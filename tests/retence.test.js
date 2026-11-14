@@ -66,8 +66,10 @@ async function ziskatRezervaci(id) {
   return seznam.find(r => r.id === id);
 }
 
-async function vytvorPoukaz(cenikId, telefon, jmeno = 'TEST-RETENCE-POUKAZ (smazat)') {
-  const res = await adminFetch('/admin/poukazy', { method: 'POST', body: JSON.stringify({ cenik_id: cenikId, kupujici_jmeno: jmeno, kupujici_telefon: telefon, pro_koho: 'TEST-OBDAROVANA (smazat)' }) });
+// Etapa 2 — zaplaceno=false je výchozí; volající, co poukaz skutečně
+// uplatňuje (viz níž), si vyžádá zaplaceno=true explicitně.
+async function vytvorPoukaz(cenikId, telefon, jmeno = 'TEST-RETENCE-POUKAZ (smazat)', zaplaceno = false) {
+  const res = await adminFetch('/admin/poukazy', { method: 'POST', body: JSON.stringify({ cenik_id: cenikId, kupujici_jmeno: jmeno, kupujici_telefon: telefon, pro_koho: 'TEST-OBDAROVANA (smazat)', zaplaceno, zpusob_platby: zaplaceno ? 'hotove' : undefined }) });
   const data = await res.json();
   assert.equal(res.status, 200, 'Vytvoření testovacího poukazu selhalo: ' + JSON.stringify(data));
   uklidPoukazy.push(data.poukaz.id);
@@ -90,7 +92,7 @@ async function vytvorExpirovanyPoukaz(mesicuZpet, telefon, jmeno = 'TEST-RETENCE
   const typ = await typRes.json();
   assert.equal(typRes.status, 200, JSON.stringify(typ));
   uklidTypy.push(typ.typ.id);
-  const res = await adminFetch('/admin/poukazy', { method: 'POST', body: JSON.stringify({ poukaz_typ_id: typ.typ.id, kupujici_jmeno: jmeno, kupujici_telefon: telefon, pro_koho: 'TEST-OBDAROVANA (smazat)' }) });
+  const res = await adminFetch('/admin/poukazy', { method: 'POST', body: JSON.stringify({ poukaz_typ_id: typ.typ.id, kupujici_jmeno: jmeno, kupujici_telefon: telefon, pro_koho: 'TEST-OBDAROVANA (smazat)', zaplaceno: true, zpusob_platby: 'hotove' }) });
   const data = await res.json();
   assert.equal(res.status, 200, JSON.stringify(data));
   uklidPoukazy.push(data.poukaz.id);
@@ -212,8 +214,9 @@ async function main() {
     }
     {
       // stejné chování i přes skutečné vyčerpání (uplatnit), ne jen ruční PATCH
+      // (Etapa 2 — zaplaceno:true, jinak by uplatnění blokovala čekající platba)
       const telefon = '6997103';
-      const p = await vytvorPoukaz(polozka.id, telefon);
+      const p = await vytvorPoukaz(polozka.id, telefon, undefined, true);
       const u = await adminFetch(`/admin/poukazy/${p.id}/uplatnit`, { method: 'POST', body: JSON.stringify({ castka: Number(p.hodnota) }) }).then(r => r.json());
       assert.equal(u.poukaz.stav, 'pouzity');
       assert.ok(u.poukaz.uzavreno_kdy, 'plné vyčerpání (uplatnit) musí nastavit uzavreno_kdy');
@@ -221,7 +224,7 @@ async function main() {
     }
     {
       const telefon = '6997104';
-      const p = await vytvorPoukaz(polozka.id, telefon);
+      const p = await vytvorPoukaz(polozka.id, telefon, undefined, true); // Etapa 2 — hned se uplatňuje
       const castecna = Math.max(1, Math.floor(Number(p.hodnota) / 3));
       const u = await adminFetch(`/admin/poukazy/${p.id}/uplatnit`, { method: 'POST', body: JSON.stringify({ castka: castecna }) }).then(r => r.json());
       assert.equal(u.poukaz.stav, 'castecne_vyuzity');

@@ -12,8 +12,11 @@
 
 const assert = require('node:assert/strict');
 
-const { ziskatTestApiBase } = require('./env-guard');
+const { ziskatTestApiBase, ziskatTestDatabaseUrl } = require('./env-guard');
 const API = ziskatTestApiBase(); // Fáze 7C.6 — fail-closed, žádný produkční fallback
+// Test 11 níž čte auditní historii přímo z DB (žádný dedikovaný GET endpoint
+// neexistuje) — DATABASE_URL se ověřuje HNED, na úrovni modulu, fail-closed.
+const DB_URL = ziskatTestDatabaseUrl();
 const HESLO = process.env.ADMIN_HESLO;
 
 if (!HESLO) {
@@ -214,13 +217,11 @@ async function main() {
     // ================= 11) Zachování auditní historie =================
     // Žádný dedikovaný "GET auditní historie" endpoint neexistuje (klientky_
     // udalosti je čistě interní log, stejně jako retence_udalosti) — ověřuje
-    // se tedy přímo v DB, výhradně READ-ONLY (SELECT), přes stejné DATABASE_URL
-    // (z .env.test), jaké používá i testovaný server — nikdy žádný zápis.
-    if (!process.env.DATABASE_URL) {
-      console.log('⚠️  11) přeskočeno — DATABASE_URL není v prostředí nastavené (audit se neověřil přímo v DB)');
-    } else {
+    // se tedy přímo v DB, výhradně READ-ONLY (SELECT), přes DB_URL ověřené
+    // fail-closed hned při načtení modulu (viz výš) — nikdy žádný zápis.
+    {
       const { Pool } = require('pg');
-      const dbPool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+      const dbPool = new Pool({ connectionString: DB_URL, ssl: { rejectUnauthorized: false } });
       try {
         const { rows } = await dbPool.query(
           `SELECT udalost, pole FROM klientky_udalosti WHERE klientka_id = $1 AND udalost = 'upraveno_kontakt' ORDER BY id`,

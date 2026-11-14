@@ -20,8 +20,12 @@
 
 const assert = require('node:assert/strict');
 
-const { ziskatTestApiBase } = require('./env-guard');
+const { ziskatTestApiBase, ziskatTestDatabaseUrl } = require('./env-guard');
 const API = ziskatTestApiBase();
+// Etapa 2 — scénář B níž simuluje zrušení poukazu přímým zápisem do DB
+// (běžné PATCH .../stav teď takové zrušení odmítá) — DATABASE_URL se proto
+// ověřuje HNED, na úrovni modulu (stejně jako API výš), fail-closed.
+const DB_URL = ziskatTestDatabaseUrl();
 const HESLO = process.env.ADMIN_HESLO;
 
 if (!HESLO) {
@@ -752,7 +756,9 @@ async function main() {
     return data.typ;
   }
   async function vydatPoukazTypem(typId) {
-    const r = await adminFetch('/admin/poukazy', { method: 'POST', body: JSON.stringify({ poukaz_typ_id: typId }) });
+    // Etapa 2 — všechna volání tohoto helperu v souboru poukaz hned uplatňují
+    // na rezervaci, musí tedy být zaplacený.
+    const r = await adminFetch('/admin/poukazy', { method: 'POST', body: JSON.stringify({ poukaz_typ_id: typId, zaplaceno: true, zpusob_platby: 'hotove' }) });
     const data = await r.json();
     assert.equal(r.status, 200, 'vydání poukazu podle typu selhalo: ' + JSON.stringify(data));
     uklidPoukazy.push(data.poukaz.id);
@@ -842,20 +848,35 @@ async function main() {
     const poPlatbe = await stavPoukazu(poukaz.id);
     assert.equal(Number(poPlatbe.zustatek), 700, 'B) po dalším čerpání 300 z 1000 musí zůstatek být 700');
 
-    const zruseni = await adminFetch(`/admin/poukazy/${poukaz.id}/stav`, { method: 'PATCH', body: JSON.stringify({ stav: 'zruseny' }) });
-    assert.equal(zruseni.status, 200, 'B) zrušení poukazu selhalo');
-    const poZruseni = await stavPoukazu(poukaz.id);
-    assert.equal(poZruseni.stav, 'zruseny', 'B) poukaz musí být po PATCH .../stav zrušený');
-    const uzavrenoKdyPredSmazanim = poZruseni.uzavreno_kdy;
-    assert.ok(uzavrenoKdyPredSmazanim, 'B) zrušení musí nastavit uzavreno_kdy');
+    // Etapa 2 (audit financních toků) — tenhle poukaz je "zaplaceno" se
+    // zůstatkem > 0, takže běžné PATCH .../stav {stav:'zruseny'} teď server
+    // záměrně odmítá (vyřešení peněz musí proběhnout první — viz Etapa 2).
+    // Scénář B ale testuje NÁSLEDEK zrušení (navrácení zůstatku při smazání
+    // rezervace), ne samotnou akci zrušení — ta se tu simuluje přímým
+    // zápisem do TEST DB přes DB_URL ověřené fail-closed hned při načtení
+    // modulu (viz výš), stejně jako už existující historický-poukaz test
+    // v tests/poukazy.test.js.
+    {
+      const { Pool } = require('pg');
+      const dbPoolB = new Pool({ connectionString: DB_URL, ssl: { rejectUnauthorized: false } });
+      try {
+        await dbPoolB.query(`UPDATE poukazy SET stav = 'zruseny', uzavreno_kdy = now() WHERE id = $1`, [poukaz.id]);
+      } finally {
+        await dbPoolB.end();
+      }
+      const poZruseni = await stavPoukazu(poukaz.id);
+      assert.equal(poZruseni.stav, 'zruseny', 'B) poukaz musí být po simulovaném zrušení "zruseny"');
+      const uzavrenoKdyPredSmazanim = poZruseni.uzavreno_kdy;
+      assert.ok(uzavrenoKdyPredSmazanim, 'B) zrušení musí nastavit uzavreno_kdy');
 
-    const smazani = await smazatRezervaciAdmin(rezId);
-    assert.equal(smazani.status, 200, 'B) smazání rezervace selhalo');
-    const poSmazani = await stavPoukazu(poukaz.id);
-    assert.equal(Number(poSmazani.zustatek), 1000, 'B) smazání musí vrátit jen těch 300, co čerpala tato rezervace (700+300=1000), ne víc');
-    assert.equal(poSmazani.stav, 'zruseny', 'B) zrušený poukaz musí po navrácení zůstatku zůstat zrušený');
-    assert.equal(poSmazani.uzavreno_kdy, uzavrenoKdyPredSmazanim, 'B) navrácení zůstatku nesmí měnit uzavreno_kdy u zrušeného poukazu');
-    ok('B) smazání částečně poukazem uhrazené rezervace vrátí jen tu část zůstatku, kterou čerpala ona sama; zrušený poukaz zůstává zrušený beze změny uzavreno_kdy');
+      const smazani = await smazatRezervaciAdmin(rezId);
+      assert.equal(smazani.status, 200, 'B) smazání rezervace selhalo');
+      const poSmazani = await stavPoukazu(poukaz.id);
+      assert.equal(Number(poSmazani.zustatek), 1000, 'B) smazání musí vrátit jen těch 300, co čerpala tato rezervace (700+300=1000), ne víc');
+      assert.equal(poSmazani.stav, 'zruseny', 'B) zrušený poukaz musí po navrácení zůstatku zůstat zrušený');
+      assert.equal(poSmazani.uzavreno_kdy, uzavrenoKdyPredSmazanim, 'B) navrácení zůstatku nesmí měnit uzavreno_kdy u zrušeného poukazu');
+      ok('B) smazání částečně poukazem uhrazené rezervace vrátí jen tu část zůstatku, kterou čerpala ona sama; zrušený poukaz zůstává zrušený beze změny uzavreno_kdy');
+    }
 
     // Úklid Rychlého prodeje vytvořeného jen pro tento test (nezávislý na
     // zbytku testovaného chování — mazání poukazu by ho stejně odmítlo,

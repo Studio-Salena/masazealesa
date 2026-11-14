@@ -169,10 +169,20 @@ async function main() {
     assert.equal(s.status, 200, JSON.stringify(s.data));
     uklidPoukazy.push(s.data.poukaz.id);
     assert.equal(Number(s.data.poukaz.hodnota), 1000); assert.equal(Number(s.data.poukaz.zustatek), 1000); assert.equal(Number(s.data.poukaz.sleva_kc), 100);
-    const po = await adminJson('/admin/ucetnictvi');
-    assert.equal(po.data.prodejPoukazu.celkem - pred.data.prodejPoukazu.celkem, 900, 'prodej poukazu se má počítat jako hodnota − sleva');
+    // Etapa 2 — "Vyřídit" NENÍ "zaplaceno" (zákaznice platí až při vyzvednutí).
+    // Dokud platba není potvrzena, poukaz se do "Prodeje poukazů" nepočítá.
+    assert.equal(s.data.poukaz.stav_uhrady, 'nezaplaceno', 'Vyřízená žádost musí dát poukaz čekající na platbu, ne rovnou zaplacený');
+    const poPredPlatbou = await adminJson('/admin/ucetnictvi');
+    assert.equal(poPredPlatbou.data.prodejPoukazu.celkem - pred.data.prodejPoukazu.celkem, 0, 'nezaplacený poukaz se ještě nemá počítat do prodeje poukazů');
+    ok('S5a) vyřízená žádost sama o sobě ještě nic nezapočítá do účetnictví (čeká na platbu)');
+
+    const potvrzeni = await adminJson('/admin/poukazy/' + s.data.poukaz.id + '/potvrdit-platbu', { method: 'PATCH', body: JSON.stringify({ zpusob_platby: 'hotove' }) });
+    assert.equal(potvrzeni.status, 200, JSON.stringify(potvrzeni.data));
+    assert.equal(potvrzeni.data.poukaz.stav_uhrady, 'zaplaceno');
+    const poZaplaceni = await adminJson('/admin/ucetnictvi');
+    assert.equal(poZaplaceni.data.prodejPoukazu.celkem - pred.data.prodejPoukazu.celkem, 900, 'po potvrzení platby se prodej poukazu počítá jako hodnota − sleva');
     druhaZadost = z.data.zadost;
-    ok('S5) poukaz se slevou: zůstatek 1000 Kč, v účetnictví prodej 900 Kč');
+    ok('S5b) po potvrzení platby: zůstatek 1000 Kč, v účetnictví prodej 900 Kč');
   }
 
   // S6 — strop 2 je vyčerpaný (rezervace + poukaz) → další VYCERPANO, stav "vycerpano"

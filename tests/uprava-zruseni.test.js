@@ -317,7 +317,8 @@ async function main() {
     {
       const r = await vytvorRezervaci(polozka.id, '44', 30 + Math.floor(Math.random() * 200));
       uklidRezervace.push(r.id);
-      const poukazRes = await adminFetch('/admin/poukazy', { method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-UPRAVA-POUKAZ (smazat)' }) }).then(x => x.json());
+      // Etapa 2 — hned se uplatňuje na rezervaci, musí být zaplacený.
+      const poukazRes = await adminFetch('/admin/poukazy', { method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-UPRAVA-POUKAZ (smazat)', zaplaceno: true, zpusob_platby: 'hotove' }) }).then(x => x.json());
       uklidPoukazy.push(poukazRes.poukaz.id);
       const castPoukazem = Math.max(1, Math.floor(Number(r.cena) * 0.5));
       await adminFetch(`/admin/poukazy/${poukazRes.poukaz.id}/uplatnit`, { method: 'POST', body: JSON.stringify({ castka: castPoukazem, rezervace_id: r.id }) });

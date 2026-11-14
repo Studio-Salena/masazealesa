@@ -43,6 +43,22 @@ function ziskatTestDatabaseUrl() {
     console.error('DATABASE_URL míří na PRODUKČNÍ databázi (aws-1-eu-west-1.pooler.supabase.com) — test se odmítá spustit.');
     process.exit(1);
   }
+  // Formální kontrola PŘED jakýmkoli pokusem o připojení — bez tohohle by
+  // zcela nesmyslný řetězec (typo, prázdný .env řádek apod.) propadl až na
+  // samotné "pg", kde by selhal později a méně jasně (např. síťová chyba
+  // DNS vyhledávání). Nejde o kontrolu "je to TEST databáze" (tu dělá regex
+  // výš) — jen o to, že se vůbec jedná o syntakticky platnou URL připojení.
+  let url;
+  try {
+    url = new URL(cista);
+  } catch {
+    console.error('DATABASE_URL není platná URL — test se odmítá spustit (zkontrolujte .env.test).');
+    process.exit(1);
+  }
+  if (!/^postgres(ql)?:$/.test(url.protocol)) {
+    console.error('DATABASE_URL nemá očekávané schéma "postgres://"/"postgresql://" — test se odmítá spustit (zkontrolujte .env.test).');
+    process.exit(1);
+  }
   return cista;
 }
 

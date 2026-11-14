@@ -69,10 +69,14 @@ async function nastavStav(rezervaceId, stav) {
   assert.equal(res.status, 200, `Nastavení stavu "${stav}" selhalo`);
 }
 
-async function vytvorPoukaz(cenikId, telefon, jmeno = 'TEST-ANONYMIZACE-POUKAZ (smazat)') {
+// Etapa 2 — zaplaceno=false je výchozí (poukaz čekající na platbu), protože
+// většina scénářů v tomhle souboru testuje zrušení/anonymizaci nezávisle na
+// platbě. zaplaceno=true se předává jen tam, kde scénář skutečně poukaz
+// uplatňuje (viz volání níž).
+async function vytvorPoukaz(cenikId, telefon, jmeno = 'TEST-ANONYMIZACE-POUKAZ (smazat)', zaplaceno = false) {
   const res = await adminFetch('/admin/poukazy', {
     method: 'POST',
-    body: JSON.stringify({ cenik_id: cenikId, kupujici_jmeno: jmeno, kupujici_telefon: telefon })
+    body: JSON.stringify({ cenik_id: cenikId, kupujici_jmeno: jmeno, kupujici_telefon: telefon, zaplaceno, zpusob_platby: zaplaceno ? 'hotove' : undefined })
   });
   const data = await res.json();
   assert.equal(res.status, 200, 'Vytvoření testovacího poukazu selhalo: ' + JSON.stringify(data));
@@ -212,8 +216,10 @@ async function main() {
     console.log('--- 6) uzavřený poukaz ---');
     {
       const telefon = '6999006';
-      const p = await vytvorPoukaz(polozka.id, telefon);
-      await adminFetch(`/admin/poukazy/${p.id}/stav`, { method: 'PATCH', body: JSON.stringify({ stav: 'zruseny' }) });
+      const p = await vytvorPoukaz(polozka.id, telefon); // nezaplacený (výchozí) — zrušení musí projít bez omezení
+      assert.equal(p.stav_uhrady, 'nezaplaceno', 'test předpoklad: nově vydaný poukaz bez zaplaceno:true je "nezaplaceno"');
+      const zrus = await adminFetch(`/admin/poukazy/${p.id}/stav`, { method: 'PATCH', body: JSON.stringify({ stav: 'zruseny' }) });
+      assert.equal(zrus.status, 200, 'Etapa 2 — zrušení nezaplaceného poukazu musí projít bez omezení');
       const { status } = await anonymizovat(p.klientka_id);
       assert.equal(status, 200);
       const seznam = await adminFetch('/admin/poukazy').then(x => x.json());
@@ -255,7 +261,7 @@ async function main() {
     console.log('--- 8) částečně využitý poukaz → odmítnout ---');
     {
       const telefon = '6999008';
-      const p = await vytvorPoukaz(polozka.id, telefon);
+      const p = await vytvorPoukaz(polozka.id, telefon, undefined, true); // Etapa 2 — hned se uplatňuje, musí být zaplacený
       const castecna = Math.max(1, Math.floor(Number(p.hodnota) / 3));
       const u = await adminFetch(`/admin/poukazy/${p.id}/uplatnit`, { method: 'POST', body: JSON.stringify({ castka: castecna }) }).then(x => x.json());
       assert.equal(u.poukaz.stav, 'castecne_vyuzity');
@@ -385,7 +391,7 @@ async function main() {
     console.log('--- 7F.4B-F) plně vyčerpaný poukaz (pouzity): PII se anonymizuje ---');
     {
       const telefon = '6999020';
-      const p = await vytvorPoukaz(polozka.id, telefon, 'TEST-7F4B-F (smazat)');
+      const p = await vytvorPoukaz(polozka.id, telefon, 'TEST-7F4B-F (smazat)', true); // Etapa 2 — hned se uplatňuje do úplného vyčerpání
       const u = await adminFetch(`/admin/poukazy/${p.id}/uplatnit`, { method: 'POST', body: JSON.stringify({ castka: Number(p.hodnota) }) }).then(x => x.json());
       assert.equal(u.poukaz.stav, 'pouzity');
       // Uplatněno bez rezervace (žádné rezervace_id) — v deníku "platby" proto

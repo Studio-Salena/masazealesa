@@ -113,8 +113,10 @@ async function main() {
     {
       const r = await vytvorRezervaci(polozka.id, '12', 30 + Math.floor(Math.random() * 300));
       uklidRezervace.push(r.id);
+      // Etapa 2 — test uplatňuje tenhle poukaz na rezervaci hned, potřebuje
+      // ho tedy okamžitě zaplacený, ne čekající na platbu.
       const poukazRes = await adminFetch('/admin/poukazy', {
-        method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-DENIK-POUKAZ (smazat)' })
+        method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-DENIK-POUKAZ (smazat)', zaplaceno: true, zpusob_platby: 'hotove' })
       }).then(res => res.json());
       uklidPoukazy.push(poukazRes.poukaz.id);
       const castPoukazem = Math.max(1, Math.floor(cena * 0.6));
@@ -145,8 +147,10 @@ async function main() {
     {
       const r = await vytvorRezervaci(polozka.id, '13', 30 + Math.floor(Math.random() * 300));
       uklidRezervace.push(r.id);
+      // Etapa 2 — test uplatňuje poukaz hned (chce ověřit, že se uplatnění
+      // nezapočítá dvakrát v Přijatých platbách), proto musí být zaplacený.
       const poukazRes = await adminFetch('/admin/poukazy', {
-        method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-DENIK-DVOJI (smazat)' })
+        method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-DENIK-DVOJI (smazat)', zaplaceno: true, zpusob_platby: 'hotove' })
       }).then(res => res.json());
       uklidPoukazy.push(poukazRes.poukaz.id);
       const hodnotaPoukazu = Number(poukazRes.poukaz.hodnota);
@@ -289,8 +293,9 @@ async function main() {
     {
       const r = await vytvorRezervaci(polozka.id, '19', 30 + Math.floor(Math.random() * 300));
       uklidRezervace.push(r.id);
+      // Etapa 2 — hned se uplatňuje, musí být zaplacený.
       const poukazRes = await adminFetch('/admin/poukazy', {
-        method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-DENIK-SOUBEZNE (smazat)' })
+        method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-DENIK-SOUBEZNE (smazat)', zaplaceno: true, zpusob_platby: 'hotove' })
       }).then(res => res.json());
       uklidPoukazy.push(poukazRes.poukaz.id);
       const hodnotaPoukazu = Number(poukazRes.poukaz.hodnota);

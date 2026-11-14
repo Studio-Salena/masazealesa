@@ -13,8 +13,14 @@
 
 const assert = require('node:assert/strict');
 
-const { ziskatTestApiBase } = require('./env-guard');
+const { ziskatTestApiBase, ziskatTestDatabaseUrl } = require('./env-guard');
 const API = ziskatTestApiBase(); // Fáze 7C.6 — fail-closed, žádný produkční fallback
+// Etapa 2 — tenhle soubor na dvou místech simuluje historický poukaz přímým
+// zápisem do DB (žádná cesta přes API ho nevytvoří) — DATABASE_URL se tu
+// proto ověřuje HNED, na úrovni modulu (stejně jako API výš), ne až uvnitř
+// main(): "process.exit" by uprostřed testu obešel "finally" úklid dřív
+// vytvořených testovacích poukazů/rezervací, kdyby selhal až později.
+const DB_URL = ziskatTestDatabaseUrl();
 const HESLO = process.env.ADMIN_HESLO;
 
 if (!HESLO) {
@@ -98,7 +104,10 @@ async function main() {
     const telefon1 = '6998001';
     const vytvorRes = await adminFetch('/admin/poukazy', {
       method: 'POST',
-      body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-POUKAZY (smazat)', kupujici_telefon: telefon1 })
+      // Etapa 2 — tento poukaz se dál v souboru skutečně uplatňuje (zůstatek,
+      // souběžné uplatnění, zrušení po vyčerpání), test tedy potřebuje poukaz
+      // okamžitě použitelný, ne čekající na platbu.
+      body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-POUKAZY (smazat)', kupujici_telefon: telefon1, zaplaceno: true, zpusob_platby: 'hotove' })
     });
     const vytvor = await vytvorRes.json();
     assert.equal(vytvorRes.status, 200, 'Vydání testovacího poukazu selhalo: ' + JSON.stringify(vytvor));
@@ -211,8 +220,11 @@ async function main() {
 
       const prehledPred = await adminFetch('/admin/prehled').then(r => r.json());
 
+      // Etapa 2 — zaplaceno:true, ať test níž skutečně prokáže ZAMÍTNUTÍ Z
+      // DŮVODU EXPIRACE (ne jen že nezaplacený poukaz jde zamítnout z
+      // jiného, dřívějšího důvodu).
       const poukazCRes = await adminFetch('/admin/poukazy', {
-        method: 'POST', body: JSON.stringify({ poukaz_typ_id: typ.typ.id, kupujici_jmeno: 'TEST-POUKAZY-EXPIROVANY (smazat)', kupujici_telefon: telefonC })
+        method: 'POST', body: JSON.stringify({ poukaz_typ_id: typ.typ.id, kupujici_jmeno: 'TEST-POUKAZY-EXPIROVANY (smazat)', kupujici_telefon: telefonC, zaplaceno: true, zpusob_platby: 'hotove' })
       });
       const poukazC = await poukazCRes.json();
       assert.equal(poukazCRes.status, 200, JSON.stringify(poukazC));
@@ -549,6 +561,168 @@ async function main() {
       console.log('OK — 7) souběžné mazání stejného poukazu (Promise.all) → právě 1× 200, 1× 404, žádná nekonzistence');
     }
     console.log('✅ ochrana historie poukazů prošla (7/7 scénářů)');
+
+    // --- Etapa 2 (bezpečnostní doplnění) — smazání podle stav_uhrady ---
+    console.log('--- Etapa 2: DELETE respektuje stav úhrady (ne jen historii čerpání) ---');
+    {
+      // 8) Zaplacený poukaz BEZ jakéhokoli čerpání (zustatek=hodnota, žádná
+      // historie) — dřív by šel smazat (cerpano=false), teď NE, protože by
+      // nenávratně zmizela evidence přijaté platby.
+      const n8 = await adminFetch('/admin/poukazy', {
+        method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-E2-DEL-ZAPLACENY (smazat)', zaplaceno: true, zpusob_platby: 'hotove' })
+      }).then(r => r.json());
+      uklidPoukazy.push(n8.poukaz.id);
+      assert.equal(Number(n8.poukaz.zustatek), Number(n8.poukaz.hodnota), 'test předpoklad: nečerpaný poukaz');
+      const smaz8 = await adminFetch(`/admin/poukazy/${n8.poukaz.id}`, { method: 'DELETE' });
+      assert.equal(smaz8.status, 400, '8) smazání zaplaceného, ale nečerpaného poukazu musí být odmítnuto (ztráta evidence platby)');
+      const d8 = await smaz8.json();
+      assert.ok(/platb/.test(d8.chyba || ''), '8) hláška má zmínit platbu: ' + JSON.stringify(d8));
+      console.log('OK — 8) zaplacený nečerpaný poukaz nelze smazat (jen zrušit)');
+
+      // 9) Skutečně NEZAPLACENÝ poukaz bez historie — smazání ZŮSTÁVÁ povolené.
+      const n9 = await adminFetch('/admin/poukazy', {
+        method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-E2-DEL-NEZAPLACENY (smazat)' })
+      }).then(r => r.json());
+      assert.equal(n9.poukaz.stav_uhrady, 'nezaplaceno');
+      const smaz9 = await adminFetch(`/admin/poukazy/${n9.poukaz.id}`, { method: 'DELETE' });
+      assert.equal(smaz9.status, 200, '9) smazání prokazatelně nezaplaceného poukazu bez historie musí zůstat povolené: ' + JSON.stringify(await smaz9.json().catch(() => ({}))));
+      console.log('OK — 9) nezaplacený poukaz bez historie lze bezpečně smazat beze změny');
+
+      // 10) Historický poukaz (stav_uhrady IS NULL) bez historie — posuzován
+      // konzervativně JAKO BY mohl být zaplacený → smazání odmítnuto.
+      // DB_URL je ověřené (fail-closed, viz výš) hned při načtení modulu —
+      // tahle větev tedy není "přeskočit, když chybí", ale rovnou zápis.
+      {
+        const { Pool } = require('pg');
+        const dbPool10 = new Pool({ connectionString: DB_URL, ssl: { rejectUnauthorized: false } });
+        try {
+          const platnostDo10 = new Date(); platnostDo10.setMonth(platnostDo10.getMonth() + 12);
+          const ins10 = await dbPool10.query(
+            `INSERT INTO poukazy (kod, hodnota, zustatek, platnost_do, zakoupeno_kde, kupujici_jmeno, stav, ucel, stav_uhrady, zpusob_platby, zaplaceno_kdy, zaplaceno_zpetne)
+             VALUES ($1,400,400,$2,'osobne','TEST-E2-DEL-HISTORICKY (smazat)','aktivni','prodej',NULL,NULL,NULL,false) RETURNING *`,
+            ['ALESA-TEST-E2-DELHIST-' + Date.now(), platnostDo10.toISOString().slice(0, 10)]
+          );
+          const hist10 = ins10.rows[0];
+          uklidPoukazy.push(hist10.id);
+          const smaz10 = await adminFetch(`/admin/poukazy/${hist10.id}`, { method: 'DELETE' });
+          assert.equal(smaz10.status, 400, '10) smazání historického poukazu s neznámým stavem úhrady musí být odmítnuto (konzervativně)');
+          console.log('OK — 10) historický poukaz s neznámým stavem úhrady (NULL) nelze smazat, i bez historie čerpání');
+        } finally {
+          await dbPool10.end();
+        }
+      }
+
+      // 11) Dar (ucel='dar') bez historie — pravidlo platby se ho netýká, smazání beze změny povoleno.
+      const n11 = await adminFetch('/admin/poukazy', {
+        method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-E2-DEL-DAR (smazat)', ucel: 'dar' })
+      }).then(r => r.json());
+      assert.equal(n11.poukaz.stav_uhrady, null);
+      const smaz11 = await adminFetch(`/admin/poukazy/${n11.poukaz.id}`, { method: 'DELETE' });
+      assert.equal(smaz11.status, 200, '11) smazání daru bez historie musí zůstat povolené (dar nikdy neřeší platbu): ' + JSON.stringify(await smaz11.json().catch(() => ({}))));
+      console.log('OK — 11) dar bez historie lze smazat beze změny (pravidlo platby se darů netýká)');
+    }
+    console.log('✅ Etapa 2: oprava DELETE podle stav_uhrady prošla');
+
+    // --- Etapa 2 (audit finančních toků) — stav úhrady poukazu ---
+    console.log('--- Etapa 2: stav úhrady poukazu (zaplaceno/nezaplaceno/historický) ---');
+    {
+      // 1) Ruční vydání BEZ zaplaceno:true → nezaplaceno, nejde uplatnit.
+      const nz = await adminFetch('/admin/poukazy', {
+        method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-E2-NEZAPLACENO (smazat)' })
+      }).then(r => r.json());
+      uklidPoukazy.push(nz.poukaz.id);
+      assert.equal(nz.poukaz.stav_uhrady, 'nezaplaceno', 'Ruční vydání bez zaplaceno:true musí dát stav_uhrady="nezaplaceno"');
+      assert.equal(nz.poukaz.zpusob_platby, null, 'Nezaplacený poukaz nesmí mít vyplněný způsob platby');
+
+      const blokovaneUplatneni = await adminFetch(`/admin/poukazy/${nz.poukaz.id}/uplatnit`, { method: 'POST', body: JSON.stringify({ castka: 1 }) });
+      const blokData = await blokovaneUplatneni.json();
+      assert.equal(blokovaneUplatneni.status, 400, 'Uplatnění nezaplaceného poukazu mělo být odmítnuto');
+      assert.ok(/nebyl zaplacen/.test(blokData.chyba || ''), 'Chybová hláška měla zmínit nezaplacenou platbu: ' + JSON.stringify(blokData));
+      console.log('OK — nezaplacený poukaz: uplatnění je odmítnuto s jasnou hláškou');
+
+      // 1b) Nezaplacený poukaz se zůstatkem > 0 JDE běžně zrušit (jistota, že nic nepřišlo).
+      const zrusNz = await adminFetch(`/admin/poukazy/${nz.poukaz.id}/stav`, { method: 'PATCH', body: JSON.stringify({ stav: 'zruseny' }) });
+      assert.equal(zrusNz.status, 200, 'Zrušení nezaplaceného poukazu (zůstatek > 0) musí být povoleno: ' + JSON.stringify(await zrusNz.json().catch(() => ({}))));
+      console.log('OK — nezaplacený poukaz se zůstatkem > 0 lze běžně zrušit (žádné peníze nepřišly)');
+
+      // 2) Potvrzení platby → stav_uhrady=zaplaceno, uplatnění teď funguje.
+      const nz2 = await adminFetch('/admin/poukazy', {
+        method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-E2-POTVRZENI (smazat)' })
+      }).then(r => r.json());
+      uklidPoukazy.push(nz2.poukaz.id);
+      const potvrzeni = await adminFetch(`/admin/poukazy/${nz2.poukaz.id}/potvrdit-platbu`, { method: 'PATCH', body: JSON.stringify({ zpusob_platby: 'kartou' }) });
+      const potvrzeniData = await potvrzeni.json();
+      assert.equal(potvrzeni.status, 200, 'Potvrzení platby selhalo: ' + JSON.stringify(potvrzeniData));
+      assert.equal(potvrzeniData.poukaz.stav_uhrady, 'zaplaceno');
+      assert.equal(potvrzeniData.poukaz.zpusob_platby, 'kartou');
+      assert.equal(potvrzeniData.poukaz.zaplaceno_zpetne, false);
+      const uplatneniPoPotvrzeni = await adminFetch(`/admin/poukazy/${nz2.poukaz.id}/uplatnit`, { method: 'POST', body: JSON.stringify({ castka: 1 }) });
+      assert.equal(uplatneniPoPotvrzeni.status, 200, 'Po potvrzení platby musí uplatnění projít');
+      console.log('OK — potvrzení platby odemkne uplatnění, zaplaceno_zpetne=false (nová platba)');
+
+      // 3) Opakované potvrzení platby je odmítnuto.
+      const opakovane = await adminFetch(`/admin/poukazy/${nz2.poukaz.id}/potvrdit-platbu`, { method: 'PATCH', body: JSON.stringify({ zpusob_platby: 'hotove' }) });
+      assert.equal(opakovane.status, 400, 'Opakované potvrzení platby mělo být odmítnuto');
+      console.log('OK — opakované potvrzení platby na už zaplaceném poukazu je odmítnuto');
+
+      // 4) Zrušení ZAPLACENÉHO poukazu s kladným zůstatkem je blokováno —
+      // a zůstává blokováno i po (hypotetickém) doplnění historické platby,
+      // protože doplnění ho jen převede na jiný druh "zaplaceno", ne na "nezaplaceno".
+      const zrusZaplaceny = await adminFetch(`/admin/poukazy/${nz2.poukaz.id}/stav`, { method: 'PATCH', body: JSON.stringify({ stav: 'zruseny' }) });
+      assert.equal(zrusZaplaceny.status, 400, 'Zrušení zaplaceného poukazu s kladným zůstatkem mělo být blokováno');
+      console.log('OK — zrušení zaplaceného poukazu s kladným zůstatkem je blokováno');
+
+      // 5) Historický poukaz (stav_uhrady neznámý) se zůstatkem > 0 je TAKÉ
+      // blokovaný pro zrušení — a po doplnění historické platby (ne nové!)
+      // zůstává blokovaný dál, protože doplnění NESMÍ odblokovat zrušení.
+      // Takový poukaz (stav_uhrady IS NULL) nejde dnes vytvořit žádnou cestou
+      // přes API (každá cesta teď nastaví 'zaplaceno' nebo 'nezaplaceno') —
+      // simuluje se proto jediným přímým INSERTEM, výhradně na TEST DB přes
+      // DB_URL ověřené fail-closed hned při načtení modulu (viz výš).
+      {
+        const { Pool } = require('pg');
+        const dbPool = new Pool({ connectionString: DB_URL, ssl: { rejectUnauthorized: false } });
+        try {
+          const kodHist = 'ALESA-TEST-E2-HIST-' + Date.now();
+          const minuleDatum = new Date(); minuleDatum.setDate(minuleDatum.getDate() - 5);
+          const platnostDoHist = new Date(); platnostDoHist.setMonth(platnostDoHist.getMonth() + 12);
+          const histIns = await dbPool.query(
+            `INSERT INTO poukazy (kod, hodnota, zustatek, platnost_do, zakoupeno_kde, kupujici_jmeno, stav, ucel, vytvoreno, stav_uhrady, zpusob_platby, zaplaceno_kdy, zaplaceno_zpetne)
+             VALUES ($1,700,700,$2,'osobne','TEST-E2-HISTORICKY (smazat)','aktivni','prodej',$3,NULL,NULL,NULL,false) RETURNING *`,
+            [kodHist, platnostDoHist.toISOString().slice(0, 10), minuleDatum.toISOString()]
+          );
+          const histPoukaz = histIns.rows[0];
+          uklidPoukazy.push(histPoukaz.id);
+          assert.equal(histPoukaz.stav_uhrady, null, 'test předpoklad: historický poukaz má stav_uhrady NULL');
+
+          const zrusHistPred = await adminFetch(`/admin/poukazy/${histPoukaz.id}/stav`, { method: 'PATCH', body: JSON.stringify({ stav: 'zruseny' }) });
+          assert.equal(zrusHistPred.status, 400, 'Zrušení historického (NULL) poukazu se zůstatkem > 0 mělo být blokováno');
+          console.log('OK — historický poukaz (stav_uhrady neznámý) se zůstatkem > 0 je také blokovaný pro zrušení');
+
+          const doplneni = await adminFetch(`/admin/poukazy/${histPoukaz.id}/doplnit-historickou-platbu`, {
+            method: 'PATCH', body: JSON.stringify({ zpusob_platby: 'hotove', zaplaceno_kdy: minuleDatum.toISOString() })
+          });
+          const doplneniData = await doplneni.json();
+          assert.equal(doplneni.status, 200, 'Doplnění historické platby selhalo: ' + JSON.stringify(doplneniData));
+          assert.equal(doplneniData.poukaz.zaplaceno_zpetne, true);
+
+          // KLÍČOVÁ KONTROLA (bod 2 požadavku) — doplnění historické platby
+          // NESMÍ odblokovat zrušení; zůstatek je stále 700 > 0.
+          const zrusHistPo = await adminFetch(`/admin/poukazy/${histPoukaz.id}/stav`, { method: 'PATCH', body: JSON.stringify({ stav: 'zruseny' }) });
+          assert.equal(zrusHistPo.status, 400, 'Doplnění historické platby NESMÍ odblokovat zrušení poukazu s kladným zůstatkem');
+          console.log('OK — doplnění historické platby NEODBLOKUJE zrušení (zůstatek stále > 0) — požadavek bodu 2 potvrzen');
+
+          // Až po úplném vyčerpání zůstatku jde zrušit i tenhle historický poukaz.
+          await adminFetch(`/admin/poukazy/${histPoukaz.id}/uplatnit`, { method: 'POST', body: JSON.stringify({ castka: 700 }) });
+          const zrusHistKonecne = await adminFetch(`/admin/poukazy/${histPoukaz.id}/stav`, { method: 'PATCH', body: JSON.stringify({ stav: 'zruseny' }) });
+          assert.equal(zrusHistKonecne.status, 200, 'Po plném vyčerpání zůstatku musí zrušení konečně projít');
+          console.log('OK — po plném vyčerpání zůstatku (0 Kč) lze historický poukaz konečně zrušit');
+        } finally {
+          await dbPool.end();
+        }
+      }
+    }
+    console.log('✅ Etapa 2: stav úhrady poukazu prošla');
 
     {
       // Veřejný GET /api/poukazy/obrazek/:klic — obrázek šablony poukazu pro
