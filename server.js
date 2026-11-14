@@ -1609,7 +1609,7 @@ app.get('/api/admin/prehled', async (req, res) => {
     const zacatekMesice = dnes.slice(0, 8) + '01';
     const zaXDni = new Date(Date.now() + POUKAZ_BRZY_EXPIRUJE_DNI * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     const [rez, pouk, zad, prod] = await Promise.all([
-      db.query('SELECT id, stav, datum, cas_od, cas_do, jmeno, masaz, cena FROM rezervace'),
+      db.query('SELECT id, stav, datum, cas_od, cas_do, jmeno, masaz, cena, stav_platby FROM rezervace'),
       db.query('SELECT id, kod, stav, zustatek, platnost_do FROM poukazy'),
       db.query('SELECT id, stav FROM poukazy_zadosti'),
       db.query('SELECT cena, vytvoreno FROM prodeje')
@@ -1643,10 +1643,16 @@ app.get('/api/admin/prehled', async (req, res) => {
       .sort((a, b) => a.platnost_do.localeCompare(b.platnost_do))
       .map(p => ({ id: p.id, kod: p.kod, zustatek: Number(p.zustatek), platnost_do: p.platnost_do }));
 
+    // Dokončené masáže, u kterých platba není (ani částečně) uzavřená — upozornění
+    // na to, že "dokončeno" u rezervace neznamená automaticky "zaplaceno" (stav
+    // rezervace a stav platby jsou nezávislé, viz prepocitatSouhrnRezervace).
+    const dokonceneBezPlatby = rez.rows.filter(r => r.stav === 'dokoncena' && r.stav_platby !== 'zaplaceno').length;
+
     res.json({
       rezervaceCelkem: rez.rows.length,
       rezervaceCekajici: rez.rows.filter(r => r.stav === 'cekajici').length,
       rezervaceBudouci: rez.rows.filter(r => r.datum >= dnes && r.stav !== 'zrusena').length,
+      dokonceneBezPlatby,
       poukazyAktivni: pouk.rows.filter(jePoukazSkutecneAktivni).length,
       poukazyHodnota: pouk.rows.filter(jePoukazSkutecneAktivni).reduce((s, p) => s + Number(p.zustatek), 0),
       poukazyZadostiNove: zad.rows.filter(z => z.stav === 'nova').length,
@@ -1932,6 +1938,41 @@ app.patch('/api/admin/rezervace/:id/poznamka', async (req, res) => {
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
+// Idempotentní klíč plateb — ochrana proti duplicitnímu zápisu při opakování
+// STEJNÉHO požadavku (ztracené potvrzení spojení, dvojklik). Na rozdíl od
+// kontroly "částka nesmí přesáhnout zbývající dluh" tohle chrání i ČÁSTEČNÉ
+// platby, kde dva zápisy stejné menší částky zbývající dluh vůbec nemusí
+// přesáhnout (např. 2× 300 Kč při doplatku 1050 Kč by tou kontrolou prošlo).
+// Vrací:
+//  - objekt odpovědi {ok,rezervace,poukaz,idempotentni:true} — klíč už byl
+//    použitý a VŠECHNO (rezervace/částka/typ/způsob) sedí → stejná platba se
+//    nezapisuje podruhé, vrátí se výsledek, jako by to prošlo poprvé
+//  - false — klíč už byl použitý, ale NĚCO nesedí (jiná rezervace, částka,
+//    typ nebo způsob platby) → volající má požadavek odmítnout
+//  - null — klíč je zatím volný → volající pokračuje normálním zápisem
+async function zkontrolovatIdempotentniPlatbu(client, klic, rezervaceId, castkaNum, druh, zpusobPlatby) {
+  const { rows: [existujici] } = await client.query('SELECT * FROM platby WHERE idempotency_klic = $1', [klic]);
+  if (!existujici) return null;
+  const ocekavanaCastka = druh === 'vratka' ? -castkaNum : castkaNum;
+  const sedi = String(existujici.rezervace_id) === String(rezervaceId)
+    && Number(existujici.castka) === ocekavanaCastka
+    && existujici.typ === druh
+    && existujici.zpusob_platby === zpusobPlatby;
+  if (!sedi) return false;
+  const { rows: [rezervace] } = await client.query('SELECT * FROM rezervace WHERE id = $1', [rezervaceId]);
+  // Vratka "jako poukaz" při prvním (skutečném) zápisu vytvořila nový
+  // poukaz a propsala jeho id na tenhle řádek (viz INSERT níž) — při
+  // opakování stejného požadavku ho tu dohledáme, ať admin.html i při
+  // idempotentní odpovědi správně ukáže "vystaven poukaz XY", ne že by
+  // se to tvářilo, že žádný poukaz nevznikl.
+  let poukaz = null;
+  if (existujici.poukaz_id) {
+    ({ rows: [poukaz] } = await client.query('SELECT * FROM poukazy WHERE id = $1', [existujici.poukaz_id]));
+  }
+  return { ok: true, rezervace, poukaz: poukaz || null, idempotentni: true };
+}
+const CHYBA_IDEMPOTENTNI_KONFLIKT = { chyba: 'Tento idempotenční klíč byl už použit pro jinou platbu (jinou rezervaci, částku, typ nebo způsob platby).' };
+
 // Zaznamenání platby NEBO vratky k rezervaci — zapíše řádek do deníku "platby"
 // a ve STEJNÉ transakci přepočte souhrn na rezervaci (viz prepocitatSouhrnRezervace).
 // Buď se zapíše obojí, nebo nic (žádný poloviční zápis). Stav platby je záměrně
@@ -1940,8 +1981,11 @@ app.patch('/api/admin/rezervace/:id/poznamka', async (req, res) => {
 // si jinak navzájem přepsaly součet (tzv. lost update).
 // typ: 'platba' (výchozí) nebo 'vratka' — vratka se ukládá jako záporná částka,
 // ale zůstává v deníku navždy vedle původní platby (nemaže historii).
+// idempotency_klic: nepovinné — admin.html ho posílá z dialogu "Dokončit
+// masáž" a z tlačítka "Zaznamenat platbu" (viz zkontrolovatIdempotentniPlatbu
+// výš); staré/jiné volání bez klíče se chová přesně jako dřív.
 app.patch('/api/admin/rezervace/:id/platba', async (req, res) => {
-  const { castka, zpusob_platby, typ } = req.body || {};
+  const { castka, zpusob_platby, typ, idempotency_klic } = req.body || {};
   const druh = typ === 'vratka' ? 'vratka' : 'platba';
   const castkaNum = Number(castka);
   if (!Number.isFinite(castkaNum) || castkaNum <= 0) {
@@ -1950,9 +1994,21 @@ app.patch('/api/admin/rezervace/:id/platba', async (req, res) => {
   if (!['hotove', 'kartou', 'online', 'poukaz'].includes(zpusob_platby)) {
     return res.status(400).json({ chyba: 'Vyberte prosím způsob platby.' });
   }
+  const klic = idempotency_klic ? String(idempotency_klic).trim() : null;
+  if (klic && klic.length > 100) {
+    return res.status(400).json({ chyba: 'Neplatný idempotenční klíč.' });
+  }
   const client = await db.connect();
   try {
     await client.query('BEGIN');
+
+    if (klic) {
+      const vysledekIdempotence = await zkontrolovatIdempotentniPlatbu(client, klic, req.params.id, castkaNum, druh, zpusob_platby);
+      if (vysledekIdempotence) { await client.query('COMMIT'); return res.json(vysledekIdempotence); }
+      if (vysledekIdempotence === false) { await client.query('ROLLBACK'); return res.status(409).json(CHYBA_IDEMPOTENTNI_KONFLIKT); }
+      // null => klíč zatím volný, pokračuje se normálním zápisem níž
+    }
+
     const { rows: [r] } = await client.query('SELECT * FROM rezervace WHERE id = $1 FOR UPDATE', [req.params.id]);
     if (!r) { await client.query('ROLLBACK'); return res.status(404).json({ chyba: 'Rezervace nebyla nalezena.' }); }
 
@@ -1982,10 +2038,35 @@ app.patch('/api/admin/rezervace/:id/platba', async (req, res) => {
       });
     }
 
-    await client.query(
-      `INSERT INTO platby (rezervace_id, castka, typ, zpusob_platby) VALUES ($1,$2,$3,$4)`,
-      [req.params.id, druh === 'vratka' ? -castkaNum : castkaNum, druh, zpusob_platby]
-    );
+    try {
+      // poukaz_id se vyplňuje jen u vratky-jako-poukazu (novyPoukaz výš) —
+      // ať zkontrolovatIdempotentniPlatbu umí při opakování stejného
+      // požadavku dohledat KTERÝ poukaz tahle vratka vytvořila.
+      await client.query(
+        `INSERT INTO platby (rezervace_id, castka, typ, zpusob_platby, idempotency_klic, poukaz_id) VALUES ($1,$2,$3,$4,$5,$6)`,
+        [req.params.id, druh === 'vratka' ? -castkaNum : castkaNum, druh, zpusob_platby, klic, novyPoukaz ? novyPoukaz.id : null]
+      );
+    } catch (e) {
+      // Souběh dvou požadavků se STEJNÝM klíčem: mezi kontrolou výš a tímhle
+      // INSERTEM mohl druhý požadavek (jiné spojení) stihnout vložit svůj
+      // řádek jako první — unikátní index na idempotency_klic (ne jen tahle
+      // kontrola) je tu skutečná pojistka. 23505 = unique_violation.
+      if (klic && e.code === '23505') {
+        await client.query('ROLLBACK');
+        const clientOverit = await db.connect();
+        try {
+          await clientOverit.query('BEGIN');
+          const vysledekIdempotence = await zkontrolovatIdempotentniPlatbu(clientOverit, klic, req.params.id, castkaNum, druh, zpusob_platby);
+          await clientOverit.query('COMMIT');
+          if (vysledekIdempotence) return res.json(vysledekIdempotence);
+          return res.status(409).json(CHYBA_IDEMPOTENTNI_KONFLIKT);
+        } finally {
+          clientOverit.release();
+        }
+      }
+      throw e;
+    }
+
     const aktualizovana = await prepocitatSouhrnRezervace(client, req.params.id);
     await client.query('COMMIT');
     res.json({ ok: true, rezervace: aktualizovana, poukaz: novyPoukaz });
@@ -3733,6 +3814,123 @@ app.get('/api/admin/ucetnictvi', async (req, res) => {
         }))
       },
       podleZpusobuPlatby: Object.entries(zpusobyMapa).map(([zpusob_platby, castka]) => ({ zpusob_platby, castka }))
+    });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
+// -- Provedené masáže: jednotný, READ-ONLY přehled dokončených rezervací +
+// prodejny (žádné kopírování dat mezi tabulkami, jen společné čtení) — řeší
+// stížnost, že dokončení masáže (PATCH /rezervace/:id/stav) samo o sobě nikdy
+// nezapisuje žádnou platbu ani prodej (ten endpoint jen mění "stav", viz jeho
+// komentář), takže admin neměla jedno místo, kde by viděla VŠECHNY skutečně
+// odvedené masáže a jejich úhrady najednou.
+// Tři oddělené součty (zadáno výslovně, nesmí se plést dohromady):
+//  - hodnotaSluzeb: cena (už PO SLEVĚ — sleva_kc je jen informativní, cena v
+//    rezervaci/prodejně je vždy finální účtovaná částka) PROVEDENÝCH/
+//    PRODANÝCH položek podle DATA MASÁŽE (rezervace) / DATA PRODEJE (prodejna)
+//  - uhrazenoKSluzbam: kolik z týchž položek už bylo uhrazeno, BEZ OHLEDU na
+//    to, kdy byla platba zapsaná (např. záloha zaplacená dávno předem)
+//  - skutecnePrijato: skutečně přijatá hotovost PODLE DATA PLATBY ve stejném
+//    období — STEJNÁ definice a vyloučení zpusob_platby='poukaz' jako
+//    kategorie B v /api/admin/ucetnictvi (uplatnění poukazu už bylo přijato
+//    jako hotovost dřív, při PRODEJI poukazu, ne teď při uplatnění) — ať
+//    nevznikne druhá, nekonzistentní definice "přijatých peněz". Poukazy jsou
+//    jinak v tomhle přehledu úmyslně ponechané stranou (vlastní agenda).
+// Zrušené rezervace (storna) jsou vynechané už filtrem stav='dokoncena'.
+app.get('/api/admin/provedene-masaze', async (req, res) => {
+  try {
+    const { od, do: doParam, zpusobPlatby } = req.query;
+    const vObdobi = iso => (!od || iso >= od) && (!doParam || iso <= doParam);
+
+    const [rez, prod, plat] = await Promise.all([
+      db.query(`SELECT id, datum, cas_od, jmeno, masaz, cena, sleva_kc, uhrazeno, stav_platby
+                FROM rezervace WHERE stav = 'dokoncena'`),
+      db.query('SELECT id, masaz, cena, zpusob_platby, poukaz_castka, vytvoreno FROM prodeje'),
+      db.query('SELECT rezervace_id, castka, zpusob_platby, vytvoreno FROM platby')
+    ]);
+
+    // Rozpis plateb PODLE METODY za každou rezervaci zvlášť — na rozdíl od
+    // rezervace.zpusob_platby (který pamatuje jen POSLEDNÍ platbu, viz
+    // prepocitatSouhrnRezervace), tady se sečtou VŠECHNY, ať jde víc plateb
+    // různými způsoby u jedné masáže zobrazit jako rozpis, ne zavádějící
+    // jedinou metodu. castka je už kladná/záporná (vratka má zápornou), takže
+    // prostý součet správně vyčistí vratky ze součtu dané metody.
+    const rozpisyPodleRezervace = {};
+    plat.rows.forEach(p => {
+      if (!p.rezervace_id) return;
+      const mapa = rozpisyPodleRezervace[p.rezervace_id] || (rozpisyPodleRezervace[p.rezervace_id] = {});
+      const z = p.zpusob_platby || 'neprirazeno';
+      mapa[z] = (mapa[z] || 0) + Number(p.castka);
+    });
+    const vycistitRozpis = mapa => {
+      const vysledek = {};
+      Object.entries(mapa || {}).forEach(([z, c]) => { if (Math.round(c * 100) !== 0) vysledek[z] = c; });
+      return vysledek;
+    };
+
+    const polozkyRezervace = rez.rows
+      .filter(r => vObdobi(r.datum))
+      .map(r => {
+        const cena = Number(r.cena) || 0;
+        const uhrazeno = Number(r.uhrazeno) || 0;
+        return {
+          zdroj: 'rezervace', id: r.id, datum: r.datum, cas: r.cas_od, jmeno: r.jmeno, nazev: r.masaz,
+          cena, sleva_kc: Number(r.sleva_kc) || 0, uhrazeno, zbytek: Math.max(0, cena - uhrazeno),
+          stav_platby: r.stav_platby, rozpisPlatby: vycistitRozpis(rozpisyPodleRezervace[r.id])
+        };
+      });
+
+    const polozkyProdejna = prod.rows
+      .map(p => ({ ...p, den: p.vytvoreno.toISOString().slice(0, 10) }))
+      .filter(p => vObdobi(p.den))
+      .map(p => {
+        // Prodejna (walk-in) se vždy platí celá hned při vzniku — žádný
+        // koncept "nedoplaceno" tu neexistuje (viz schema.sql — žádný
+        // sloupec pro částečnou úhradu, jen poukaz_castka + zpusob_platby na
+        // zbytek, které musí dát součtem přesně "cena").
+        const cena = Number(p.cena) || 0;
+        const poukazCastka = Number(p.poukaz_castka) || 0;
+        const rozpis = vycistitRozpis({
+          ...(poukazCastka > 0 ? { poukaz: poukazCastka } : {}),
+          [p.zpusob_platby || 'neprirazeno']: cena - poukazCastka
+        });
+        return {
+          zdroj: 'prodejna', id: p.id, datum: p.den, cas: null, jmeno: null, nazev: p.masaz,
+          cena, sleva_kc: 0, uhrazeno: cena, zbytek: 0, stav_platby: 'zaplaceno', rozpisPlatby: rozpis
+        };
+      });
+
+    let polozky = [...polozkyRezervace, ...polozkyProdejna];
+    if (zpusobPlatby) {
+      polozky = polozky.filter(p => Object.keys(p.rozpisPlatby).includes(zpusobPlatby));
+    }
+    polozky.sort((a, b) => b.datum.localeCompare(a.datum) || (b.cas || '').localeCompare(a.cas || ''));
+
+    // "Skutečně přijaté peníze podle data platby" — nezávislá třetí dimenze,
+    // STEJNÁ definice jako kategorie B v /api/admin/ucetnictvi (deník plateb
+    // bez poukazových řádků + prodejna bez poukazové části), jen omezená na
+    // stejné období od/do a případný filtr metody. Počítá se ze SAMOSTATNÉHO
+    // dotazu na data podle data PLATBY, ne z "polozky" výš (ty jsou filtrované
+    // podle data MASÁŽE/PRODEJE — jiná osa, viz komentář nad endpointem).
+    const prijatePlatbyPolozky = [
+      ...plat.rows
+        .map(p => ({ ...p, den: p.vytvoreno.toISOString().slice(0, 10) }))
+        .filter(p => vObdobi(p.den) && p.zpusob_platby !== 'poukaz' && (!zpusobPlatby || p.zpusob_platby === zpusobPlatby))
+        .map(p => Number(p.castka)),
+      ...prod.rows
+        .map(p => ({ ...p, den: p.vytvoreno.toISOString().slice(0, 10) }))
+        .filter(p => vObdobi(p.den) && p.zpusob_platby !== 'poukaz' && (!zpusobPlatby || p.zpusob_platby === zpusobPlatby))
+        .map(p => (Number(p.cena) || 0) - (Number(p.poukaz_castka) || 0))
+    ];
+
+    res.json({
+      obdobi: { od: od || null, do: doParam || null, zpusobPlatby: zpusobPlatby || null },
+      polozky,
+      souhrn: {
+        hodnotaSluzeb: polozky.reduce((s, p) => s + p.cena, 0),
+        uhrazenoKSluzbam: polozky.reduce((s, p) => s + p.uhrazeno, 0),
+        skutecnePrijato: prijatePlatbyPolozky.reduce((s, c) => s + c, 0)
+      }
     });
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });

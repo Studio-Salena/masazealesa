@@ -118,6 +118,8 @@ create table if not exists platby (
   poukaz_id integer, -- vyplněno jen když zpusob_platby = 'poukaz'; FK na poukazy(id) přidána
     -- až níž přes ALTER TABLE (tabulka "poukazy" v souboru vzniká až POZDĚJI —
     -- stejný důvod a stejný princip jako u klientka_id, viz komentář u FK bloku níž)
+  idempotency_klic text, -- nepovinný klíč proti duplicitnímu zápisu při opakování
+    -- stejného požadavku (ztracené potvrzení/dvojklik) — unikátní index níž
   vytvoreno timestamptz not null default now(),
   check ((typ = 'platba' and castka > 0) or (typ = 'vratka' and castka < 0))
 );
@@ -173,13 +175,28 @@ create table if not exists poukazy (
   vytvoreno timestamptz not null default now(),
   klientka_id integer, -- Fáze 6D: vazba na klientky(id), nullable — poukaz bez kupujici_telefon
     -- zůstává klientka_id NULL (nelze bezpečně určit), kupujici_* pole ZŮSTÁVAJÍ jako snímek
-  uzavreno_kdy timestamptz -- Fáze 7G.3: kdy poukaz naposledy přešel do 'pouzity'/'zruseny'
+  uzavreno_kdy timestamptz, -- Fáze 7G.3: kdy poukaz naposledy přešel do 'pouzity'/'zruseny'
     -- (nastaveno ve stejném UPDATE jako změna stavu) — NULL, dokud poukaz nebyl nikdy
     -- uzavřen, nebo po návratu zpět do 'aktivni'/'castecne_vyuzity'. Retenční engine
     -- (viz retence_udalosti) počítá stáří uzavřeného poukazu VÝHRADNĚ z tohoto sloupce,
     -- nikdy z "vytvoreno" (to je okamžik vydání, ne uzavření — viz audit Fáze 7G.2A).
     -- Poukaz s uzavreno_kdy IS NULL a stav IN ('pouzity','zruseny') je historický
     -- řádek bez známého okamžiku uzavření — retenční engine ho vždy přeskočí.
+  -- Etapa 2 (audit financnich toku, 2026-11) — stav_uhrady odděluje "byl poukaz
+  -- aktivován" (stav='aktivni', hned použitelný) od "byly za něj skutečně
+  -- přijaté peníze". NULL = historický poukaz z doby před touto opravou,
+  -- stav úhrady neznámý — NIKDY se nedosazuje automaticky, jen výslovnou
+  -- jednotlivou akcí admina (PATCH .../potvrdit-platbu nebo
+  -- .../doplnit-historickou-platbu).
+  stav_uhrady text check (stav_uhrady in ('zaplaceno','nezaplaceno')),
+  zaplaceno_kdy timestamptz, -- skutečné datum přijetí peněz (NE datum vyřízení žádosti/vytvoreno)
+  zaplaceno_zpetne boolean not null default false
+    -- true = zaplaceno_kdy byl doplněn dodatečně pro starý historický poukaz
+    -- (admin osobně potvrdila, že šlo o dávno proběhlou platbu), ne zaznamenán
+    -- v okamžiku skutečné platby. Takový řádek se v GET /api/admin/ucetnictvi
+    -- NIKDY nepočítá do kategorie B/F (mohl by jít o peníze už započítané v
+    -- dávno uzavřené uzávěrce) a v kategorii C se počítá podle "vytvoreno",
+    -- ne podle zaplaceno_kdy, aby se neposunul do jiného účetního období.
 );
 
 -- Fáze 6D: skutečná klientská entita s vlastním id — nahrazuje telefon jako
@@ -506,3 +523,11 @@ alter table poukazy         add column if not exists sleva_kc numeric not null d
 
 alter table promo_kody           enable row level security;
 alter table promo_poukaz_vyuziti enable row level security;
+
+-- Idempotentní klíč plateb (ochrana proti duplicitnímu zápisu při opakování
+-- stejného požadavku, např. ztracené potvrzení spojení nebo dvojklik v
+-- dialogu "Dokončit masáž"/tlačítku "Zaznamenat platbu") — nepovinný,
+-- historické řádky zůstávají NULL a mezi sebou nekolidují (partial unikátní
+-- index platí jen pro vyplněné klíče). Bezpečné spustit i opakovaně.
+alter table platby add column if not exists idempotency_klic text;
+create unique index if not exists platby_idempotency_klic_idx on platby (idempotency_klic) where idempotency_klic is not null;
