@@ -2485,11 +2485,11 @@ function vykreslitRezervace(filtr) {
       <td>${escapeHtml(r.masaz)}${r.poukaz_kod ? '<br><small>🎁 ' + escapeHtml(r.poukaz_kod) + '</small>' : ''}${r.poznamka ? '<br><small style="color:var(--text-light)">' + escapeHtml(r.poznamka) + '</small>' : ''}</td>
       <td>${stavBadge[r.stav] || r.stav}${r.stav === 'dokoncena' && r.stav_platby !== 'zaplaceno' ? '<br>' + (platbaBadgeKratky[r.stav_platby] || platbaBadgeKratky.nezaplaceno) : ''}</td>
       <td style="display:flex;gap:4px;flex-wrap:wrap" onclick="event.stopPropagation()">
-        ${r.stav !== 'potvrzena' ? `<button class="btn btn-green btn-sm" onclick="zmenitStavRez(${r.id},'potvrzena')" title="Potvrdit">✅</button>` : ''}
+        ${r.stav !== 'potvrzena' ? `<button class="btn btn-green btn-sm" onclick="zmenitStavRez(${r.id},'potvrzena','${r.stav}')" title="Potvrdit">✅</button>` : ''}
         ${r.stav !== 'dokoncena' ? `<button class="btn btn-green btn-sm" onclick="otevritDokonceniMasaze(${r.id})" title="Dokončit masáž">🌸</button>` : ''}
-        ${r.stav !== 'nedostavila_se' ? `<button class="btn btn-red btn-sm" onclick="zmenitStavRez(${r.id},'nedostavila_se')" title="Nedostavila se">🚫</button>` : ''}
-        ${r.stav !== 'zrusena' ? `<button class="btn btn-red btn-sm" onclick="zmenitStavRez(${r.id},'zrusena')" title="Zrušit">❌</button>` : ''}
-        <button class="btn btn-red btn-sm" onclick="smazatRezervaci(${r.id})" title="Smazat">🗑️</button>
+        ${r.stav !== 'nedostavila_se' ? `<button class="btn btn-red btn-sm" onclick="zmenitStavRez(${r.id},'nedostavila_se','${r.stav}')" title="Nedostavila se">🚫</button>` : ''}
+        ${r.stav !== 'zrusena' ? `<button class="btn btn-red btn-sm" onclick="zmenitStavRez(${r.id},'zrusena','${r.stav}')" title="Zrušit">❌</button>` : ''}
+        <button class="btn btn-red btn-sm" onclick="smazatRezervaci(${r.id},'${r.stav}',${Number(r.uhrazeno) || 0})" title="Smazat">🗑️</button>
       </td>
     </tr>`;
   // Dnešní a budoucí dny jsou rovnou rozbalené (to hlavní, co ji zajímá),
@@ -2611,11 +2611,11 @@ function vykreslitDetailRezervace(r) {
   `;
   document.getElementById('detailRezervaceAkce').innerHTML = `
     ${r.stav !== 'zrusena' ? `<button class="btn btn-outline btn-sm" onclick="closeModal('modalDetailRezervace');otevritUpravitRezervaci(${r.id})">✏️ Upravit</button>` : ''}
-    ${r.stav !== 'potvrzena' ? `<button class="btn btn-green btn-sm" onclick="zmenitStavRez(${r.id},'potvrzena');closeModal('modalDetailRezervace')">✅ Potvrdit</button>` : ''}
+    ${r.stav !== 'potvrzena' ? `<button class="btn btn-green btn-sm" onclick="zmenitStavRez(${r.id},'potvrzena','${r.stav}');closeModal('modalDetailRezervace')">✅ Potvrdit</button>` : ''}
     ${r.stav !== 'dokoncena' ? `<button class="btn btn-green btn-sm" onclick="closeModal('modalDetailRezervace');otevritDokonceniMasaze(${r.id})">🌸 Dokončit masáž</button>` : ''}
-    ${r.stav !== 'nedostavila_se' ? `<button class="btn btn-red btn-sm" onclick="zmenitStavRez(${r.id},'nedostavila_se');closeModal('modalDetailRezervace')">🚫 Nedostavila se</button>` : ''}
-    ${r.stav !== 'zrusena' ? `<button class="btn btn-red btn-sm" onclick="zmenitStavRez(${r.id},'zrusena');closeModal('modalDetailRezervace')">❌ Zrušit</button>` : ''}
-    <button class="btn btn-red btn-sm" onclick="smazatRezervaci(${r.id});closeModal('modalDetailRezervace')">🗑️ Smazat</button>
+    ${r.stav !== 'nedostavila_se' ? `<button class="btn btn-red btn-sm" onclick="zmenitStavRez(${r.id},'nedostavila_se','${r.stav}');closeModal('modalDetailRezervace')">🚫 Nedostavila se</button>` : ''}
+    ${r.stav !== 'zrusena' ? `<button class="btn btn-red btn-sm" onclick="zmenitStavRez(${r.id},'zrusena','${r.stav}');closeModal('modalDetailRezervace')">❌ Zrušit</button>` : ''}
+    <button class="btn btn-red btn-sm" onclick="smazatRezervaci(${r.id},'${r.stav}',${Number(r.uhrazeno) || 0});closeModal('modalDetailRezervace')">🗑️ Smazat</button>
   `;
 }
 async function nacistHistoriiPlateb(id) {
@@ -2732,7 +2732,15 @@ function filtrovatRez(f, el) {
   el.classList.add('active');
   vykreslitRezervace(f);
 }
-async function zmenitStavRez(id, stav) {
+// aktualniStav: dosavadní stav rezervace (zná ho volající z už načtených
+// dat) — jen pro rozpoznání přechodu PRYČ z "dokoncena", kdy masáž zmizí
+// z přehledu "Provedené masáže" (zůstane ale v databázi, lze vrátit zpět;
+// viz rezervace č. 466). bezPotvrzeni: true jen pro interní přesměrování
+// z smazatRezervaci() výš, kde uživatel už potvrdil přesně tenhle krok.
+async function zmenitStavRez(id, stav, aktualniStav, bezPotvrzeni) {
+  if (!bezPotvrzeni && aktualniStav === 'dokoncena' && stav !== 'dokoncena') {
+    if (!confirm('Tato masáž je dokončená. Změnou stavu zmizí z přehledu „Provedené masáže“, ale rezervace zůstane uložená v databázi (lze stav kdykoli vrátit zpět na „Dokončeno“). Pokračovat?')) return;
+  }
   const res = await adminFetch(API + '/admin/rezervace/' + id + '/stav', { method: 'PATCH', body: JSON.stringify({ stav }) });
   // Akce „Stromeček“: při obnovení zrušené rezervace už sleva nemusela jít uplatnit
   try { const data = await res.json(); if (data.promoZprava) alert(data.promoZprava); } catch (e) {}
@@ -2853,9 +2861,21 @@ async function dokoncitMasazOdeslat() {
   }
 }
 
-async function smazatRezervaci(id) {
+// Dokončenou nebo zaplacenou (i jen částečně/vrácenou) rezervaci backend
+// trvale smazat odmítne (ztratila by se evidence provedené služby/účetní
+// historie, viz rezervace č. 466) — tady se to pozná dřív, než se o to
+// vůbec zkouší, a nabídne se bezpečná alternativa (zrušení) místo mazání.
+async function smazatRezervaci(id, stav, uhrazeno) {
+  const chranena = stav === 'dokoncena' || Number(uhrazeno) > 0;
+  if (chranena) {
+    if (!confirm('Tuhle rezervaci nelze trvale smazat — je dokončená nebo má evidovanou platbu (ztratila by se evidence/účetní historie). Chcete ji místo toho zrušit (stav "Zrušeno")?')) return;
+    await zmenitStavRez(id, 'zrusena', stav, true); // bezPotvrzeni=true — tohle přesné rozhodnutí už právě potvrdil výš
+    return;
+  }
   if (!confirm('Trvale smazat tuto rezervaci?')) return;
-  await adminFetch(API + '/admin/rezervace/' + id, { method: 'DELETE' });
+  const res = await adminFetch(API + '/admin/rezervace/' + id, { method: 'DELETE' });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { alert(data.chyba || 'Smazání se nepodařilo.'); return; }
   loadRezervace();
 }
 
