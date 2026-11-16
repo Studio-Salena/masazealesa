@@ -10,6 +10,7 @@
 const assert = require('node:assert/strict');
 
 const { ziskatTestApiBase } = require('./env-guard');
+const { uklidRezervaciSFallbackem } = require('./test-helpers');
 const API = ziskatTestApiBase(); // fail-closed, žádný produkční fallback
 const HESLO = process.env.ADMIN_HESLO;
 
@@ -602,7 +603,7 @@ async function main() {
     console.log(`\n✅ VŠECHNY TESTY ANONYMIZACE PROŠLY (${uspesnych}/${scenaru} scénářů)`);
   } finally {
     for (const id of uklidRezervace) {
-      await adminFetch(`/admin/rezervace/${id}`, { method: 'DELETE' }).catch(() => {});
+      await uklidRezervaciSFallbackem(adminFetch, id);
     }
     for (const id of uklidPoukazy) {
       await adminFetch(`/admin/poukazy/${id}`, { method: 'DELETE' }).catch(() => {});

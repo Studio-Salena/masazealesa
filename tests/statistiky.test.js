@@ -10,6 +10,7 @@
 const assert = require('node:assert/strict');
 
 const { ziskatTestApiBase } = require('./env-guard');
+const { uklidRezervaciSFallbackem } = require('./test-helpers');
 const API = ziskatTestApiBase(); // Fáze 7C.6 — fail-closed, žádný produkční fallback
 const HESLO = process.env.ADMIN_HESLO;
 
@@ -121,7 +122,7 @@ async function main() {
 
     console.log('\n✅ VŠECHNY TESTY STATISTIK PROŠLY');
   } finally {
-    for (const id of uklidRezervace) await adminFetch(`/admin/rezervace/${id}`, { method: 'DELETE' }).catch(() => {});
+    for (const id of uklidRezervace) await uklidRezervaciSFallbackem(adminFetch, id);
     for (const id of uklidKlientky) await adminFetch(`/admin/klientky/${id}`, { method: 'DELETE' }).catch(() => {});
     console.log(`(uklizeno: ${uklidRezervace.length} testovacích rezervací, ${uklidKlientky.size} testovacích klientek)`);
   }

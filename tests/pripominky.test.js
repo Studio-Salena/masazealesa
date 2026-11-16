@@ -27,6 +27,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { ziskatTestApiBase } = require('./env-guard');
+const { uklidRezervaciSFallbackem } = require('./test-helpers');
 const API = ziskatTestApiBase(); // Fáze 7C.6 — fail-closed, žádný produkční fallback
 const HESLO = process.env.ADMIN_HESLO;
 
@@ -214,7 +215,7 @@ async function main() {
       console.log('(nastavení připomínek vráceno přesně do stavu před testem)');
     }
     if (rezervaceId) {
-      await adminFetch(`/admin/rezervace/${rezervaceId}`, { method: 'DELETE' });
+      await uklidRezervaciSFallbackem(adminFetch, rezervaceId);
       console.log('(testovací rezervace smazána)');
     }
     // Klientka se maže AŽ TEĎ, po smazání rezervace — DELETE

@@ -19,6 +19,7 @@
 const assert = require('node:assert/strict');
 
 const { ziskatTestApiBase } = require('./env-guard');
+const { uklidRezervaciSFallbackem } = require('./test-helpers');
 const API = ziskatTestApiBase();
 const HESLO = process.env.ADMIN_HESLO;
 
@@ -289,7 +290,7 @@ async function main() {
     console.log('\n✅ VŠECHNY TESTY IDEMPOTENCE PLATEB PROŠLY');
   } finally {
     for (const id of uklidRezervace) {
-      await adminFetch(`/admin/rezervace/${id}`, { method: 'DELETE' }).catch(() => null);
+      await uklidRezervaciSFallbackem(adminFetch, id);
     }
     let klientkySmazano = 0;
     for (const id of uklidKlientky) {

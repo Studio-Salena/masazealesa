@@ -13,6 +13,7 @@
 const assert = require('node:assert/strict');
 
 const { ziskatTestApiBase, ziskatTestDatabaseUrl } = require('./env-guard');
+const { uklidRezervaciSFallbackem } = require('./test-helpers');
 const API = ziskatTestApiBase(); // Fáze 7C.6 — fail-closed, žádný produkční fallback
 // Test 11 níž čte auditní historii přímo z DB (žádný dedikovaný GET endpoint
 // neexistuje) — DATABASE_URL se ověřuje HNED, na úrovni modulu, fail-closed.
@@ -284,7 +285,7 @@ async function main() {
 
     console.log('\n✅ VŠECHNY TESTY ÚPRAVY KONTAKTU KLIENTKY PROŠLY');
   } finally {
-    for (const id of uklidRezervace) await adminFetch(`/admin/rezervace/${id}`, { method: 'DELETE' }).catch(() => {});
+    for (const id of uklidRezervace) await uklidRezervaciSFallbackem(adminFetch, id);
     for (const id of uklidPoukazy) await adminFetch(`/admin/poukazy/${id}`, { method: 'DELETE' }).catch(() => {});
     let klientkySmazano = 0;
     for (const id of uklidKlientky) {

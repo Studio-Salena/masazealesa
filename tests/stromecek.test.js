@@ -14,6 +14,7 @@
 
 const assert = require('node:assert/strict');
 const { ziskatTestApiBase } = require('./env-guard');
+const { uklidRezervaciSFallbackem } = require('./test-helpers');
 const API = ziskatTestApiBase();
 const HESLO = process.env.ADMIN_HESLO;
 if (!HESLO) { console.error('Chybí ADMIN_HESLO v prostředí — test se přeskakuje.'); process.exit(0); }
@@ -324,7 +325,7 @@ main()
   .catch(e => { console.error('CHYBA:', e); process.exitCode = 1; })
   .finally(async () => {
     console.log('\n--- úklid ---');
-    for (const id of uklidRezervace) await adminFetch('/admin/rezervace/' + id, { method: 'DELETE' }).catch(() => {});
+    for (const id of uklidRezervace) await uklidRezervaciSFallbackem(adminFetch, id);
     for (const id of uklidZadosti) await adminFetch('/admin/poukazy/zadosti/' + id, { method: 'DELETE' }).catch(() => {});
     for (const id of uklidPoukazy) await adminFetch('/admin/poukazy/' + id, { method: 'DELETE' }).catch(() => {});
     for (const id of uklidKlientky) await adminFetch('/admin/klientky/' + id, { method: 'DELETE' }).catch(() => {});
