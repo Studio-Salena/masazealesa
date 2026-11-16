@@ -111,7 +111,12 @@ create table if not exists rezervace (
 -- ale historie jednotlivých plateb (kdy, kolik, jak) žije jen tady.
 create table if not exists platby (
   id serial primary key,
-  rezervace_id integer not null references rezervace(id) on delete cascade,
+  -- ON DELETE RESTRICT (ne CASCADE) — ochrana proti ztrátě evidence přijatých
+  -- peněz jako vedlejšímu efektu smazání rezervace. Smazat rezervaci s
+  -- JAKOUKOLI historií platby (i nulovou po vrácení) teď nejde ani přímým
+  -- SQL příkazem, ne jen přes administraci (viz DELETE /api/admin/rezervace/:id
+  -- a trigger rezervace_bez_mazani_dokoncene níž).
+  rezervace_id integer not null references rezervace(id) on delete restrict,
   castka numeric not null, -- kladná = platba, záporná = vratka (viz typ níž)
   typ text not null, -- platba | vratka
   zpusob_platby text not null, -- hotove | kartou | online | poukaz
@@ -531,3 +536,93 @@ alter table promo_poukaz_vyuziti enable row level security;
 -- index platí jen pro vyplněné klíče). Bezpečné spustit i opakovaně.
 alter table platby add column if not exists idempotency_klic text;
 create unique index if not exists platby_idempotency_klic_idx on platby (idempotency_klic) where idempotency_klic is not null;
+
+-- Ochrana proti ztrátě evidence plateb/dokončených masáží při mazání
+-- rezervace (viz DELETE /api/admin/rezervace/:id a rezervace č. 466, která
+-- dřív zmizela z evidence beze stopy) — tři části, bezpečné spustit opakovaně:
+--  1) FK platby.rezervace_id: CASCADE → RESTRICT. Rezervaci s JAKOUKOLI
+--     historií platby (i nulovou po úplném vrácení) teď nejde smazat ani
+--     přímým SQL příkazem, ne jen přes administraci.
+--  2) Trigger: dokončenou rezervaci (stav='dokoncena') nejde smazat vůbec,
+--     ani bez jakékoli platby — ta ochrana jde vynutit jen na úrovni
+--     databáze přes trigger (FK samo o sobě "stav" neřeší).
+--  3) Auditní tabulka + DVA DALŠÍ triggery (AFTER DELETE/AFTER UPDATE,
+--     definované pod samotnou tabulkou níž): KAŽDÉ povolené trvalé smazání
+--     rezervace a KAŽDÝ přechod stavu PRYČ z "dokoncena" (to totiž umí
+--     masáž z evidence "Provedené masáže" odstranit, aniž by se cokoli
+--     smazalo) — append-only, jen metadata, NIKDY osobní údaje, BEZ FOREIGN
+--     KEY (přežije smazání objektu, na který odkazuje — stejný princip jako
+--     klientky_udalosti/retence_udalosti výš). Zápis auditu je VÝHRADNĚ na
+--     úrovni databáze (appka už nezapisuje), ať se nedá obejít přímým SQL.
+alter table platby drop constraint if exists platby_rezervace_id_fkey;
+alter table platby add constraint platby_rezervace_id_fkey
+  foreign key (rezervace_id) references rezervace(id) on delete restrict;
+
+create or replace function zkontrolovat_mazani_dokoncene_rezervace() returns trigger language plpgsql as $$
+begin
+  if OLD.stav = 'dokoncena' then
+    raise exception 'Dokončenou masáž nelze trvale smazat (ztratila by se evidence provedené služby) — nejdřív změňte stav, pak smažte.';
+  end if;
+  return OLD;
+end $$;
+drop trigger if exists rezervace_bez_mazani_dokoncene on rezervace;
+create trigger rezervace_bez_mazani_dokoncene before delete on rezervace
+  for each row execute function zkontrolovat_mazani_dokoncene_rezervace();
+
+create table if not exists rezervace_ochrana_udalosti (
+  id serial primary key,
+  rezervace_id integer not null,
+  udalost text not null check (udalost in ('smazana', 'stav_zmenen_z_dokoncena')),
+  stav_pred text,
+  stav_po text,
+  uhrazeno_pred numeric,
+  mela_historii_plateb boolean not null default false,
+  kdy timestamptz not null default now()
+);
+
+-- Audit zápis PŘESUNUT z appky (server.js) do databázových triggerů —
+-- appka teď do rezervace_ochrana_udalosti nezapisuje VŮBEC, jen z ní čte
+-- (GET /api/admin/rezervace-ochrana-udalosti). Důvod: appkový INSERT šlo
+-- obejít přímým SQL DELETE/UPDATE mimo server.js (ověřeno živým testem —
+-- 0 nových auditních záznamů po přímém SQL zásahu). Trigger se spustí
+-- VŽDY, když řádek skutečně zmizí/změní stav, bez ohledu na to, jak k tomu
+-- došlo. Zápis auditu je navíc součástí STEJNÉ transakce/příkazu jako
+-- samotná změna (standardní vlastnost Postgres triggerů) — selže-li INSERT
+-- do auditu, celý příkaz (včetně DELETE/UPDATE rezervace) se vrátí zpět,
+-- nemůže tedy nastat změna bez auditního záznamu.
+--
+-- AFTER DELETE: v okamžiku, kdy trigger doběhne, řádek už byl skutečně
+-- smazán (prošel i přes trigger rezervace_bez_mazani_dokoncene výš a přes
+-- FK RESTRICT na platby) — "mela_historii_plateb" je u úspěšného smazání
+-- proto vždy false (jinak by FK smazání zablokovalo dřív, než se sem vůbec
+-- dostalo), dotaz na jistotu zůstává pro čitelnost/budoucí odolnost.
+create or replace function rezervace_audit_smazani() returns trigger language plpgsql as $$
+declare
+  v_pocet_plateb integer;
+begin
+  select count(*) into v_pocet_plateb from platby where rezervace_id = OLD.id;
+  insert into rezervace_ochrana_udalosti (rezervace_id, udalost, stav_pred, stav_po, uhrazeno_pred, mela_historii_plateb)
+  values (OLD.id, 'smazana', OLD.stav, null, OLD.uhrazeno, v_pocet_plateb > 0);
+  return OLD;
+end $$;
+drop trigger if exists rezervace_audit_smazani on rezervace;
+create trigger rezervace_audit_smazani after delete on rezervace
+  for each row execute function rezervace_audit_smazani();
+
+-- AFTER UPDATE: zapíše se jen při skutečném přechodu PRYČ z "dokoncena" (ne
+-- při každém UPDATE rezervace) — ten totiž umí masáž odstranit z evidence
+-- "Provedené masáže", aniž by se cokoli smazalo (viz rezervace č. 466).
+create or replace function rezervace_audit_zmena_stavu() returns trigger language plpgsql as $$
+declare
+  v_pocet_plateb integer;
+begin
+  if OLD.stav = 'dokoncena' and NEW.stav is distinct from OLD.stav then
+    select count(*) into v_pocet_plateb from platby where rezervace_id = OLD.id;
+    insert into rezervace_ochrana_udalosti (rezervace_id, udalost, stav_pred, stav_po, uhrazeno_pred, mela_historii_plateb)
+    values (OLD.id, 'stav_zmenen_z_dokoncena', OLD.stav, NEW.stav, OLD.uhrazeno, v_pocet_plateb > 0);
+  end if;
+  return NEW;
+end $$;
+drop trigger if exists rezervace_audit_zmena_stavu on rezervace;
+create trigger rezervace_audit_zmena_stavu after update on rezervace
+  for each row execute function rezervace_audit_zmena_stavu();

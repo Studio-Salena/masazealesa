@@ -1873,6 +1873,12 @@ app.patch('/api/admin/rezervace/:id/stav', async (req, res) => {
     await client.query('BEGIN');
     ({ rows: [predtim] } = await client.query('SELECT * FROM rezervace WHERE id = $1 FOR UPDATE', [req.params.id]));
     if (!predtim) { await client.query('ROLLBACK'); return res.status(404).json({ chyba: 'Rezervace nebyla nalezena.' }); }
+    // Přechod PRYČ z "dokoncena" rezervaci neničí, ale stejně jako smazání
+    // ji odstraní z evidence "Provedené masáže" (ta filtruje jen stav =
+    // 'dokoncena') — audit tohoto přechodu (viz rezervace č. 466) teď zapisuje
+    // VÝHRADNĚ databázový trigger (rezervace_audit_zmena_stavu, schema.sql),
+    // ne appka — ať se zachytí i přímý SQL UPDATE, ne jen tahle cesta, a ať
+    // nevznikne duplicitní záznam.
     await client.query('UPDATE rezervace SET stav = $1 WHERE id = $2', [stav, req.params.id]);
     if (Number(predtim.sleva_kc) > 0 && predtim.promo_kod) {
       if (stav === 'zrusena' && predtim.stav !== 'zrusena') {
@@ -2120,7 +2126,7 @@ app.delete('/api/admin/rezervace/:id', async (req, res) => {
   const client = await db.connect();
   try {
     await client.query('BEGIN');
-    const { rows: [rezervace] } = await client.query('SELECT id FROM rezervace WHERE id = $1 FOR UPDATE', [req.params.id]);
+    const { rows: [rezervace] } = await client.query('SELECT * FROM rezervace WHERE id = $1 FOR UPDATE', [req.params.id]);
     if (!rezervace) {
       // Už smazaná (druhým souběžným požadavkem) nebo nikdy neexistovala —
       // bezpečný no-op, žádná změna zůstatků. Zachovává dosavadní chování
@@ -2128,6 +2134,37 @@ app.delete('/api/admin/rezervace/:id', async (req, res) => {
       await client.query('COMMIT');
       return res.json({ ok: true });
     }
+
+    // Ochrana proti ztrátě evidence (viz rezervace č. 466, která zmizela z
+    // "Provedené masáže" beze stopy): dokončenou masáž nejde smazat NIKDY
+    // (ani bez platby), rezervaci s JAKOUKOLI historií platby (i nulovou po
+    // vrácení, i poukazovou) nejde smazat, dokud ta historie existuje.
+    // Stejná pravidla navíc vynucuje i databáze samotná (FK RESTRICT +
+    // trigger, viz schema.sql) — tahle kontrola je jen pro rychlou a
+    // srozumitelnou hlášku, ne jediná linie obrany.
+    const { rows: [{ pocet: pocetPlateb }] } = await client.query(
+      'SELECT count(*) AS pocet FROM platby WHERE rezervace_id = $1', [req.params.id]
+    );
+    const melaHistoriiPlateb = Number(pocetPlateb) > 0;
+    if (rezervace.stav === 'dokoncena') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ chyba: 'Dokončenou masáž nelze trvale smazat (ztratila by se evidence provedené služby). Použijte zrušení (stav "Zrušeno") nebo vraťte platbu, pokud je potřeba opravit účetnictví.' });
+    }
+    if (melaHistoriiPlateb) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ chyba: 'Rezervaci s evidovanou platbou (i vrácenou) nelze trvale smazat (ztratila by se účetní historie). Nejdřív vraťte platbu, pokud je potřeba, a rezervaci zrušte (stav "Zrušeno") místo smazání.' });
+    }
+
+    // Smazání je povolené (nedokončená, bez jakékoli platby) — audit zápisu
+    // (co a kdy zmizelo, bez osobních údajů) teď provádí VÝHRADNĚ databázový
+    // trigger (rezervace_audit_smazani, schema.sql), ne appka — ať se
+    // zachytí i přímý SQL DELETE, ne jen tahle cesta, a ať nevznikne
+    // duplicitní záznam.
+
+    // Od zavedení ochrany výš je tohle ve skutečnosti nedosažitelné — pokud
+    // by tu nějaký řádek byl, "melaHistoriiPlateb" by už dřív zablokovalo
+    // smazání. Zůstává to tu beze změny (čitelnost/historie kódu), ne jako
+    // záměrně mrtvý kód k úklidu.
     const { rows: platbyPoukazem } = await client.query(
       `SELECT poukaz_id, SUM(castka) AS castka FROM platby
        WHERE rezervace_id = $1 AND zpusob_platby = 'poukaz' AND poukaz_id IS NOT NULL
@@ -2159,6 +2196,17 @@ app.delete('/api/admin/rezervace/:id', async (req, res) => {
   } finally {
     client.release();
   }
+});
+
+// Čtecí přehled auditu ochrany mazání/dokončených rezervací (viz
+// rezervace_ochrana_udalosti ve schema.sql) — jen pro zpětné zjištění "co a
+// kdy zmizelo z evidence provedených masáží", žádný zápis. Bez osobních
+// údajů (tabulka samotná žádné neobsahuje).
+app.get('/api/admin/rezervace-ochrana-udalosti', async (req, res) => {
+  try {
+    const { rows } = await db.query('SELECT * FROM rezervace_ochrana_udalosti ORDER BY kdy DESC, id DESC LIMIT 200');
+    res.json(rows);
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
 // -- Pracovní doba --
