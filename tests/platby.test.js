@@ -93,7 +93,7 @@ async function main() {
     console.log('--- 2/6) plná platba (nezaplaceno → zaplaceno) ---');
     {
       const res = await adminFetch(`/admin/rezervace/${r1.id}/platba`, {
-        method: 'PATCH', body: JSON.stringify({ castka: cena, zpusob_platby: 'hotove' })
+        method: 'PATCH', body: JSON.stringify({ castka: cena, zpusob_platby: 'hotove', kontaktni_platba: true })
       });
       const data = await res.json();
       assert.equal(res.status, 200, JSON.stringify(data));
@@ -111,7 +111,7 @@ async function main() {
     {
       const castecna = Math.max(1, Math.floor(cena / 3));
       const res = await adminFetch(`/admin/rezervace/${r3.id}/platba`, {
-        method: 'PATCH', body: JSON.stringify({ castka: castecna, zpusob_platby: 'kartou' })
+        method: 'PATCH', body: JSON.stringify({ castka: castecna, zpusob_platby: 'kartou', kontaktni_platba: true })
       });
       const data = await res.json();
       assert.equal(res.status, 200, JSON.stringify(data));
@@ -128,7 +128,7 @@ async function main() {
       // Etapa 2 — poukaz se tu hned uplatňuje na rezervaci, musí tedy být
       // zaplacený, ne čekající na platbu.
       const poukazRes = await adminFetch('/admin/poukazy', {
-        method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-PLATBY-POUKAZ (smazat)', zaplaceno: true, zpusob_platby: 'hotove' })
+        method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-PLATBY-POUKAZ (smazat)', zaplaceno: true, zpusob_platby: 'hotove', kontaktni_platba: true })
       });
       const poukazData = await poukazRes.json();
       assert.equal(poukazRes.status, 200, JSON.stringify(poukazData));
@@ -158,7 +158,7 @@ async function main() {
       // částečné uplatnění vlastní částkou nižší než hodnota poukazu.
       // Etapa 2 — hned se uplatňuje, musí být zaplacený.
       const poukazRes = await adminFetch('/admin/poukazy', {
-        method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-PLATBY-DOPLATEK (smazat)', zaplaceno: true, zpusob_platby: 'hotove' })
+        method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-PLATBY-DOPLATEK (smazat)', zaplaceno: true, zpusob_platby: 'hotove', kontaktni_platba: true })
       });
       const poukazData = await poukazRes.json();
       assert.equal(poukazRes.status, 200, JSON.stringify(poukazData));
@@ -177,7 +177,7 @@ async function main() {
       console.log('OK — poukaz pokryje část ceny (' + castPoukazem + ' Kč): stav "castecne_zaplaceno"');
 
       const u2 = await adminFetch(`/admin/rezervace/${r5.id}/platba`, {
-        method: 'PATCH', body: JSON.stringify({ castka: doplatek, zpusob_platby: 'hotove' })
+        method: 'PATCH', body: JSON.stringify({ castka: doplatek, zpusob_platby: 'hotove', kontaktni_platba: true })
       }).then(r => r.json());
       assert.equal(u2.rezervace.stav_platby, 'zaplaceno');
       assert.equal(Number(u2.rezervace.uhrazeno), cena);
@@ -202,7 +202,7 @@ async function main() {
     let r8 = await vytvorRezervaci(polozka.id, '08');
     uklidRezervace.push(r8.id);
     {
-      await adminFetch(`/admin/rezervace/${r8.id}/platba`, { method: 'PATCH', body: JSON.stringify({ castka: cena, zpusob_platby: 'kartou' }) });
+      await adminFetch(`/admin/rezervace/${r8.id}/platba`, { method: 'PATCH', body: JSON.stringify({ castka: cena, zpusob_platby: 'kartou', kontaktni_platba: true }) });
       await adminFetch(`/admin/rezervace/${r8.id}/stav`, { method: 'PATCH', body: JSON.stringify({ stav: 'zrusena' }) });
       const seznam = await adminFetch('/admin/rezervace').then(r => r.json());
       const aktualni = seznam.find(x => x.id === r8.id);

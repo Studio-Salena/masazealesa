@@ -57,7 +57,7 @@ async function nastavStav(id, stav) {
 }
 async function platba(id, castka, zpusob_platby, typ) {
   const res = await adminFetch(`/admin/rezervace/${id}/platba`, {
-    method: 'PATCH', body: JSON.stringify({ castka, zpusob_platby, ...(typ ? { typ } : {}) })
+    method: 'PATCH', body: JSON.stringify({ castka, zpusob_platby, kontaktni_platba: true, ...(typ ? { typ } : {}) })
   });
   const data = await res.json();
   assert.equal(res.status, 200, 'Zápis platby selhal: ' + JSON.stringify(data));

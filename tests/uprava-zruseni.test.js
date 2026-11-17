@@ -269,7 +269,7 @@ async function main() {
     {
       const r = await vytvorRezervaci(polozka.id, '42', 30 + Math.floor(Math.random() * 200));
       uklidRezervace.push(r.id);
-      await adminFetch(`/admin/rezervace/${r.id}/platba`, { method: 'PATCH', body: JSON.stringify({ castka: Number(r.cena), zpusob_platby: 'hotove' }) });
+      await adminFetch(`/admin/rezervace/${r.id}/platba`, { method: 'PATCH', body: JSON.stringify({ castka: Number(r.cena), zpusob_platby: 'hotove', kontaktni_platba: true }) });
       const historiePred = await historiePlateb(r.id);
       assert.equal(historiePred.length, 1);
 
@@ -295,8 +295,8 @@ async function main() {
       uklidRezervace.push(r.id);
       const cena = Number(r.cena);
       const c1 = Math.max(1, Math.floor(cena * 0.3));
-      await adminFetch(`/admin/rezervace/${r.id}/platba`, { method: 'PATCH', body: JSON.stringify({ castka: c1, zpusob_platby: 'hotove' }) });
-      await adminFetch(`/admin/rezervace/${r.id}/platba`, { method: 'PATCH', body: JSON.stringify({ castka: c1, zpusob_platby: 'kartou' }) });
+      await adminFetch(`/admin/rezervace/${r.id}/platba`, { method: 'PATCH', body: JSON.stringify({ castka: c1, zpusob_platby: 'hotove', kontaktni_platba: true }) });
+      await adminFetch(`/admin/rezervace/${r.id}/platba`, { method: 'PATCH', body: JSON.stringify({ castka: c1, zpusob_platby: 'kartou', kontaktni_platba: true }) });
       const historiePred = await historiePlateb(r.id);
       assert.equal(historiePred.length, 2);
 
@@ -319,7 +319,7 @@ async function main() {
       const r = await vytvorRezervaci(polozka.id, '44', 30 + Math.floor(Math.random() * 200));
       uklidRezervace.push(r.id);
       // Etapa 2 — hned se uplatňuje na rezervaci, musí být zaplacený.
-      const poukazRes = await adminFetch('/admin/poukazy', { method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-UPRAVA-POUKAZ (smazat)', zaplaceno: true, zpusob_platby: 'hotove' }) }).then(x => x.json());
+      const poukazRes = await adminFetch('/admin/poukazy', { method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-UPRAVA-POUKAZ (smazat)', zaplaceno: true, zpusob_platby: 'hotove', kontaktni_platba: true }) }).then(x => x.json());
       uklidPoukazy.push(poukazRes.poukaz.id);
       const castPoukazem = Math.max(1, Math.floor(Number(r.cena) * 0.5));
       await adminFetch(`/admin/poukazy/${poukazRes.poukaz.id}/uplatnit`, { method: 'POST', body: JSON.stringify({ castka: castPoukazem, rezervace_id: r.id }) });
@@ -343,7 +343,7 @@ async function main() {
       const r = await vytvorRezervaci(polozka.id, '45', 30 + Math.floor(Math.random() * 200));
       uklidRezervace.push(r.id);
       const castecna = Math.max(1, Math.floor(Number(r.cena) * 0.3));
-      await adminFetch(`/admin/rezervace/${r.id}/platba`, { method: 'PATCH', body: JSON.stringify({ castka: castecna, zpusob_platby: 'hotove' }) });
+      await adminFetch(`/admin/rezervace/${r.id}/platba`, { method: 'PATCH', body: JSON.stringify({ castka: castecna, zpusob_platby: 'hotove', kontaktni_platba: true }) });
 
       const cerstva = await adminFetch('/admin/rezervace').then(res => res.json()).then(list => list.find(x => x.id === r.id));
       const terminyNove = await fetch(`${API}/rezervace/volne-terminy?datum=${cerstva.datum}&cenik_id=${jinaPolozka.id}`).then(x => x.json());
@@ -367,7 +367,7 @@ async function main() {
       const levnější = dražší.id === polozka.id ? jinaPolozka : polozka;
       const r = await vytvorRezervaci(dražší.id, '46', 30 + Math.floor(Math.random() * 200));
       uklidRezervace.push(r.id);
-      await adminFetch(`/admin/rezervace/${r.id}/platba`, { method: 'PATCH', body: JSON.stringify({ castka: Number(dražší.cena), zpusob_platby: 'hotove' }) });
+      await adminFetch(`/admin/rezervace/${r.id}/platba`, { method: 'PATCH', body: JSON.stringify({ castka: Number(dražší.cena), zpusob_platby: 'hotove', kontaktni_platba: true }) });
 
       const cerstva = await adminFetch('/admin/rezervace').then(res => res.json()).then(list => list.find(x => x.id === r.id));
       const terminyNove = await fetch(`${API}/rezervace/volne-terminy?datum=${cerstva.datum}&cenik_id=${levnější.id}`).then(x => x.json());

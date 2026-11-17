@@ -70,7 +70,7 @@ async function ziskatRezervaci(id) {
 // Etapa 2 — zaplaceno=false je výchozí; volající, co poukaz skutečně
 // uplatňuje (viz níž), si vyžádá zaplaceno=true explicitně.
 async function vytvorPoukaz(cenikId, telefon, jmeno = 'TEST-RETENCE-POUKAZ (smazat)', zaplaceno = false) {
-  const res = await adminFetch('/admin/poukazy', { method: 'POST', body: JSON.stringify({ cenik_id: cenikId, kupujici_jmeno: jmeno, kupujici_telefon: telefon, pro_koho: 'TEST-OBDAROVANA (smazat)', zaplaceno, zpusob_platby: zaplaceno ? 'hotove' : undefined }) });
+  const res = await adminFetch('/admin/poukazy', { method: 'POST', body: JSON.stringify({ cenik_id: cenikId, kupujici_jmeno: jmeno, kupujici_telefon: telefon, pro_koho: 'TEST-OBDAROVANA (smazat)', zaplaceno, zpusob_platby: zaplaceno ? 'hotove' : undefined, kontaktni_platba: zaplaceno ? true : undefined }) });
   const data = await res.json();
   assert.equal(res.status, 200, 'Vytvoření testovacího poukazu selhalo: ' + JSON.stringify(data));
   uklidPoukazy.push(data.poukaz.id);
@@ -93,7 +93,7 @@ async function vytvorExpirovanyPoukaz(mesicuZpet, telefon, jmeno = 'TEST-RETENCE
   const typ = await typRes.json();
   assert.equal(typRes.status, 200, JSON.stringify(typ));
   uklidTypy.push(typ.typ.id);
-  const res = await adminFetch('/admin/poukazy', { method: 'POST', body: JSON.stringify({ poukaz_typ_id: typ.typ.id, kupujici_jmeno: jmeno, kupujici_telefon: telefon, pro_koho: 'TEST-OBDAROVANA (smazat)', zaplaceno: true, zpusob_platby: 'hotove' }) });
+  const res = await adminFetch('/admin/poukazy', { method: 'POST', body: JSON.stringify({ poukaz_typ_id: typ.typ.id, kupujici_jmeno: jmeno, kupujici_telefon: telefon, pro_koho: 'TEST-OBDAROVANA (smazat)', zaplaceno: true, zpusob_platby: 'hotove', kontaktni_platba: true }) });
   const data = await res.json();
   assert.equal(res.status, 200, JSON.stringify(data));
   uklidPoukazy.push(data.poukaz.id);
@@ -278,7 +278,7 @@ async function main() {
       // finance/historie nedotčené po skutečné anonymizaci
       const telefonFinance = '6997206';
       const rFin = await vytvorRezervaciNaDatum(polozka.id, dnyZpet(15), telefonFinance);
-      await adminFetch(`/admin/rezervace/${rFin.id}/platba`, { method: 'PATCH', body: JSON.stringify({ castka: Number(polozka.cena), zpusob_platby: 'hotove' }) });
+      await adminFetch(`/admin/rezervace/${rFin.id}/platba`, { method: 'PATCH', body: JSON.stringify({ castka: Number(polozka.cena), zpusob_platby: 'hotove', kontaktni_platba: true }) });
       await nastavStavRezervace(rFin.id, 'dokoncena');
       const predApply = await ziskatRezervaci(rFin.id);
       const applyVysledek = await apply({ dry_run: false, potvrzeno: true });

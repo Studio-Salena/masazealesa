@@ -55,7 +55,7 @@ async function vytvorRezervaciZaplacenou(cenikId, telefonSuffix, cena) {
   const data = await res.json();
   assert.equal(res.status, 200, 'Vytvoření testovací rezervace selhalo: ' + JSON.stringify(data));
   if (data.rezervace.klientka_id) uklidKlientky.add(data.rezervace.klientka_id);
-  const platba = await adminFetch(`/admin/rezervace/${data.rezervace.id}/platba`, { method: 'PATCH', body: JSON.stringify({ castka: cena, zpusob_platby: 'hotove' }) });
+  const platba = await adminFetch(`/admin/rezervace/${data.rezervace.id}/platba`, { method: 'PATCH', body: JSON.stringify({ castka: cena, zpusob_platby: 'hotove', kontaktni_platba: true }) });
   assert.equal(platba.status, 200);
   return data.rezervace;
 }

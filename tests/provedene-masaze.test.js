@@ -81,7 +81,7 @@ async function dokoncit(id) {
 }
 
 async function zaplatit(id, castka, zpusob_platby) {
-  return adminFetch(`/admin/rezervace/${id}/platba`, { method: 'PATCH', body: JSON.stringify({ castka, zpusob_platby }) }).then(async r => ({ status: r.status, data: await r.json() }));
+  return adminFetch(`/admin/rezervace/${id}/platba`, { method: 'PATCH', body: JSON.stringify({ castka, zpusob_platby, kontaktni_platba: true }) }).then(async r => ({ status: r.status, data: await r.json() }));
 }
 
 async function najitPolozku(od, doD, id) {
@@ -196,7 +196,7 @@ async function main() {
       const r = await vytvorRezervaci(polozka.id, '16');
       uklidRezervace.push(r.id);
       const poukazRes = await adminFetch('/admin/poukazy', {
-        method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-PROVEDENE-MASAZE-POUKAZ (smazat)', zaplaceno: true, zpusob_platby: 'hotove' })
+        method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-PROVEDENE-MASAZE-POUKAZ (smazat)', zaplaceno: true, zpusob_platby: 'hotove', kontaktni_platba: true })
       });
       const poukazData = await poukazRes.json();
       assert.equal(poukazRes.status, 200, JSON.stringify(poukazData));

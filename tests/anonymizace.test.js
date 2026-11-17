@@ -77,7 +77,7 @@ async function nastavStav(rezervaceId, stav) {
 async function vytvorPoukaz(cenikId, telefon, jmeno = 'TEST-ANONYMIZACE-POUKAZ (smazat)', zaplaceno = false) {
   const res = await adminFetch('/admin/poukazy', {
     method: 'POST',
-    body: JSON.stringify({ cenik_id: cenikId, kupujici_jmeno: jmeno, kupujici_telefon: telefon, zaplaceno, zpusob_platby: zaplaceno ? 'hotove' : undefined })
+    body: JSON.stringify({ cenik_id: cenikId, kupujici_jmeno: jmeno, kupujici_telefon: telefon, zaplaceno, zpusob_platby: zaplaceno ? 'hotove' : undefined, kontaktni_platba: zaplaceno ? true : undefined })
   });
   const data = await res.json();
   assert.equal(res.status, 200, 'Vytvoření testovacího poukazu selhalo: ' + JSON.stringify(data));
@@ -191,7 +191,7 @@ async function main() {
     {
       const telefon = '6999005';
       const r = await vytvorRezervaci(polozka.id, telefon, odpocet); odpocet += 5;
-      await adminFetch(`/admin/rezervace/${r.id}/platba`, { method: 'PATCH', body: JSON.stringify({ castka: cena, zpusob_platby: 'hotove' }) });
+      await adminFetch(`/admin/rezervace/${r.id}/platba`, { method: 'PATCH', body: JSON.stringify({ castka: cena, zpusob_platby: 'hotove', kontaktni_platba: true }) });
       await nastavStav(r.id, 'dokoncena');
 
       const platbyPred = await adminFetch(`/admin/rezervace/${r.id}/platby`).then(x => x.json());
@@ -507,7 +507,7 @@ async function main() {
     {
       const telefon = '6999015';
       const r = await vytvorRezervaci(polozka.id, telefon, odpocet); odpocet += 5;
-      await adminFetch(`/admin/rezervace/${r.id}/platba`, { method: 'PATCH', body: JSON.stringify({ castka: cena, zpusob_platby: 'hotove' }) });
+      await adminFetch(`/admin/rezervace/${r.id}/platba`, { method: 'PATCH', body: JSON.stringify({ castka: cena, zpusob_platby: 'hotove', kontaktni_platba: true }) });
       await nastavStav(r.id, 'dokoncena');
 
       const ucetPred = await adminFetch('/admin/ucetnictvi').then(x => x.json());

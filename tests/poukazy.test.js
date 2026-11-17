@@ -107,7 +107,7 @@ async function main() {
       // Etapa 2 — tento poukaz se dál v souboru skutečně uplatňuje (zůstatek,
       // souběžné uplatnění, zrušení po vyčerpání), test tedy potřebuje poukaz
       // okamžitě použitelný, ne čekající na platbu.
-      body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-POUKAZY (smazat)', kupujici_telefon: telefon1, zaplaceno: true, zpusob_platby: 'hotove' })
+      body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-POUKAZY (smazat)', kupujici_telefon: telefon1, zaplaceno: true, zpusob_platby: 'hotove', kontaktni_platba: true })
     });
     const vytvor = await vytvorRes.json();
     assert.equal(vytvorRes.status, 200, 'Vydání testovacího poukazu selhalo: ' + JSON.stringify(vytvor));
@@ -224,7 +224,7 @@ async function main() {
       // DŮVODU EXPIRACE (ne jen že nezaplacený poukaz jde zamítnout z
       // jiného, dřívějšího důvodu).
       const poukazCRes = await adminFetch('/admin/poukazy', {
-        method: 'POST', body: JSON.stringify({ poukaz_typ_id: typ.typ.id, kupujici_jmeno: 'TEST-POUKAZY-EXPIROVANY (smazat)', kupujici_telefon: telefonC, zaplaceno: true, zpusob_platby: 'hotove' })
+        method: 'POST', body: JSON.stringify({ poukaz_typ_id: typ.typ.id, kupujici_jmeno: 'TEST-POUKAZY-EXPIROVANY (smazat)', kupujici_telefon: telefonC, zaplaceno: true, zpusob_platby: 'hotove', kontaktni_platba: true })
       });
       const poukazC = await poukazCRes.json();
       assert.equal(poukazCRes.status, 200, JSON.stringify(poukazC));
@@ -569,7 +569,7 @@ async function main() {
       // historie) — dřív by šel smazat (cerpano=false), teď NE, protože by
       // nenávratně zmizela evidence přijaté platby.
       const n8 = await adminFetch('/admin/poukazy', {
-        method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-E2-DEL-ZAPLACENY (smazat)', zaplaceno: true, zpusob_platby: 'hotove' })
+        method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-E2-DEL-ZAPLACENY (smazat)', zaplaceno: true, zpusob_platby: 'hotove', kontaktni_platba: true })
       }).then(r => r.json());
       uklidPoukazy.push(n8.poukaz.id);
       assert.equal(Number(n8.poukaz.zustatek), Number(n8.poukaz.hodnota), 'test předpoklad: nečerpaný poukaz');
@@ -650,7 +650,7 @@ async function main() {
         method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-E2-POTVRZENI (smazat)' })
       }).then(r => r.json());
       uklidPoukazy.push(nz2.poukaz.id);
-      const potvrzeni = await adminFetch(`/admin/poukazy/${nz2.poukaz.id}/potvrdit-platbu`, { method: 'PATCH', body: JSON.stringify({ zpusob_platby: 'kartou' }) });
+      const potvrzeni = await adminFetch(`/admin/poukazy/${nz2.poukaz.id}/potvrdit-platbu`, { method: 'PATCH', body: JSON.stringify({ zpusob_platby: 'kartou', kontaktni_platba: true }) });
       const potvrzeniData = await potvrzeni.json();
       assert.equal(potvrzeni.status, 200, 'Potvrzení platby selhalo: ' + JSON.stringify(potvrzeniData));
       assert.equal(potvrzeniData.poukaz.stav_uhrady, 'zaplaceno');
@@ -661,7 +661,7 @@ async function main() {
       console.log('OK — potvrzení platby odemkne uplatnění, zaplaceno_zpetne=false (nová platba)');
 
       // 3) Opakované potvrzení platby je odmítnuto.
-      const opakovane = await adminFetch(`/admin/poukazy/${nz2.poukaz.id}/potvrdit-platbu`, { method: 'PATCH', body: JSON.stringify({ zpusob_platby: 'hotove' }) });
+      const opakovane = await adminFetch(`/admin/poukazy/${nz2.poukaz.id}/potvrdit-platbu`, { method: 'PATCH', body: JSON.stringify({ zpusob_platby: 'hotove', kontaktni_platba: true }) });
       assert.equal(opakovane.status, 400, 'Opakované potvrzení platby mělo být odmítnuto');
       console.log('OK — opakované potvrzení platby na už zaplaceném poukazu je odmítnuto');
 
@@ -700,7 +700,7 @@ async function main() {
           console.log('OK — historický poukaz (stav_uhrady neznámý) se zůstatkem > 0 je také blokovaný pro zrušení');
 
           const doplneni = await adminFetch(`/admin/poukazy/${histPoukaz.id}/doplnit-historickou-platbu`, {
-            method: 'PATCH', body: JSON.stringify({ zpusob_platby: 'hotove', zaplaceno_kdy: minuleDatum.toISOString() })
+            method: 'PATCH', body: JSON.stringify({ zpusob_platby: 'hotove', zaplaceno_kdy: minuleDatum.toISOString(), kontaktni_platba: true })
           });
           const doplneniData = await doplneni.json();
           assert.equal(doplneni.status, 200, 'Doplnění historické platby selhalo: ' + JSON.stringify(doplneniData));

@@ -765,7 +765,7 @@ async function main() {
   async function vydatPoukazTypem(typId) {
     // Etapa 2 — všechna volání tohoto helperu v souboru poukaz hned uplatňují
     // na rezervaci, musí tedy být zaplacený.
-    const r = await adminFetch('/admin/poukazy', { method: 'POST', body: JSON.stringify({ poukaz_typ_id: typId, zaplaceno: true, zpusob_platby: 'hotove' }) });
+    const r = await adminFetch('/admin/poukazy', { method: 'POST', body: JSON.stringify({ poukaz_typ_id: typId, zaplaceno: true, zpusob_platby: 'hotove', kontaktni_platba: true }) });
     const data = await r.json();
     assert.equal(r.status, 200, 'vydání poukazu podle typu selhalo: ' + JSON.stringify(data));
     uklidPoukazy.push(data.poukaz.id);

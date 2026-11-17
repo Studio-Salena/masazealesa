@@ -177,7 +177,7 @@ async function main() {
     assert.equal(poPredPlatbou.data.prodejPoukazu.celkem - pred.data.prodejPoukazu.celkem, 0, 'nezaplacený poukaz se ještě nemá počítat do prodeje poukazů');
     ok('S5a) vyřízená žádost sama o sobě ještě nic nezapočítá do účetnictví (čeká na platbu)');
 
-    const potvrzeni = await adminJson('/admin/poukazy/' + s.data.poukaz.id + '/potvrdit-platbu', { method: 'PATCH', body: JSON.stringify({ zpusob_platby: 'hotove' }) });
+    const potvrzeni = await adminJson('/admin/poukazy/' + s.data.poukaz.id + '/potvrdit-platbu', { method: 'PATCH', body: JSON.stringify({ zpusob_platby: 'hotove', kontaktni_platba: true }) });
     assert.equal(potvrzeni.status, 200, JSON.stringify(potvrzeni.data));
     assert.equal(potvrzeni.data.poukaz.stav_uhrady, 'zaplaceno');
     const poZaplaceni = await adminJson('/admin/ucetnictvi');

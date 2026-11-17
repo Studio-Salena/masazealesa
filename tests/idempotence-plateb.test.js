@@ -67,7 +67,7 @@ function uuid() {
 }
 
 async function zaplatit(id, castka, zpusob_platby, idempotency_klic, typ) {
-  const body = { castka, zpusob_platby };
+  const body = { castka, zpusob_platby, kontaktni_platba: true };
   if (idempotency_klic) body.idempotency_klic = idempotency_klic;
   if (typ) body.typ = typ;
   return adminFetch(`/admin/rezervace/${id}/platba`, { method: 'PATCH', body: JSON.stringify(body) }).then(async r => ({ status: r.status, data: await r.json() }));

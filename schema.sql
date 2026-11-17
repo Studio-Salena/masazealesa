@@ -655,3 +655,27 @@ alter table prodeje_produktu alter column zpusob_platby drop default;
 alter table prodeje_produktu drop constraint if exists prodeje_produktu_zpusob_platby_check;
 alter table prodeje_produktu add constraint prodeje_produktu_zpusob_platby_check
   check (zpusob_platby in ('hotove','kartou','online','qr','poukaz'));
+
+-- Krok 2 přípravy na EET 2.0 (rozlišení způsobu a charakteru platby, viz
+-- migrace_krok2_rozliseni_platby.sql) — 'prevodem' (bankovní převod NA
+-- DÁLKU) doplněn k rezervacím i poukazům; 'qr' tam byl v unii CHECK už od
+-- Kroku 1, teď ho navíc smí použít i aplikační validace rezervací
+-- (ZPUSOBY_PLATBY_REZERVACE v server.js). Prodejna a produkty se v Kroku 2
+-- nemění (mimo schválený rozsah).
+alter table platby drop constraint if exists platby_zpusob_platby_check;
+alter table platby add constraint platby_zpusob_platby_check
+  check (zpusob_platby in ('hotove','kartou','online','qr','poukaz','prevodem'));
+
+alter table poukazy drop constraint if exists poukazy_zpusob_platby_check;
+alter table poukazy add constraint poukazy_zpusob_platby_check
+  check (zpusob_platby is null or zpusob_platby in ('hotove','kartou','online','qr','poukaz','prevodem'));
+
+-- "kontaktní platba" (§6 ZEET) — NEZÁVISLÉ na zpusob_platby (viz
+-- jeKontaktniPlatbaPlatna v server.js). Nový sloupec, nullable: historické
+-- řádky (vzniklé před touto migrací) zůstávají NULL NAVŽDY — žádný
+-- automatický dopočet podle metody, na výslovné přání Aleny. U nových
+-- skutečně přijatých plateb je hodnota vynucená v server.js (ne tady v DB
+-- CHECKem) — na úrovni DB zůstává sloupec záměrně bez NOT NULL, protože
+-- historická NULL je legitimní, trvalý stav, ne dočasná mezera k doplnění.
+alter table platby  add column if not exists kontaktni_platba boolean;
+alter table poukazy add column if not exists kontaktni_platba boolean;

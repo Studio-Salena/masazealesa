@@ -67,7 +67,7 @@ async function vytvorRezervaci(cenikId, telefonSuffix) {
 }
 
 async function zaplatit(id, castka, zpusob_platby, typ) {
-  const body = { castka, zpusob_platby };
+  const body = { castka, zpusob_platby, kontaktni_platba: true };
   if (typ) body.typ = typ;
   return adminFetch(`/admin/rezervace/${id}/platba`, { method: 'PATCH', body: JSON.stringify(body) }).then(async r => ({ status: r.status, data: await r.json() }));
 }
@@ -167,7 +167,7 @@ async function main() {
       const r = await vytvorRezervaci(polozka.id, '6');
       uklidRezervace.push(r.id);
       const poukazRes = await adminFetch('/admin/poukazy', {
-        method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-OCHRANA-MAZANI-POUKAZ (smazat)', zaplaceno: true, zpusob_platby: 'hotove' })
+        method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-OCHRANA-MAZANI-POUKAZ (smazat)', zaplaceno: true, zpusob_platby: 'hotove', kontaktni_platba: true })
       });
       const poukazData = await poukazRes.json();
       assert.equal(poukazRes.status, 200, JSON.stringify(poukazData));

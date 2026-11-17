@@ -52,7 +52,7 @@ async function vytvorRezervaci(cenikId, telefonSuffix, odpocetDni) {
 }
 async function platba(id, castka, zpusob_platby, typ) {
   return adminFetch(`/admin/rezervace/${id}/platba`, {
-    method: 'PATCH', body: JSON.stringify({ castka, zpusob_platby, ...(typ ? { typ } : {}) })
+    method: 'PATCH', body: JSON.stringify({ castka, zpusob_platby, kontaktni_platba: true, ...(typ ? { typ } : {}) })
   }).then(r => r.json().then(data => ({ status: r.status, data })));
 }
 async function historiePlateb(id) {
@@ -117,7 +117,7 @@ async function main() {
       // Etapa 2 — test uplatňuje tenhle poukaz na rezervaci hned, potřebuje
       // ho tedy okamžitě zaplacený, ne čekající na platbu.
       const poukazRes = await adminFetch('/admin/poukazy', {
-        method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-DENIK-POUKAZ (smazat)', zaplaceno: true, zpusob_platby: 'hotove' })
+        method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-DENIK-POUKAZ (smazat)', zaplaceno: true, zpusob_platby: 'hotove', kontaktni_platba: true })
       }).then(res => res.json());
       uklidPoukazy.push(poukazRes.poukaz.id);
       const castPoukazem = Math.max(1, Math.floor(cena * 0.6));
@@ -151,7 +151,7 @@ async function main() {
       // Etapa 2 — test uplatňuje poukaz hned (chce ověřit, že se uplatnění
       // nezapočítá dvakrát v Přijatých platbách), proto musí být zaplacený.
       const poukazRes = await adminFetch('/admin/poukazy', {
-        method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-DENIK-DVOJI (smazat)', zaplaceno: true, zpusob_platby: 'hotove' })
+        method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-DENIK-DVOJI (smazat)', zaplaceno: true, zpusob_platby: 'hotove', kontaktni_platba: true })
       }).then(res => res.json());
       uklidPoukazy.push(poukazRes.poukaz.id);
       const hodnotaPoukazu = Number(poukazRes.poukaz.hodnota);
@@ -296,7 +296,7 @@ async function main() {
       uklidRezervace.push(r.id);
       // Etapa 2 — hned se uplatňuje, musí být zaplacený.
       const poukazRes = await adminFetch('/admin/poukazy', {
-        method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-DENIK-SOUBEZNE (smazat)', zaplaceno: true, zpusob_platby: 'hotove' })
+        method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-DENIK-SOUBEZNE (smazat)', zaplaceno: true, zpusob_platby: 'hotove', kontaktni_platba: true })
       }).then(res => res.json());
       uklidPoukazy.push(poukazRes.poukaz.id);
       const hodnotaPoukazu = Number(poukazRes.poukaz.hodnota);

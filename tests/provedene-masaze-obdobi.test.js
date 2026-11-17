@@ -82,7 +82,7 @@ async function vytvorRezervaci(cenikId, telefonSuffix, datum, cas) {
 }
 
 async function zaplatit(id, castka, zpusob_platby) {
-  return adminFetch(`/admin/rezervace/${id}/platba`, { method: 'PATCH', body: JSON.stringify({ castka, zpusob_platby }) }).then(async r => ({ status: r.status, data: await r.json() }));
+  return adminFetch(`/admin/rezervace/${id}/platba`, { method: 'PATCH', body: JSON.stringify({ castka, zpusob_platby, kontaktni_platba: true }) }).then(async r => ({ status: r.status, data: await r.json() }));
 }
 
 async function dokoncit(id) {

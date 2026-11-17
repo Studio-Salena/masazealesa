@@ -197,7 +197,7 @@ async function main() {
       // 5a) výhradní využití → poukaz zmizí celý
       const r5 = await vytvorRezervaci(polozka.id, '5');
       const poukaz5 = await adminFetch('/admin/poukazy', {
-        method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-AUDIT-UKLID-POUKAZ-A (smazat)', zaplaceno: true, zpusob_platby: 'hotove' })
+        method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-AUDIT-UKLID-POUKAZ-A (smazat)', zaplaceno: true, zpusob_platby: 'hotove', kontaktni_platba: true })
       }).then(r => r.json());
       await adminFetch(`/admin/poukazy/${poukaz5.poukaz.id}/uplatnit`, { method: 'POST', body: JSON.stringify({ castka: cena, rezervace_id: r5.id }) });
       await smazatRezervaciNatvrdo(r5.id);
@@ -215,7 +215,7 @@ async function main() {
       const typ5bRes = await adminFetch('/admin/poukazy/typy', { method: 'POST', body: JSON.stringify({ hodnota: 2000, platnost_mesicu: platnostNahodna }) });
       const typ5b = await typ5bRes.json();
       assert.equal(typ5bRes.status, 200, JSON.stringify(typ5b));
-      const poukaz5b = await adminFetch('/admin/poukazy', { method: 'POST', body: JSON.stringify({ poukaz_typ_id: typ5b.typ.id, zaplaceno: true, zpusob_platby: 'hotove' }) }).then(r => r.json());
+      const poukaz5b = await adminFetch('/admin/poukazy', { method: 'POST', body: JSON.stringify({ poukaz_typ_id: typ5b.typ.id, zaplaceno: true, zpusob_platby: 'hotove', kontaktni_platba: true }) }).then(r => r.json());
       const prodejna5b = await adminFetch('/admin/prodejna', { method: 'POST', body: JSON.stringify({ masaz: 'TEST-AUDIT-UKLID jiné čerpání', cena: 500, poukaz_kod: poukaz5b.poukaz.kod }) }).then(r => r.json());
       const r5b = await vytvorRezervaci(polozka.id, '5b2');
       await adminFetch(`/admin/poukazy/${poukaz5b.poukaz.id}/uplatnit`, { method: 'POST', body: JSON.stringify({ castka: 300, rezervace_id: r5b.id }) });
@@ -293,7 +293,7 @@ async function main() {
 }
 
 async function zaplatitPresApi(id, castka) {
-  const r = await adminFetch(`/admin/rezervace/${id}/platba`, { method: 'PATCH', body: JSON.stringify({ castka, zpusob_platby: 'hotove' }) });
+  const r = await adminFetch(`/admin/rezervace/${id}/platba`, { method: 'PATCH', body: JSON.stringify({ castka, zpusob_platby: 'hotove', kontaktni_platba: true }) });
   assert.equal(r.status, 200);
 }
 

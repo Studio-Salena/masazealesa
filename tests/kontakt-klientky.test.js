@@ -194,7 +194,7 @@ async function main() {
     assert.equal(poukaz.klientka_id, idA, 'Poukaz se musí napojit na existující klientku A podle (aktuálního) telefonu');
 
     const platbaRes = await adminFetch(`/admin/rezervace/${rezervace.id}/platba`, {
-      method: 'PATCH', body: JSON.stringify({ castka: Number(polozka.cena), zpusob_platby: 'hotove' })
+      method: 'PATCH', body: JSON.stringify({ castka: Number(polozka.cena), zpusob_platby: 'hotove', kontaktni_platba: true })
     });
     assert.equal(platbaRes.status, 200, 'Zápis platby selhal');
 

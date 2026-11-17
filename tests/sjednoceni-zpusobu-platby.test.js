@@ -112,7 +112,7 @@ async function main() {
     for (const metoda of ['hotove', 'kartou', 'online']) {
       const r2 = await vytvorRezervaci(polozka.id, '1-' + metoda);
       const resOk = await adminFetch(`/admin/rezervace/${r2.id}/platba`, {
-        method: 'PATCH', body: JSON.stringify({ castka: 1, zpusob_platby: metoda })
+        method: 'PATCH', body: JSON.stringify({ castka: 1, zpusob_platby: metoda, kontaktni_platba: true })
       });
       assert.equal(resOk.status, 200, `1c) historická metoda '${metoda}' musí dál procházet: ` + JSON.stringify(await resOk.json().catch(() => ({}))));
     }
@@ -132,7 +132,7 @@ async function main() {
     assert.equal(resChybejici.status, 400, '2b) chybějící metoda platby u vydání poukazu musí být odmítnuta');
 
     const resQr = await adminFetch('/admin/poukazy', {
-      method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-SJEDNOCENI-QR (smazat)', zaplaceno: true, zpusob_platby: 'qr' })
+      method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-SJEDNOCENI-QR (smazat)', zaplaceno: true, zpusob_platby: 'qr', kontaktni_platba: true })
     });
     const poukazQr = await resQr.json();
     assert.equal(resQr.status, 200, '2c) historická metoda qr u vydání poukazu musí dál fungovat: ' + JSON.stringify(poukazQr));
@@ -159,7 +159,7 @@ async function main() {
     assert.equal(resChybejici.status, 400, '3b) chybějící metoda u potvrzení platby poukazu musí být odmítnuta');
 
     const resOk = await adminFetch(`/admin/poukazy/${nezaplaceny.poukaz.id}/potvrdit-platbu`, {
-      method: 'PATCH', body: JSON.stringify({ zpusob_platby: 'kartou' })
+      method: 'PATCH', body: JSON.stringify({ zpusob_platby: 'kartou', kontaktni_platba: true })
     });
     assert.equal(resOk.status, 200, '3c) historická metoda kartou musí dál procházet');
     await vycerpatPoukazCele(nezaplaceny.poukaz.kod, Number(polozka.cena));
@@ -207,7 +207,7 @@ async function main() {
     uklidPoukazyTypy.push(typ.typ.id);
 
     const poukaz = await adminFetch('/admin/poukazy', {
-      method: 'POST', body: JSON.stringify({ poukaz_typ_id: typ.typ.id, zaplaceno: true, zpusob_platby: 'hotove' })
+      method: 'POST', body: JSON.stringify({ poukaz_typ_id: typ.typ.id, zaplaceno: true, zpusob_platby: 'hotove', kontaktni_platba: true })
     }).then(r => r.json());
     uklidPoukazy.push(poukaz.poukaz.id);
 

@@ -42,14 +42,26 @@ const CRON_KLIC = process.env.CRON_KLIC; // sdílené heslo pro denní úlohu (p
 // zpusob_platby (4 různé literály). Tady je to teď na jednom místě, ALE
 // POZOR: tyhle 4 konstanty NEJSOU vzájemně zaměnitelné — každá odráží
 // historicky danou, byznysově odlišnou podmnožinu pro svůj konkrétní
-// endpoint (např. prodejna/produkty nikdy neumožňovaly platbu kartou,
-// endpoint plateb k rezervaci nikdy neuměl 'qr'). Cílem tohoto kroku je
-// sjednotit ZPŮSOB validace (jedno místo, žádný tichý fallback), ne
-// rozšířit, co je kde povolené — to by byla změna chování, ne sjednocení.
-const ZPUSOBY_PLATBY_REZERVACE = ['hotove', 'kartou', 'online', 'poukaz'];
-const ZPUSOBY_PLATBY_POUKAZ = ['hotove', 'kartou', 'qr'];
+// endpoint (např. prodejna/produkty nikdy neumožňovaly platbu kartou).
+// Krok 2 přípravy na EET 2.0 — doplněno 'qr' (platba QR kódem OSOBNĚ v
+// salonu) k rezervacím a 'prevodem' (bankovní převod NA DÁLKU) k rezervacím
+// i poukazům — dřív byly tyhle dvě věci u poukazů spojené pod jednou
+// hodnotou 'qr' s popiskem "QR kód / bankovní převod", což je pro EET
+// nepřesné (viz §6 ZEET — kontaktní vs. nekontaktní platba). Prodejna a
+// produkty se v Kroku 2 nemění (mimo schválený rozsah).
+const ZPUSOBY_PLATBY_REZERVACE = ['hotove', 'kartou', 'qr', 'prevodem', 'online', 'poukaz'];
+const ZPUSOBY_PLATBY_POUKAZ = ['hotove', 'kartou', 'qr', 'prevodem'];
 const ZPUSOBY_PLATBY_PRODEJNA = ['hotove', 'qr'];
 const ZPUSOBY_PLATBY_PRODUKT = ['hotove', 'kartou', 'online'];
+// Krok 2 — "kontaktní platba": NEZÁVISLÉ na zpusob_platby, protože metoda
+// sama o sobě spolehlivě neurčuje, jestli šlo o kontaktní platbu ve smyslu
+// §6 ZEET (osobně v salonu) nebo platbu na dálku. true/false u NOVĚ
+// zaznamenané skutečně přijaté platby je POVINNÉ (viz validace níž u
+// jednotlivých endpointů) — žádný tichý výchozí odhad na serveru. Historické
+// řádky (před touto migrací) zůstávají NULL navždy, nikdy se nedopočítávají.
+function jeKontaktniPlatbaPlatna(hodnota) {
+  return hodnota === true || hodnota === false;
+}
 const EMAIL_MAJITELKY = 'info@masazealesa.cz'; // kam chodí upozornění na novou rezervaci / žádost o poukaz z webu
 
 // Fáze 7G.3 — bezpečnostní limit na jedno spuštění POST /api/admin/retence/apply,
@@ -779,14 +791,17 @@ async function vytvoritPoukaz(client, {
   // vzniku (ruční vydání v adminu) — zaplaceno_zpetne vždy false, protože při
   // samotném VZNIKU poukazu nikdy nejde o dodatečné zpětné doplnění historie
   // (to řeší výhradně PATCH .../doplnit-historickou-platbu, ne tahle funkce).
-  stavUhrady = null, zaplacenoKdy = null
+  stavUhrady = null, zaplacenoKdy = null,
+  // Krok 2 — viz jeKontaktniPlatbaPlatna výš. null jen když se poukaz
+  // nevydává jako rovnou zaplacený (stavUhrady !== 'zaplaceno').
+  kontaktniPlatba = null
 }) {
   const platnostDo = new Date();
   platnostDo.setMonth(platnostDo.getMonth() + platnostMesicu);
   const { rows: [poukaz] } = await client.query(
-    `INSERT INTO poukazy (kod, hodnota, zustatek, platnost_do, zakoupeno_kde, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, konkretni_masaz, zpusob_platby, stav, klientka_id, ucel, sleva_kc, stav_uhrady, zaplaceno_kdy, zaplaceno_zpetne)
-     VALUES ($1,$2,$2,$3,$4,$5,$6,$7,$8,$9,$10,'aktivni',$11,$12,$13,$14,$15,false) RETURNING *`,
-    [vygenerovatKod(ucel), hodnota, platnostDo.toISOString().slice(0, 10), zakoupenoKde, kupujiciJmeno || null, kupujiciEmail || null, kupujiciTelefon || null, proKoho, konkretniMasaz, zpusobPlatby, klientkaId, ucel, Number(slevaKc) || 0, stavUhrady, zaplacenoKdy]
+    `INSERT INTO poukazy (kod, hodnota, zustatek, platnost_do, zakoupeno_kde, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, konkretni_masaz, zpusob_platby, stav, klientka_id, ucel, sleva_kc, stav_uhrady, zaplaceno_kdy, zaplaceno_zpetne, kontaktni_platba)
+     VALUES ($1,$2,$2,$3,$4,$5,$6,$7,$8,$9,$10,'aktivni',$11,$12,$13,$14,$15,false,$16) RETURNING *`,
+    [vygenerovatKod(ucel), hodnota, platnostDo.toISOString().slice(0, 10), zakoupenoKde, kupujiciJmeno || null, kupujiciEmail || null, kupujiciTelefon || null, proKoho, konkretniMasaz, zpusobPlatby, klientkaId, ucel, Number(slevaKc) || 0, stavUhrady, zaplacenoKdy, kontaktniPlatba]
   );
   return poukaz;
 }
@@ -2005,7 +2020,7 @@ const CHYBA_IDEMPOTENTNI_KONFLIKT = { chyba: 'Tento idempotenční klíč byl u�
 // masáž" a z tlačítka "Zaznamenat platbu" (viz zkontrolovatIdempotentniPlatbu
 // výš); staré/jiné volání bez klíče se chová přesně jako dřív.
 app.patch('/api/admin/rezervace/:id/platba', async (req, res) => {
-  const { castka, zpusob_platby, typ, idempotency_klic } = req.body || {};
+  const { castka, zpusob_platby, typ, idempotency_klic, kontaktni_platba } = req.body || {};
   const druh = typ === 'vratka' ? 'vratka' : 'platba';
   const castkaNum = Number(castka);
   if (!Number.isFinite(castkaNum) || castkaNum <= 0) {
@@ -2018,6 +2033,14 @@ app.patch('/api/admin/rezervace/:id/platba', async (req, res) => {
   if (klic && klic.length > 100) {
     return res.status(400).json({ chyba: 'Neplatný idempotenční klíč.' });
   }
+  // Krok 2 — u skutečně PŘIJATÉ platby (ne u vratky, ne u čerpání poukazu,
+  // kde nejde o nový pohyb peněz) musí být jednoznačně určené, jestli šlo o
+  // platbu osobně v salonu, nebo na dálku (viz jeKontaktniPlatbaPlatna výš).
+  const vyzadujeKontaktniPlatbu = druh === 'platba' && zpusob_platby !== 'poukaz';
+  if (vyzadujeKontaktniPlatbu && !jeKontaktniPlatbaPlatna(kontaktni_platba)) {
+    return res.status(400).json({ chyba: 'Vyberte prosím, jestli platba proběhla osobně v salonu, nebo na dálku.' });
+  }
+  const kontaktniPlatbaKUlozeni = jeKontaktniPlatbaPlatna(kontaktni_platba) ? kontaktni_platba : null;
   const client = await db.connect();
   try {
     await client.query('BEGIN');
@@ -2063,8 +2086,8 @@ app.patch('/api/admin/rezervace/:id/platba', async (req, res) => {
       // ať zkontrolovatIdempotentniPlatbu umí při opakování stejného
       // požadavku dohledat KTERÝ poukaz tahle vratka vytvořila.
       await client.query(
-        `INSERT INTO platby (rezervace_id, castka, typ, zpusob_platby, idempotency_klic, poukaz_id) VALUES ($1,$2,$3,$4,$5,$6)`,
-        [req.params.id, druh === 'vratka' ? -castkaNum : castkaNum, druh, zpusob_platby, klic, novyPoukaz ? novyPoukaz.id : null]
+        `INSERT INTO platby (rezervace_id, castka, typ, zpusob_platby, idempotency_klic, poukaz_id, kontaktni_platba) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [req.params.id, druh === 'vratka' ? -castkaNum : castkaNum, druh, zpusob_platby, klic, novyPoukaz ? novyPoukaz.id : null, kontaktniPlatbaKUlozeni]
       );
     } catch (e) {
       // Souběh dvou požadavků se STEJNÝM klíčem: mezi kontrolou výš a tímhle
@@ -2424,19 +2447,25 @@ app.get('/api/admin/poukazy', async (req, res) => {
 // na konkrétní masáž (cenik_id) — pak se hodnota poukazu vezme přímo z ceníku,
 // místo aby se vždycky vynucovala první/vybraná peněžní varianta.
 app.post('/api/admin/poukazy', async (req, res) => {
-  const { poukaz_typ_id, cenik_id, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, zakoupeno_kde, ucel, zaplaceno, zpusob_platby } = req.body || {};
+  const { poukaz_typ_id, cenik_id, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, zakoupeno_kde, ucel, zaplaceno, zpusob_platby, kontaktni_platba } = req.body || {};
   if (!poukaz_typ_id && !cenik_id) return res.status(400).json({ chyba: 'Vyberte variantu poukazu nebo konkrétní masáž.' });
   const ucelPoukazu = ucel === 'dar' ? 'dar' : 'prodej'; // výchozí "prodej", "dar" jen na výslovnou volbu v adminu
   // Etapa 2 — u daru se platba vůbec neřeší (nikdy nevzniká tržba). U prodeje
   // musí admin výslovně zvolit, zda je zaplaceno hned (a jakou metodou), nebo
   // zatím ne — žádná domněnka, žádné automatické "hotove".
-  let stavUhrady = null, zaplacenoKdy = null, zpusobPlatbyFinal = null;
+  let stavUhrady = null, zaplacenoKdy = null, zpusobPlatbyFinal = null, kontaktniPlatbaFinal = null;
   if (ucelPoukazu === 'prodej') {
     if (zaplaceno) {
       if (!ZPUSOBY_PLATBY_POUKAZ.includes(zpusob_platby)) {
         return res.status(400).json({ chyba: 'Vyberte prosím skutečný způsob platby.' });
       }
-      stavUhrady = 'zaplaceno'; zaplacenoKdy = new Date(); zpusobPlatbyFinal = zpusob_platby;
+      // Krok 2 — u skutečně PRÁVĚ TEĎ přijaté platby musí být jednoznačně
+      // určené, jestli šlo o platbu osobně v salonu, nebo na dálku (viz
+      // jeKontaktniPlatbaPlatna výš) — žádný tichý odhad podle metody.
+      if (!jeKontaktniPlatbaPlatna(kontaktni_platba)) {
+        return res.status(400).json({ chyba: 'Vyberte prosím, jestli platba proběhla osobně v salonu, nebo na dálku.' });
+      }
+      stavUhrady = 'zaplaceno'; zaplacenoKdy = new Date(); zpusobPlatbyFinal = zpusob_platby; kontaktniPlatbaFinal = kontaktni_platba;
     } else {
       stavUhrady = 'nezaplaceno';
     }
@@ -2465,7 +2494,7 @@ app.post('/api/admin/poukazy', async (req, res) => {
       hodnota, platnostMesicu, zakoupenoKde: zakoupeno_kde || 'osobne',
       kupujiciJmeno: kupujici_jmeno, kupujiciEmail: kupujici_email, kupujiciTelefon: kupujici_telefon,
       proKoho: pro_koho || null, konkretniMasaz, klientkaId, ucel: ucelPoukazu,
-      zpusobPlatby: zpusobPlatbyFinal, stavUhrady, zaplacenoKdy
+      zpusobPlatby: zpusobPlatbyFinal, stavUhrady, zaplacenoKdy, kontaktniPlatba: kontaktniPlatbaFinal
     });
     await client.query('COMMIT');
     res.json({ ok: true, poukaz });
@@ -2514,9 +2543,15 @@ app.patch('/api/admin/poukazy/:id/stav', async (req, res) => {
 // zaplaceno_zpetne=false → počítá se v kategorii B i F (skutečný nový pohyb
 // peněz), na rozdíl od zpětného doplnění historie.
 app.patch('/api/admin/poukazy/:id/potvrdit-platbu', async (req, res) => {
-  const { zpusob_platby } = req.body || {};
+  const { zpusob_platby, kontaktni_platba } = req.body || {};
   if (!ZPUSOBY_PLATBY_POUKAZ.includes(zpusob_platby)) {
     return res.status(400).json({ chyba: 'Vyberte prosím skutečný způsob platby.' });
+  }
+  // Krok 2 — skutečně nová platba, PRÁVĚ TEĎ potvrzovaná jako přijatá, musí
+  // mít jednoznačně určené, jestli šlo o platbu osobně v salonu, nebo na
+  // dálku (viz jeKontaktniPlatbaPlatna výš).
+  if (!jeKontaktniPlatbaPlatna(kontaktni_platba)) {
+    return res.status(400).json({ chyba: 'Vyberte prosím, jestli platba proběhla osobně v salonu, nebo na dálku.' });
   }
   const client = await db.connect();
   try {
@@ -2526,8 +2561,8 @@ app.patch('/api/admin/poukazy/:id/potvrdit-platbu', async (req, res) => {
     if (poukaz.ucel !== 'prodej') { await client.query('ROLLBACK'); return res.status(400).json({ chyba: 'Platbu lze potvrdit jen u prodaného poukazu.' }); }
     if (poukaz.stav_uhrady === 'zaplaceno') { await client.query('ROLLBACK'); return res.status(400).json({ chyba: 'Tento poukaz je už zaznamenaný jako zaplacený.' }); }
     const { rows: [aktualizovany] } = await client.query(
-      `UPDATE poukazy SET stav_uhrady = 'zaplaceno', zpusob_platby = $1, zaplaceno_kdy = now(), zaplaceno_zpetne = false WHERE id = $2 RETURNING *`,
-      [zpusob_platby, req.params.id]
+      `UPDATE poukazy SET stav_uhrady = 'zaplaceno', zpusob_platby = $1, zaplaceno_kdy = now(), zaplaceno_zpetne = false, kontaktni_platba = $3 WHERE id = $2 RETURNING *`,
+      [zpusob_platby, req.params.id, kontaktni_platba]
     );
     await client.query('COMMIT');
     res.json({ ok: true, poukaz: aktualizovany });
@@ -2548,13 +2583,18 @@ app.patch('/api/admin/poukazy/:id/potvrdit-platbu', async (req, res) => {
 // peníze už započítané v dávno uzavřené uzávěrce), jen do kategorie C, a i tam
 // beze změny data (viz GET /api/admin/ucetnictvi) — žádný nový příjem nevzniká.
 app.patch('/api/admin/poukazy/:id/doplnit-historickou-platbu', async (req, res) => {
-  const { zpusob_platby, zaplaceno_kdy } = req.body || {};
+  const { zpusob_platby, zaplaceno_kdy, kontaktni_platba } = req.body || {};
   if (!ZPUSOBY_PLATBY_POUKAZ.includes(zpusob_platby)) {
     return res.status(400).json({ chyba: 'Vyberte prosím skutečný způsob platby.' });
   }
   const datum = zaplaceno_kdy ? new Date(zaplaceno_kdy) : null;
   if (!datum || Number.isNaN(datum.getTime())) {
     return res.status(400).json({ chyba: 'Zadejte prosím platné datum skutečné platby.' });
+  }
+  // Krok 2 — i dodatečné doplnění je NOVÝ zápis reálné platby (jen s datem v
+  // minulosti), takže potřebuje stejně jednoznačně určený charakter platby.
+  if (!jeKontaktniPlatbaPlatna(kontaktni_platba)) {
+    return res.status(400).json({ chyba: 'Vyberte prosím, jestli platba proběhla osobně v salonu, nebo na dálku.' });
   }
   const client = await db.connect();
   try {
@@ -2567,8 +2607,8 @@ app.patch('/api/admin/poukazy/:id/doplnit-historickou-platbu', async (req, res) 
       return res.status(400).json({ chyba: 'Tuto akci lze použít jen u historického poukazu s neznámým stavem úhrady.' });
     }
     const { rows: [aktualizovany] } = await client.query(
-      `UPDATE poukazy SET stav_uhrady = 'zaplaceno', zpusob_platby = $1, zaplaceno_kdy = $2, zaplaceno_zpetne = true WHERE id = $3 RETURNING *`,
-      [zpusob_platby, datum.toISOString(), req.params.id]
+      `UPDATE poukazy SET stav_uhrady = 'zaplaceno', zpusob_platby = $1, zaplaceno_kdy = $2, zaplaceno_zpetne = true, kontaktni_platba = $4 WHERE id = $3 RETURNING *`,
+      [zpusob_platby, datum.toISOString(), req.params.id, kontaktni_platba]
     );
     await client.query('COMMIT');
     res.json({ ok: true, poukaz: aktualizovany });
