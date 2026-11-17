@@ -626,3 +626,32 @@ end $$;
 drop trigger if exists rezervace_audit_zmena_stavu on rezervace;
 create trigger rezervace_audit_zmena_stavu after update on rezervace
   for each row execute function rezervace_audit_zmena_stavu();
+
+-- Krok 1 přípravy na EET 2.0 (sjednocení způsobů plateb, viz
+-- migrace_sjednoceni_zpusobu_platby.sql) — DB-úrovňová pojistka navíc k
+-- validaci v server.js (jedno sdílené místo definice místo 4 nezávislých
+-- literálů, viz ZPUSOBY_PLATBY_* konstanty). CHECK je úmyslně nejširší
+-- UNIE všech historicky platných hodnot napříč tabulkami, NE zúžená
+-- podmnožina konkrétního endpointu — přesné, užší business pravidlo
+-- zůstává v appce, DB jen chrání proti nesmyslné hodnotě přes jakoukoli
+-- cestu (i přímé SQL).
+alter table platby drop constraint if exists platby_zpusob_platby_check;
+alter table platby add constraint platby_zpusob_platby_check
+  check (zpusob_platby in ('hotove','kartou','online','qr','poukaz'));
+
+alter table poukazy drop constraint if exists poukazy_zpusob_platby_check;
+alter table poukazy add constraint poukazy_zpusob_platby_check
+  check (zpusob_platby is null or zpusob_platby in ('hotove','kartou','online','qr','poukaz'));
+
+-- DEFAULT 'hotove' odstraněn — appka dnes už vždy explicitně vkládá
+-- zpusob_platby (ověřeno), DEFAULT tu byl jen tichá možnost "platba bez
+-- výslovného potvrzení", přesně to, co tento krok odstraňuje i v appce.
+alter table prodeje alter column zpusob_platby drop default;
+alter table prodeje drop constraint if exists prodeje_zpusob_platby_check;
+alter table prodeje add constraint prodeje_zpusob_platby_check
+  check (zpusob_platby in ('hotove','kartou','online','qr','poukaz'));
+
+alter table prodeje_produktu alter column zpusob_platby drop default;
+alter table prodeje_produktu drop constraint if exists prodeje_produktu_zpusob_platby_check;
+alter table prodeje_produktu add constraint prodeje_produktu_zpusob_platby_check
+  check (zpusob_platby in ('hotove','kartou','online','qr','poukaz'));

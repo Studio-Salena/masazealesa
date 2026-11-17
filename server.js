@@ -36,6 +36,20 @@ db.on('error', (err) => console.error('Neočekávaná chyba databázového spoje
 
 const ADMIN_HESLO = process.env.ADMIN_HESLO;
 const CRON_KLIC = process.env.CRON_KLIC; // sdílené heslo pro denní úlohu (připomínky, žádosti o recenzi) i pro retenční cron (Fáze 7G.3)
+
+// Krok 1 přípravy na EET 2.0 (sjednocení způsobů plateb) — každý peněžní
+// endpoint měl dřív svůj vlastní nezávislý seznam povolených hodnot
+// zpusob_platby (4 různé literály). Tady je to teď na jednom místě, ALE
+// POZOR: tyhle 4 konstanty NEJSOU vzájemně zaměnitelné — každá odráží
+// historicky danou, byznysově odlišnou podmnožinu pro svůj konkrétní
+// endpoint (např. prodejna/produkty nikdy neumožňovaly platbu kartou,
+// endpoint plateb k rezervaci nikdy neuměl 'qr'). Cílem tohoto kroku je
+// sjednotit ZPŮSOB validace (jedno místo, žádný tichý fallback), ne
+// rozšířit, co je kde povolené — to by byla změna chování, ne sjednocení.
+const ZPUSOBY_PLATBY_REZERVACE = ['hotove', 'kartou', 'online', 'poukaz'];
+const ZPUSOBY_PLATBY_POUKAZ = ['hotove', 'kartou', 'qr'];
+const ZPUSOBY_PLATBY_PRODEJNA = ['hotove', 'qr'];
+const ZPUSOBY_PLATBY_PRODUKT = ['hotove', 'kartou', 'online'];
 const EMAIL_MAJITELKY = 'info@masazealesa.cz'; // kam chodí upozornění na novou rezervaci / žádost o poukaz z webu
 
 // Fáze 7G.3 — bezpečnostní limit na jedno spuštění POST /api/admin/retence/apply,
@@ -1997,7 +2011,7 @@ app.patch('/api/admin/rezervace/:id/platba', async (req, res) => {
   if (!Number.isFinite(castkaNum) || castkaNum <= 0) {
     return res.status(400).json({ chyba: 'Zadejte prosím kladnou částku.' });
   }
-  if (!['hotove', 'kartou', 'online', 'poukaz'].includes(zpusob_platby)) {
+  if (!ZPUSOBY_PLATBY_REZERVACE.includes(zpusob_platby)) {
     return res.status(400).json({ chyba: 'Vyberte prosím způsob platby.' });
   }
   const klic = idempotency_klic ? String(idempotency_klic).trim() : null;
@@ -2419,7 +2433,7 @@ app.post('/api/admin/poukazy', async (req, res) => {
   let stavUhrady = null, zaplacenoKdy = null, zpusobPlatbyFinal = null;
   if (ucelPoukazu === 'prodej') {
     if (zaplaceno) {
-      if (!['hotove', 'kartou', 'qr'].includes(zpusob_platby)) {
+      if (!ZPUSOBY_PLATBY_POUKAZ.includes(zpusob_platby)) {
         return res.status(400).json({ chyba: 'Vyberte prosím skutečný způsob platby.' });
       }
       stavUhrady = 'zaplaceno'; zaplacenoKdy = new Date(); zpusobPlatbyFinal = zpusob_platby;
@@ -2501,7 +2515,7 @@ app.patch('/api/admin/poukazy/:id/stav', async (req, res) => {
 // peněz), na rozdíl od zpětného doplnění historie.
 app.patch('/api/admin/poukazy/:id/potvrdit-platbu', async (req, res) => {
   const { zpusob_platby } = req.body || {};
-  if (!['hotove', 'kartou', 'qr'].includes(zpusob_platby)) {
+  if (!ZPUSOBY_PLATBY_POUKAZ.includes(zpusob_platby)) {
     return res.status(400).json({ chyba: 'Vyberte prosím skutečný způsob platby.' });
   }
   const client = await db.connect();
@@ -2535,7 +2549,7 @@ app.patch('/api/admin/poukazy/:id/potvrdit-platbu', async (req, res) => {
 // beze změny data (viz GET /api/admin/ucetnictvi) — žádný nový příjem nevzniká.
 app.patch('/api/admin/poukazy/:id/doplnit-historickou-platbu', async (req, res) => {
   const { zpusob_platby, zaplaceno_kdy } = req.body || {};
-  if (!['hotove', 'kartou', 'qr'].includes(zpusob_platby)) {
+  if (!ZPUSOBY_PLATBY_POUKAZ.includes(zpusob_platby)) {
     return res.status(400).json({ chyba: 'Vyberte prosím skutečný způsob platby.' });
   }
   const datum = zaplaceno_kdy ? new Date(zaplaceno_kdy) : null;
@@ -3411,13 +3425,19 @@ app.post('/api/admin/prodejna', async (req, res) => {
       );
       poukazId = poukaz.id;
     }
-    // Zbytek ceny (po odečtení poukazu, pokud byl zadaný) musí mít platný
-    // způsob platby — bez poukazu je tohle prostě celá cena jako dřív.
-    if (zbytek > 0 && poukazId && !['hotove', 'qr'].includes(zpusob_platby)) {
+    // Zbytek ceny (po odečtení poukazu, pokud byl zadaný) musí mít platný,
+    // VÝSLOVNĚ potvrzený způsob platby — bez poukazu je tohle prostě celá
+    // cena jako dřív. Krok 1 (sjednocení plateb) — dřív se tahle kontrola
+    // prováděla jen když byl zadaný poukaz; běžný prodej bez poukazu se
+    // nevalidoval vůbec a tichý fallback níž z něj tiše udělal "hotove",
+    // i když admin žádnou platbu výslovně nepotvrdila. Teď platí stejně
+    // přísně pro oba případy, beze změny povolených hodnot (historicky
+    // vždy jen hotove/qr pro zbytek ceny v prodejně).
+    if (zbytek > 0 && !ZPUSOBY_PLATBY_PRODEJNA.includes(zpusob_platby)) {
       await client.query('ROLLBACK');
       return res.status(400).json({ chyba: 'Vyberte prosím způsob platby pro zbytek ceny.' });
     }
-    const zpusobPlatbyFinal = poukazId && zbytek <= 0 ? 'poukaz' : (zpusob_platby || 'hotove');
+    const zpusobPlatbyFinal = zbytek <= 0 ? 'poukaz' : zpusob_platby;
 
     const { rows: [prodej] } = await client.query(
       'INSERT INTO prodeje (masaz, cena, zpusob_platby, poznamka, poukaz_id, poukaz_castka) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
@@ -3616,6 +3636,11 @@ app.post('/api/admin/produkty/:id/prodat', async (req, res) => {
   const { mnozstvi, zpusob_platby } = req.body || {};
   const mnozstviNum = Number(mnozstvi);
   if (!Number.isInteger(mnozstviNum) || mnozstviNum <= 0) return res.status(400).json({ chyba: 'Zadejte prosím kladný celočíselný počet kusů.' });
+  // Krok 1 (sjednocení plateb) — dřív tu nebyla žádná validace a chybějící
+  // hodnota se tiše stala "hotove", i bez výslovného potvrzení.
+  if (!ZPUSOBY_PLATBY_PRODUKT.includes(zpusob_platby)) {
+    return res.status(400).json({ chyba: 'Vyberte prosím způsob platby.' });
+  }
   const client = await db.connect();
   try {
     await client.query('BEGIN');
@@ -3629,7 +3654,7 @@ app.post('/api/admin/produkty/:id/prodat', async (req, res) => {
     const { rows: [prodej] } = await client.query(
       `INSERT INTO prodeje_produktu (produkt_id, nazev, mnozstvi, cena_za_kus, cena_celkem, zpusob_platby)
        VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [produkt.id, produkt.skupina + ' – ' + produkt.varianta, mnozstviNum, produkt.cena, cenaCelkem, zpusob_platby || 'hotove']
+      [produkt.id, produkt.skupina + ' – ' + produkt.varianta, mnozstviNum, produkt.cena, cenaCelkem, zpusob_platby]
     );
     const { rows: [aktualizovany] } = await client.query('UPDATE produkty SET sklad = sklad - $1 WHERE id = $2 RETURNING *', [mnozstviNum, produkt.id]);
     await client.query('COMMIT');
