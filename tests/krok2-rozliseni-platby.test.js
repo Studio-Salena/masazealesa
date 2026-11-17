@@ -4,21 +4,30 @@
 // Cíl testu:
 //  1) 'qr' a 'prevodem' nově fungují jako zpusob_platby u rezervací, 'prevodem'
 //     nově funguje u poukazů (dřív jen 'qr' s dvojznačným popiskem).
-//  2) U skutečně nové/právě potvrzované přijaté platby (rezervace i poukaz) je
-//     kontaktni_platba POVINNÁ — chybějící nebo neplatná hodnota je odmítnuta.
-//  3) Platná hodnota (true i false) se uloží a je čitelná zpátky.
+//  2) kontaktni_platba NENÍ tvrdě vyžadovaná na úrovni API (zpětná kompatibilita
+//     se starší nasazenou administrací, viz jeKontaktniPlatbaPlatna v server.js)
+//     — chybějící/neplatná hodnota se bezpečně uloží jako NULL, nikdy chyba.
+//  3) Platná hodnota (true i false) se uloží a je čitelná zpátky, PŘESNĚ jak
+//     byla zadaná (false se neztrácí/nezamění za "nezadáno").
 //  4) Vratka a čerpání poukazu (zpusob_platby='poukaz') kontaktni_platba
-//     NEVYŽADUJÍ (nejde o nový příjem peněz).
+//     nevyžadují (nejde o nový příjem peněz).
 //  5) Historické řádky (vzniklé před touto migrací) mají kontaktni_platba
 //     IS NULL — ŽÁDNÝ automatický dopočet/backfill.
 //  6) Částečné/kombinované platby: každý řádek si nese svou vlastní správnou
 //     dvojici zpusob_platby/kontaktni_platba, součet uhrazeno sedí.
 //  7) 'prevodem' se správně počítá do přijatých plateb v účetnictví (není
 //     vyloučené jako 'poukaz').
+//  8) STATICKY: admin.html (nová administrace) skutečně POSÍLÁ kontaktni_platba
+//     u každé nové přijaté platby (rezervace, dokončení masáže, poukaz vydání/
+//     potvrzení/historická platba) i u skutečné vratky — a převádí volbu
+//     selectu na SKUTEČNÝ boolean (true/false), ne na syrový řetězec 'ano'/'ne'
+//     (to by server s přísnou kontrolou typu zahodil jako neplatné -> NULL).
 //
 // Spuštění:  ADMIN_HESLO=... TEST_API_BASE=http://localhost:3001/api DATABASE_URL=... node tests/krok2-rozliseni-platby.test.js
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const { ziskatTestApiBase, ziskatTestDatabaseUrl } = require('./env-guard');
 const { uklidRezervaciSFallbackem } = require('./test-helpers');
@@ -163,7 +172,21 @@ async function main() {
     assert.equal(resVratka.status, 200, '2a) vratka BEZ kontaktni_platba musí uspět (není vyžadovaná): ' + JSON.stringify(await resVratka.json().catch(() => ({}))));
     const vratkaRadek = await posledniPlatba(r.id);
     assert.equal(vratkaRadek.kontaktni_platba, null, '2b) vratka bez zadané kontaktni_platba se uloží jako NULL');
-    console.log('OK — 2) rezervace/vratka: kontaktni_platba se nevyžaduje, uloží se NULL, pokud není zadaná');
+
+    // 2c) skutečná vratka SE zadanou kontaktni_platba (nová administrace u
+    // skutečné vratky peněz) — false se nesmí ztratit/zaměnit za "nezadáno".
+    const r2 = await vytvorRezervaci(polozka.id, '2-prevodem');
+    await adminFetch(`/admin/rezervace/${r2.id}/platba`, {
+      method: 'PATCH', body: JSON.stringify({ castka: 300, zpusob_platby: 'hotove', kontaktni_platba: true })
+    });
+    const resVratkaPrevodem = await adminFetch(`/admin/rezervace/${r2.id}/platba`, {
+      method: 'PATCH', body: JSON.stringify({ castka: 300, zpusob_platby: 'prevodem', typ: 'vratka', kontaktni_platba: false })
+    });
+    assert.equal(resVratkaPrevodem.status, 200, '2c) skutečná vratka převodem s kontaktni_platba=false musí uspět');
+    const vratkaPrevodemRadek = await posledniPlatba(r2.id);
+    assert.equal(vratkaPrevodemRadek.zpusob_platby, 'prevodem', '2c) uložená metoda vratky musí být přesně prevodem');
+    assert.equal(vratkaPrevodemRadek.kontaktni_platba, false, '2c) uložená kontaktni_platba=false u skutečné vratky se NESMÍ ztratit ani zaměnit za NULL');
+    console.log('OK — 2) rezervace/vratka: kontaktni_platba se nevyžaduje (uloží se NULL, pokud není zadaná), ale pokud zadaná je (i false), uloží se přesně');
   }
 
   // 3) Rezervace — vratka "jako poukaz" (zpusob_platby='poukaz'): kontaktni_platba se také nevyžaduje
@@ -306,6 +329,53 @@ async function main() {
     const rozdil = Number(po.prijatePlatby.celkem) - Number(pred.prijatePlatby.celkem);
     assert.equal(rozdil, castka, '8) přijatá platba prevodem (' + castka + ' Kč) se musí objevit v součtu přijatých plateb v účetnictví, nesmí být vyloučená jako poukaz (rozdíl byl ' + rozdil + ' Kč)');
     console.log('OK — 8) účetnictví: platba prevodem se správně počítá do přijatých plateb');
+  }
+
+  // 9) STATICKY: admin.html skutečně POSÍLÁ kontaktni_platba (jako skutečný
+  // boolean, ne syrový řetězec) u každé nové přijaté platby i u skutečné
+  // vratky — čtena je PŘÍMO skutečná administrace, ne kopie/reimplementace
+  // (stejný princip jako escapeHtml v xss.test.js).
+  {
+    const html = fs.readFileSync(path.join(__dirname, '..', 'admin.html'), 'utf8');
+    function extrahovatFunkci(nazev) {
+      const regex = new RegExp('(?:async\\s+)?function\\s+' + nazev + '\\s*\\([^)]*\\)\\s*\\{');
+      const m = regex.exec(html);
+      assert.ok(m, `Funkce ${nazev} nebyla v admin.html nalezena — regrese!`);
+      let i = m.index + m[0].length, hloubka = 1;
+      while (hloubka > 0 && i < html.length) {
+        if (html[i] === '{') hloubka++;
+        else if (html[i] === '}') hloubka--;
+        i++;
+      }
+      return html.slice(m.index, i);
+    }
+
+    // a) Zaznamenat platbu k rezervaci
+    const fZaznamenat = extrahovatFunkci('zaznamenatPlatbu');
+    assert.match(fZaznamenat, /kontaktni_platba\s*=\s*document\.getElementById\('platbaKontaktni'\)\.value\s*===\s*'ano'/, '9a) zaznamenatPlatbu musí převést volbu selectu na skutečný boolean (true/false), ne syrový řetězec');
+    assert.match(fZaznamenat, /JSON\.stringify\(\{[^}]*kontaktni_platba[^}]*\}\)/, '9a) zaznamenatPlatbu musí kontaktni_platba skutečně poslat v těle požadavku');
+
+    // b) Dokončit masáž (se zápisem platby)
+    const fDokoncit = extrahovatFunkci('dokoncitMasazOdeslat');
+    assert.match(fDokoncit, /kontaktni_platba\s*=\s*document\.getElementById\('dmKontaktni'\)\.value\s*===\s*'ano'/, '9b) dokoncitMasazOdeslat musí převést volbu selectu na skutečný boolean');
+    assert.match(fDokoncit, /JSON\.stringify\(\{[^}]*kontaktni_platba[^}]*\}\)/, '9b) dokoncitMasazOdeslat musí kontaktni_platba skutečně poslat v těle požadavku');
+
+    // c) Vydat poukaz (zaplaceno hned)
+    const fVydat = extrahovatFunkci('vydatPoukaz');
+    assert.match(fVydat, /kontaktni_platba\s*=\s*document\.getElementById\('npKontaktni'\)\.value\s*===\s*'ano'/, '9c) vydatPoukaz musí převést volbu selectu na skutečný boolean');
+    assert.match(fVydat, /body\.kontaktni_platba/, '9c) vydatPoukaz musí kontaktni_platba skutečně přidat do těla požadavku');
+
+    // d) Potvrdit platbu poukazu / doplnit historickou platbu (sdílený formulář)
+    const fPotvrdit = extrahovatFunkci('potvrditPlatbuPoukazuOdeslat');
+    assert.match(fPotvrdit, /kontaktni_platba\s*=\s*document\.getElementById\('ppKontaktni'\)\.value\s*===\s*'ano'/, '9d) potvrditPlatbuPoukazuOdeslat musí převést volbu selectu na skutečný boolean');
+    assert.match(fPotvrdit, /const body\s*=\s*\{[^}]*kontaktni_platba[^}]*\}/, '9d) potvrditPlatbuPoukazuOdeslat musí kontaktni_platba skutečně poslat v těle požadavku');
+
+    // e) Vrátit platbu klientce — skutečná vratka (ne "jako poukaz")
+    const fVratit = extrahovatFunkci('vratitPlatbu');
+    assert.match(fVratit, /kontaktni_platba\s*=\s*zpusob_platby\s*===\s*'poukaz'\s*\?\s*undefined\s*:\s*document\.getElementById\('vratkaKontaktni'\)\.value\s*===\s*'ano'/, "9e) vratitPlatbu musí u skutečné vratky převést volbu selectu na skutečný boolean, a u vratky „jako poukaz“ ho vůbec neposílat");
+    assert.match(fVratit, /JSON\.stringify\(\{[^}]*kontaktni_platba[^}]*\}\)/, '9e) vratitPlatbu musí kontaktni_platba skutečně poslat v těle požadavku');
+
+    console.log('OK — 9) staticky ověřeno: admin.html posílá kontaktni_platba jako skutečný boolean u platby, dokončení masáže, poukazu (vydání/potvrzení/historická platba) i u skutečné vratky; u vratky „jako poukaz“ se neposílá vůbec');
   }
 
   console.log('\n✅ VŠECHNY TESTY KROKU 2 (EET — rozlišení způsobu a charakteru platby) PROŠLY');

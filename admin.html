@@ -2543,6 +2543,16 @@ function prednastavitKontaktniPlatbu(zpusobId, kontaktniId, varovaniId) {
   const varovani = varovaniId ? document.getElementById(varovaniId) : null;
   if (varovani) varovani.style.display = zpusob === 'prevodem' ? '' : 'none';
 }
+// Vratka "jako poukaz" nevyplácí žádnou skutečnou hotovost (viz
+// PATCH /rezervace/:id/platba na serveru) — u ní kontaktni_platba nedává
+// smysl, proto se u téhle volby přepínač schová a nic se neodesílá.
+function aktualizovatVratkaKontaktni() {
+  const zpusob = document.getElementById('vratkaZpusob')?.value;
+  const kontaktniSelect = document.getElementById('vratkaKontaktni');
+  if (!kontaktniSelect) return;
+  kontaktniSelect.style.display = zpusob === 'poukaz' ? 'none' : '';
+  if (zpusob !== 'poukaz') kontaktniSelect.value = zpusob === 'prevodem' ? 'ne' : 'ano';
+}
 function otevritDetailRezervace(id) {
   const r = vsechnyRezervace.find(x => x.id === id);
   if (!r) return;
@@ -2639,14 +2649,19 @@ function vykreslitDetailRezervace(r) {
     ${uhrazeno > 0 ? `
     <div class="form-group"><label>Vrátit platbu klientce</label>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-        <select id="vratkaZpusob" style="border:1px solid var(--tan-light);border-radius:6px;padding:6px 8px">
+        <select id="vratkaZpusob" style="border:1px solid var(--tan-light);border-radius:6px;padding:6px 8px" onchange="aktualizovatVratkaKontaktni()">
           <option value="hotove">Hotově</option>
           <option value="kartou">Kartou</option>
+          <option value="prevodem">Převodem</option>
           <option value="online">Online</option>
           <option value="poukaz">Jako poukaz (bez výplaty)</option>
         </select>
         <input type="number" id="vratkaCastka" value="${uhrazeno}" min="1" max="${uhrazeno}" style="width:100px;border:1px solid var(--tan-light);border-radius:6px;padding:6px 8px">
         <span style="font-size:0.8rem;color:var(--text-light)">Kč</span>
+        <select id="vratkaKontaktni" style="border:1px solid var(--tan-light);border-radius:6px;padding:6px 8px">
+          <option value="ano">🏠 Osobně v salonu</option>
+          <option value="ne">📡 Na dálku</option>
+        </select>
         <button class="btn btn-outline btn-sm" onclick="vratitPlatbu(${r.id},this)">↺ Vrátit</button>
       </div>
     </div>` : ''}
@@ -2762,7 +2777,10 @@ async function vratitPlatbu(id, btn) {
       klic = crypto.randomUUID(); // jiná částka/metoda = nová, samostatná vratka
       vratkaIdempotence[id] = { klic, castka, zpusob_platby };
     }
-    const res = await adminFetch(API + '/admin/rezervace/' + id + '/platba', { method: 'PATCH', body: JSON.stringify({ castka, zpusob_platby, typ: 'vratka', idempotency_klic: klic }) });
+    // "Jako poukaz" nevyplácí skutečné peníze — kontaktni_platba tam nedává
+    // smysl, proto se u téhle volby vůbec neposílá (viz aktualizovatVratkaKontaktni).
+    const kontaktni_platba = zpusob_platby === 'poukaz' ? undefined : document.getElementById('vratkaKontaktni').value === 'ano';
+    const res = await adminFetch(API + '/admin/rezervace/' + id + '/platba', { method: 'PATCH', body: JSON.stringify({ castka, zpusob_platby, kontaktni_platba, typ: 'vratka', idempotency_klic: klic }) });
     const data = await res.json();
     if (!res.ok) { alert(data.chyba || 'Vrácení platby se nepodařilo.'); return; }
     delete vratkaIdempotence[id]; // úspěch — příští vratka k téhle rezervaci bude nová, s novým klíčem
