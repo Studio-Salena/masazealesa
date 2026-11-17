@@ -679,3 +679,269 @@ alter table poukazy add constraint poukazy_zpusob_platby_check
 -- historická NULL je legitimní, trvalý stav, ne dočasná mezera k doplnění.
 alter table platby  add column if not exists kontaktni_platba boolean;
 alter table poukazy add column if not exists kontaktni_platba boolean;
+
+-- ══════════════════════════════════════════════════════════
+-- Krok 3a EET 2.0 — databázový základ (evidované tržby)
+--
+-- Čistě aditivní: žádná existující tabulka se nemění (kromě dvou nových
+-- klíčů v "nastaveni" na konci), žádná historická data se nepřepisují a
+-- NIC z tohohle zatím není napojené na žádný existující platební endpoint
+-- (rezervace/poukazy/prodejna/produkty) — to je úmyslně vyhrazené pro
+-- samostatně schvalovaný Krok 3b. Zatím žádný SOAP klient, žádné skutečné
+-- odesílání. Viz tests/eet-krok3a.test.js pro živé ověření všech záruk níž.
+--
+-- Architektura (shrnutí z návrhu Kroku 3):
+--   platby/poukazy_historie/prodeje/prodeje_produktu  ← obchodní případ (beze změny)
+--           ↓ M:N (evidovana_trzba_zdroje, UNIQUE(zdroj_typ,zdroj_id))
+--   evidovana_trzba                                   ← 1 evidovaná tržba (příjem/storno)
+--           ↓ 1:N
+--   eet_odeslani                                      ← KAŽDÝ pokus o odeslání
+--
+-- "pokladni_udalost_id" (UUID) je JEDNOZNAČNÝ identifikátor pokladní
+-- operace, generovaný klientem (admin.html) stejným principem jako už
+-- existující idempotency_klic — u samostatné akce je to prostě nové UUID
+-- jen pro ni, sloučení více zdrojů do jedné evidované tržby nastává JEN
+-- když klient výslovně pošle STEJNÉ UUID víc zápisům (budoucí kombinovaná
+-- platební akce v adminu, Krok 3b+). ŽÁDNÉ odvozování podle data nebo ID
+-- rezervace — to bylo výslovně zamítnuto jako nespolehlivá heuristika.
+
+create sequence if not exists eet_porad_cis_seq start 1;
+
+create table if not exists evidovana_trzba (
+  id serial primary key,
+  pokladni_udalost_id uuid not null unique,
+  smer text not null check (smer in ('prijem','storno')),
+  celk_trzba numeric not null default 0
+    check ((smer = 'prijem' and celk_trzba >= 0) or (smer = 'storno' and celk_trzba <= 0)),
+  urceno_cerp_zuct numeric,
+  cerp_zuct numeric,
+  id_jednotky text not null,
+  id_pokl text not null,
+  porad_cis text not null default ('ET-' || nextval('eet_porad_cis_seq')::text),
+  dat_trzby timestamptz not null,
+  -- 'nova' = zatím nic odesláno; 'odeslano'/'nejiste' = čeká na výsledek;
+  -- 'potvrzeno' = finanční správa potvrdila (POK); 'chyba' = trvale odmítnuto,
+  -- vyžaduje zásah; 'rucne_vyreseno' = admin to vyřešil mimo frontu.
+  stav_evidence text not null default 'nova'
+    check (stav_evidence in ('nova','odeslano','potvrzeno','chyba','nejiste','rucne_vyreseno')),
+  -- Bezpečné převzetí úlohy ve frontě (viz eet_zamknout_dalsi_davku níž) —
+  -- aktualni_pokus_id funguje jako "lístek": výsledek smí zapsat jen worker,
+  -- co pořád drží tenhle přesný pokus (ochrana proti dokončení starým,
+  -- zpožděným pokusem PO tom, co úlohu mezitím převzal/dokončil někdo jiný).
+  zpracovava_se_od timestamptz,
+  zpracovava_worker_id text,
+  aktualni_pokus_id uuid,
+  poznamka_rucniho_vyreseni text,
+  vytvoreno timestamptz not null default now(),
+  -- Odráží oficiální deduplikační klíč finanční správy (EET 2.0 rozhraní
+  -- v1.2, §3.3.3.10): (eic_popl, id_jednotky, id_pokl, porad_cis, dat_trzby).
+  -- eic_popl je u nás vždycky stejné (jeden poplatník), proto tu není.
+  unique (id_jednotky, id_pokl, porad_cis, dat_trzby)
+);
+create index if not exists evidovana_trzba_fronta_idx on evidovana_trzba (stav_evidence, zpracovava_se_od);
+
+-- Jeden obchodní zápis (platba/čerpání poukazu/prodej/prodej produktu)
+-- nikdy nemůže být napočítán do dvou evidovaných tržeb, ani dvakrát do
+-- jedné — vynucuje to UNIQUE(zdroj_typ, zdroj_id) níž, ne aplikační
+-- kontrola. "castka" je snímek částky v okamžiku zaevidování (audit).
+create table if not exists evidovana_trzba_zdroje (
+  id serial primary key,
+  evidovana_trzba_id integer not null references evidovana_trzba(id),
+  zdroj_typ text not null check (zdroj_typ in ('platba','poukaz_historie','prodej','prodej_produktu')),
+  zdroj_id integer not null,
+  castka numeric not null,
+  vytvoreno timestamptz not null default now(),
+  unique (zdroj_typ, zdroj_id)
+);
+
+-- Každý JEDNOTLIVÝ pokus o odeslání (ne jen poslední) — nové uuid_zpravy
+-- při každém pokusu (vyžaduje to spec), ale identita tržby (porad_cis atd.
+-- na evidovana_trzba) zůstává stejná, takže opakování po nejistém doručení
+-- je vždy bezpečné (dedup na straně finanční správy je podle téhle
+-- identity, ne podle uuid_zpravy). Záznamy se nikdy nemažou (viz trigger níž).
+create table if not exists eet_odeslani (
+  id serial primary key,
+  evidovana_trzba_id integer not null references evidovana_trzba(id),
+  pokus_id uuid not null,
+  uuid_zpravy uuid not null,
+  prvni_zaslani boolean not null,
+  odeslano_kdy timestamptz not null default now(),
+  stav text not null check (stav in ('odeslano','potvrzeno','chyba','nejiste')),
+  pok text,
+  chyba_kod text,
+  chyba_text text,
+  http_status integer
+);
+create index if not exists eet_odeslani_trzba_idx on eet_odeslani (evidovana_trzba_id);
+
+-- Diagnostické/ověřovací zprávy (overeni=true) — ÚPLNĚ odděleno od reálných
+-- obchodních dat, žádná vazba na evidovana_trzba. "prostredi" chrání proti
+-- záměně Playground/produkce i jen v logu.
+create table if not exists eet_pripojeni_test (
+  id serial primary key,
+  kdy timestamptz not null default now(),
+  prostredi text not null check (prostredi in ('playground','produkce')),
+  vysledek text not null,
+  detail text
+);
+
+-- Auditní historie oprav evidované tržby, dokud je ještě 'nova' (před prvním
+-- odesláním) — po prvním odeslání opravy blokuje trigger níž.
+create table if not exists evidovana_trzba_audit (
+  id serial primary key,
+  evidovana_trzba_id integer not null references evidovana_trzba(id),
+  pole text not null,
+  puvodni_hodnota text,
+  nova_hodnota text,
+  kdy timestamptz not null default now()
+);
+
+-- Neměnnost identifikačních údajů PO PRVNÍM ODESLÁNÍ (existuje-li jakýkoli
+-- řádek v eet_odeslani pro danou evidovanou tržbu) — id_jednotky, id_pokl,
+-- porad_cis, dat_trzby, celk_trzba, smer, urceno_cerp_zuct, cerp_zuct se pak
+-- už nesmí měnit. Stav fronty (zpracovava_se_od/worker/pokus/stav_evidence)
+-- a poznámka ručního vyřešení se měnit smí (to je běžný provoz fronty).
+create or replace function evidovana_trzba_chranit_po_odeslani() returns trigger language plpgsql as $$
+declare
+  existuje_odeslani boolean;
+begin
+  select exists(select 1 from eet_odeslani where evidovana_trzba_id = old.id) into existuje_odeslani;
+  if existuje_odeslani and (
+    new.id_jednotky is distinct from old.id_jednotky or
+    new.id_pokl is distinct from old.id_pokl or
+    new.porad_cis is distinct from old.porad_cis or
+    new.dat_trzby is distinct from old.dat_trzby or
+    new.celk_trzba is distinct from old.celk_trzba or
+    new.smer is distinct from old.smer or
+    new.urceno_cerp_zuct is distinct from old.urceno_cerp_zuct or
+    new.cerp_zuct is distinct from old.cerp_zuct
+  ) then
+    raise exception 'Identifikační údaje evidované tržby (id %) nelze měnit po prvním odeslání.', old.id;
+  end if;
+  return new;
+end $$;
+drop trigger if exists evidovana_trzba_chranit_po_odeslani_trg on evidovana_trzba;
+create trigger evidovana_trzba_chranit_po_odeslani_trg before update on evidovana_trzba
+  for each row execute function evidovana_trzba_chranit_po_odeslani();
+
+-- Záznamy o odeslání se nikdy nemažou (stejný princip jako u
+-- promo_poukaz_vyuziti/rezervace_audit jinde v tomhle schématu).
+create or replace function eet_odeslani_zakaz_mazani() returns trigger language plpgsql as $$
+begin
+  raise exception 'Záznamy o odeslání EET se nemažou.';
+end $$;
+drop trigger if exists eet_odeslani_bez_mazani on eet_odeslani;
+create trigger eet_odeslani_bez_mazani before delete on eet_odeslani
+  for each row execute function eet_odeslani_zakaz_mazani();
+
+-- Bezpečné zaevidování jednoho zdrojového zápisu (volá se uvnitř TÉŽE
+-- transakce jako budoucí INSERT do platby/poukazy_historie/prodeje/
+-- prodeje_produktu — to až Krok 3b). Idempotentní a bezpečné i při
+-- souběžném volání: UNIQUE(zdroj_typ, zdroj_id) zaručuje, že se částka
+-- připočte NEJVÝŠ JEDNOU na zdroj, bez ohledu na to, kolikrát se o totéž
+-- zaevidování pokusí (opakovaný požadavek i skutečný souběh) — "castka" se
+-- NIKDY nepřičítá naslepo, jen když INSERT do zdrojů skutečně vložil nový
+-- řádek (ověřeno přes GET DIAGNOSTICS, ne předpokladem).
+create or replace function eet_zaevidovat_zdroj(
+  p_pokladni_udalost_id uuid,
+  p_smer text,
+  p_zdroj_typ text,
+  p_zdroj_id integer,
+  p_castka numeric,
+  p_id_jednotky text,
+  p_id_pokl text,
+  p_dat_trzby timestamptz,
+  p_urceno_cerp_zuct numeric default null,
+  p_cerp_zuct numeric default null,
+  out trzba_id integer,
+  out nove_zapocitano boolean
+) language plpgsql as $$
+declare
+  v_pocet integer;
+begin
+  insert into evidovana_trzba (pokladni_udalost_id, smer, celk_trzba, id_jednotky, id_pokl, dat_trzby)
+  values (p_pokladni_udalost_id, p_smer, 0, p_id_jednotky, p_id_pokl, p_dat_trzby)
+  on conflict (pokladni_udalost_id) do update set pokladni_udalost_id = evidovana_trzba.pokladni_udalost_id
+  returning id into trzba_id;
+
+  insert into evidovana_trzba_zdroje (evidovana_trzba_id, zdroj_typ, zdroj_id, castka)
+  values (trzba_id, p_zdroj_typ, p_zdroj_id, p_castka)
+  on conflict (zdroj_typ, zdroj_id) do nothing;
+
+  get diagnostics v_pocet = row_count;
+  nove_zapocitano := v_pocet > 0;
+
+  if nove_zapocitano then
+    update evidovana_trzba
+    set celk_trzba = celk_trzba + p_castka,
+        urceno_cerp_zuct = case when p_urceno_cerp_zuct is not null then coalesce(urceno_cerp_zuct, 0) + p_urceno_cerp_zuct else urceno_cerp_zuct end,
+        cerp_zuct = case when p_cerp_zuct is not null then coalesce(cerp_zuct, 0) + p_cerp_zuct else cerp_zuct end
+    where id = trzba_id;
+  end if;
+end $$;
+
+-- Bezpečné převzetí dávky úloh z fronty — SELECT...FOR UPDATE SKIP LOCKED
+-- v jedné atomické SQL větě (žádný plpgsql cyklus, co by mohl zámek držet
+-- déle, než je nutné): souběžní workeři si nikdy nevezmou stejný řádek,
+-- jen se navzájem přeskočí. "Stale" claim (starší než 5 minut, typicky
+-- spadlý worker) se smí převzít znovu — dostane nové aktualni_pokus_id.
+create or replace function eet_zamknout_dalsi_davku(p_worker_id text, p_pocet integer default 10)
+returns setof evidovana_trzba language sql as $$
+  with kandidati as (
+    select id from evidovana_trzba
+    where stav_evidence in ('nova', 'nejiste')
+      and (zpracovava_se_od is null or zpracovava_se_od < now() - interval '5 minutes')
+    order by id
+    for update skip locked
+    limit p_pocet
+  )
+  update evidovana_trzba e
+  set zpracovava_se_od = now(), zpracovava_worker_id = p_worker_id, aktualni_pokus_id = gen_random_uuid()
+  from kandidati
+  where e.id = kandidati.id
+  returning e.*;
+$$;
+
+-- Zápis výsledku odeslání — CHRÁNĚNO proti dokončení starým/zpožděným
+-- pokusem: zapíše se JEN pokud evidovana_trzba.aktualni_pokus_id pořád
+-- odpovídá pokusu, který výsledek nese (compare-and-swap). Pokud mezitím
+-- úlohu převzal někdo jiný (stale claim), p_pokus_id už nesedí a zápis se
+-- tiše neprovede (zapsano=false) — volající to musí zalogovat, ne ignorovat.
+create or replace function eet_zapsat_vysledek(
+  p_trzba_id integer,
+  p_pokus_id uuid,
+  p_novy_stav text,
+  p_uuid_zpravy uuid,
+  p_prvni_zaslani boolean,
+  p_odeslani_stav text,
+  p_pok text default null,
+  p_chyba_kod text default null,
+  p_chyba_text text default null,
+  p_http_status integer default null,
+  out zapsano boolean
+) language plpgsql as $$
+declare
+  v_pocet integer;
+begin
+  insert into eet_odeslani (evidovana_trzba_id, pokus_id, uuid_zpravy, prvni_zaslani, stav, pok, chyba_kod, chyba_text, http_status)
+  select p_trzba_id, p_pokus_id, p_uuid_zpravy, p_prvni_zaslani, p_odeslani_stav, p_pok, p_chyba_kod, p_chyba_text, p_http_status
+  where exists (select 1 from evidovana_trzba where id = p_trzba_id and aktualni_pokus_id = p_pokus_id);
+  get diagnostics v_pocet = row_count;
+  zapsano := v_pocet > 0;
+
+  if zapsano then
+    update evidovana_trzba
+    set stav_evidence = p_novy_stav, zpracovava_se_od = null, zpracovava_worker_id = null
+    where id = p_trzba_id and aktualni_pokus_id = p_pokus_id;
+  end if;
+end $$;
+
+-- Dvě NEZÁVISLÉ páčky (viz návrh Kroku 3, bod 6): "aktivovano_od" řídí jen
+-- zakládání nových evidovaných tržeb pro BUDOUCÍ obchodní události (zatím
+-- prázdné — nic se zatím nezakládá, protože na tohle Krok 3a ještě nic
+-- nenapojuje). "odesilani_pozastaveno" řídí jen frontu na odesílání —
+-- pozastavení NIKDY neztratí už založenou evidenční povinnost, jen
+-- pozastaví její odeslání. Obě jsou v Kroku 3a čistě připravené, nic je
+-- zatím nečte ani nezapisuje (to až Krok 3b/3d).
+insert into nastaveni (klic, hodnota) values ('eet_aktivovano_od', '') on conflict (klic) do nothing;
+insert into nastaveni (klic, hodnota) values ('eet_odesilani_pozastaveno', 'true') on conflict (klic) do nothing;

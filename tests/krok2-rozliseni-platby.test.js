@@ -316,16 +316,38 @@ async function main() {
   }
 
   // 8) Účetnictví: platba prevodem se počítá do přijatých plateb (není vyloučená jako poukaz)
+  //
+  // Diagnostická poznámka (2026-11): tenhle scénář jednou spadl na nečitelné
+  // "Cannot read properties of undefined (reading 'celkem')" uprostřed běhu
+  // celé sady (24 souborů). Příčinu se nepodařilo reprodukovat ani zátěžovým
+  // testem (15× 24 souběžných GET /admin/ucetnictvi + 6 souběžných pg.Client
+  // spojení, 360/360 úspěšných), ani 3 dalšími běhy celé sady se zachyceným
+  // server-side logem (žádná DB/spojovací chyba v logu, 72/72 souborů OK).
+  // Nejde tedy o reprodukovatelnou chybu v kódu — spíš o jednorázový výpadek
+  // spojení k Supabase (vzdálená cloudová DB). Proto se sem NEPŘIDÁVÁ žádné
+  // automatické opakování (to by jen schovalo případnou skutečnou chybu) —
+  // jen explicitní kontrola tvaru odpovědi, ať případné budoucí selhání dá
+  // čitelnou diagnózu (HTTP stav + tělo), ne nečitelný pád.
   {
-    const dnes = new Date().toISOString().slice(0, 10);
-    const pred = await adminFetch(`/admin/ucetnictvi?od=${dnes}&do=${dnes}`).then(x => x.json());
+    async function ucetnictviNeboChyba(popis) {
+      const dnes = new Date().toISOString().slice(0, 10);
+      const res = await adminFetch(`/admin/ucetnictvi?od=${dnes}&do=${dnes}`);
+      const data = await res.json().catch(() => ({ chyba: 'odpověď není platný JSON' }));
+      assert.ok(
+        res.status === 200 && data && data.prijatePlatby && typeof data.prijatePlatby.celkem !== 'undefined',
+        `8) GET /admin/ucetnictvi (${popis}) selhalo nebo vrátilo neočekávaný tvar — HTTP ${res.status}: ${JSON.stringify(data).slice(0, 300)}`
+      );
+      return data;
+    }
+
+    const pred = await ucetnictviNeboChyba('před platbou');
     const r = await vytvorRezervaci(polozka.id, '8');
     const castka = 37; // nenápadná, snadno dohledatelná částka
     const res = await adminFetch(`/admin/rezervace/${r.id}/platba`, {
       method: 'PATCH', body: JSON.stringify({ castka, zpusob_platby: 'prevodem', kontaktni_platba: false })
     });
     assert.equal(res.status, 200, '8) platba prevodem pro účetní kontrolu musí uspět');
-    const po = await adminFetch(`/admin/ucetnictvi?od=${dnes}&do=${dnes}`).then(x => x.json());
+    const po = await ucetnictviNeboChyba('po platbě');
     const rozdil = Number(po.prijatePlatby.celkem) - Number(pred.prijatePlatby.celkem);
     assert.equal(rozdil, castka, '8) přijatá platba prevodem (' + castka + ' Kč) se musí objevit v součtu přijatých plateb v účetnictví, nesmí být vyloučená jako poukaz (rozdíl byl ' + rozdil + ' Kč)');
     console.log('OK — 8) účetnictví: platba prevodem se správně počítá do přijatých plateb');
