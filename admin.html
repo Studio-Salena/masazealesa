@@ -2504,7 +2504,7 @@ function vykreslitRezervace(filtr) {
     </details>`;
   }).join('');
 }
-const platbaZpusobLabel = { hotove: 'Hotově', kartou: 'Kartou', online: 'Online', poukaz: 'Poukaz' };
+const platbaZpusobLabel = { hotove: 'Hotově', kartou: 'Kartou', online: 'Online', qr: 'QR kód', poukaz: 'Poukaz' };
 function otevritDetailRezervace(id) {
   const r = vsechnyRezervace.find(x => x.id === id);
   if (!r) return;
