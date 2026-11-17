@@ -852,8 +852,6 @@ tr:hover td{background:var(--cream)}
             <option value="">Všechny</option>
             <option value="hotove">Hotově</option>
             <option value="kartou">Kartou</option>
-            <option value="qr">QR kód</option>
-            <option value="prevodem">Převodem</option>
             <option value="online">Online</option>
             <option value="poukaz">Poukaz</option>
           </select>
@@ -1163,20 +1161,11 @@ tr:hover td{background:var(--cream)}
     </div>
     <div class="form-group" id="npZpusobWrap">
       <label>Způsob platby</label>
-      <select id="npZpusobPlatby" onchange="prednastavitKontaktniPlatbu('npZpusobPlatby','npKontaktni','npPrevodVarovani')">
+      <select id="npZpusobPlatby">
         <option value="hotove">Hotově</option>
         <option value="kartou">Kartou</option>
-        <option value="qr">QR kód (osobně v salonu)</option>
-        <option value="prevodem">Bankovní převod (na dálku)</option>
+        <option value="qr">QR kód / bankovní převod</option>
       </select>
-    </div>
-    <div class="form-group" id="npKontaktniWrap">
-      <label>Platba proběhla</label>
-      <select id="npKontaktni">
-        <option value="ano">🏠 Osobně v salonu</option>
-        <option value="ne">📡 Na dálku</option>
-      </select>
-      <div id="npPrevodVarovani" style="display:none;font-size:0.78rem;color:var(--text-warning,#a66300);margin-top:4px">⚠️ Potvrzujte, až peníze skutečně dorazí na účet — výběr metody sám o sobě příjem nepotvrzuje.</div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal('modalNovyPoukaz')">Zrušit</button>
@@ -1192,20 +1181,11 @@ tr:hover td{background:var(--cream)}
     <p id="ppPoukazPopis" style="font-size:0.82rem;color:var(--text-light);margin:-6px 0 12px"></p>
     <div id="ppPoukazMsg"></div>
     <div class="form-group"><label>Způsob platby</label>
-      <select id="ppPoukazZpusob" onchange="prednastavitKontaktniPlatbu('ppPoukazZpusob','ppKontaktni','ppPrevodVarovani')">
+      <select id="ppPoukazZpusob">
         <option value="hotove">Hotově</option>
         <option value="kartou">Kartou</option>
-        <option value="qr">QR kód (osobně v salonu)</option>
-        <option value="prevodem">Bankovní převod (na dálku)</option>
+        <option value="qr">QR kód / bankovní převod</option>
       </select>
-    </div>
-    <div class="form-group">
-      <label>Platba proběhla</label>
-      <select id="ppKontaktni">
-        <option value="ano">🏠 Osobně v salonu</option>
-        <option value="ne">📡 Na dálku</option>
-      </select>
-      <div id="ppPrevodVarovani" style="display:none;font-size:0.78rem;color:var(--text-warning,#a66300);margin-top:4px">⚠️ Potvrzujte, až peníze skutečně dorazí na účet — výběr metody sám o sobě příjem nepotvrzuje.</div>
     </div>
     <div class="form-group" id="ppPoukazDatumWrap" style="display:none">
       <label>Datum skutečné platby</label>
@@ -1344,21 +1324,14 @@ tr:hover td{background:var(--cream)}
     </div>
     <div class="form-group" id="dmPlatbaWrap" style="display:none">
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-        <select id="dmZpusob" style="border:1px solid var(--tan-light);border-radius:6px;padding:6px 8px" onchange="prednastavitKontaktniPlatbu('dmZpusob','dmKontaktni','dmPrevodVarovani')">
+        <select id="dmZpusob" style="border:1px solid var(--tan-light);border-radius:6px;padding:6px 8px">
           <option value="hotove">Hotově</option>
           <option value="kartou">Kartou</option>
-          <option value="qr">QR kód (v salonu)</option>
-          <option value="prevodem">Převodem (na dálku)</option>
           <option value="online">Online</option>
         </select>
         <input type="number" id="dmCastka" min="1" style="width:100px;border:1px solid var(--tan-light);border-radius:6px;padding:6px 8px">
         <span style="font-size:0.8rem;color:var(--text-light)">Kč</span>
-        <select id="dmKontaktni" style="border:1px solid var(--tan-light);border-radius:6px;padding:6px 8px">
-          <option value="ano">🏠 Osobně v salonu</option>
-          <option value="ne">📡 Na dálku</option>
-        </select>
       </div>
-      <div id="dmPrevodVarovani" style="display:none;font-size:0.78rem;color:var(--text-warning,#a66300);margin-top:4px">⚠️ Potvrzujte, až peníze skutečně dorazí na účet.</div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal('modalDokonceniMasaze')">Zrušit</button>
@@ -2531,28 +2504,7 @@ function vykreslitRezervace(filtr) {
     </details>`;
   }).join('');
 }
-const platbaZpusobLabel = { hotove: 'Hotově', kartou: 'Kartou', online: 'Online', qr: 'QR kód', prevodem: 'Převodem', poukaz: 'Poukaz' };
-// Krok 2 — jen PŘEDVYPLNĚNÍ návrhu podle zvolené metody (hotove/kartou/qr →
-// osobně v salonu, prevodem/online → na dálku); uživatel to vždy může ručně
-// přepsat, server žádný odhad sám nikdy nedělá (viz jeKontaktniPlatbaPlatna
-// v server.js) — tahle funkce je čistě pohodlí pro vyplňování formuláře.
-function prednastavitKontaktniPlatbu(zpusobId, kontaktniId, varovaniId) {
-  const zpusob = document.getElementById(zpusobId)?.value;
-  const kontaktniSelect = document.getElementById(kontaktniId);
-  if (kontaktniSelect) kontaktniSelect.value = (zpusob === 'prevodem' || zpusob === 'online') ? 'ne' : 'ano';
-  const varovani = varovaniId ? document.getElementById(varovaniId) : null;
-  if (varovani) varovani.style.display = zpusob === 'prevodem' ? '' : 'none';
-}
-// Vratka "jako poukaz" nevyplácí žádnou skutečnou hotovost (viz
-// PATCH /rezervace/:id/platba na serveru) — u ní kontaktni_platba nedává
-// smysl, proto se u téhle volby přepínač schová a nic se neodesílá.
-function aktualizovatVratkaKontaktni() {
-  const zpusob = document.getElementById('vratkaZpusob')?.value;
-  const kontaktniSelect = document.getElementById('vratkaKontaktni');
-  if (!kontaktniSelect) return;
-  kontaktniSelect.style.display = zpusob === 'poukaz' ? 'none' : '';
-  if (zpusob !== 'poukaz') kontaktniSelect.value = zpusob === 'prevodem' ? 'ne' : 'ano';
-}
+const platbaZpusobLabel = { hotove: 'Hotově', kartou: 'Kartou', online: 'Online', qr: 'QR kód', poukaz: 'Poukaz' };
 function otevritDetailRezervace(id) {
   const r = vsechnyRezervace.find(x => x.id === id);
   if (!r) return;
@@ -2621,22 +2573,15 @@ function vykreslitDetailRezervace(r) {
     ${zbyva > 0 ? `
     <div class="form-group"><label>Zaznamenat platbu</label>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-        <select id="platbaZpusob" style="border:1px solid var(--tan-light);border-radius:6px;padding:6px 8px" onchange="prednastavitKontaktniPlatbu('platbaZpusob','platbaKontaktni','platbaPrevodVarovani')">
+        <select id="platbaZpusob" style="border:1px solid var(--tan-light);border-radius:6px;padding:6px 8px">
           <option value="hotove">Hotově</option>
           <option value="kartou">Kartou</option>
-          <option value="qr">QR kód (v salonu)</option>
-          <option value="prevodem">Převodem (na dálku)</option>
           <option value="online">Online</option>
         </select>
         <input type="number" id="platbaCastka" value="${zbyva}" min="1" max="${zbyva}" style="width:100px;border:1px solid var(--tan-light);border-radius:6px;padding:6px 8px">
         <span style="font-size:0.8rem;color:var(--text-light)">Kč</span>
-        <select id="platbaKontaktni" style="border:1px solid var(--tan-light);border-radius:6px;padding:6px 8px">
-          <option value="ano">🏠 Osobně v salonu</option>
-          <option value="ne">📡 Na dálku</option>
-        </select>
         <button class="btn btn-green btn-sm" onclick="zaznamenatPlatbu(${r.id},this)">💾 Zaznamenat</button>
       </div>
-      <div id="platbaPrevodVarovani" style="display:none;font-size:0.78rem;color:var(--text-warning,#a66300);margin-top:4px">⚠️ Potvrzujte, až peníze skutečně dorazí na účet.</div>
     </div>
     ${r.poukaz_kod ? `
     <div class="form-group">
@@ -2649,19 +2594,14 @@ function vykreslitDetailRezervace(r) {
     ${uhrazeno > 0 ? `
     <div class="form-group"><label>Vrátit platbu klientce</label>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-        <select id="vratkaZpusob" style="border:1px solid var(--tan-light);border-radius:6px;padding:6px 8px" onchange="aktualizovatVratkaKontaktni()">
+        <select id="vratkaZpusob" style="border:1px solid var(--tan-light);border-radius:6px;padding:6px 8px">
           <option value="hotove">Hotově</option>
           <option value="kartou">Kartou</option>
-          <option value="prevodem">Převodem</option>
           <option value="online">Online</option>
           <option value="poukaz">Jako poukaz (bez výplaty)</option>
         </select>
         <input type="number" id="vratkaCastka" value="${uhrazeno}" min="1" max="${uhrazeno}" style="width:100px;border:1px solid var(--tan-light);border-radius:6px;padding:6px 8px">
         <span style="font-size:0.8rem;color:var(--text-light)">Kč</span>
-        <select id="vratkaKontaktni" style="border:1px solid var(--tan-light);border-radius:6px;padding:6px 8px">
-          <option value="ano">🏠 Osobně v salonu</option>
-          <option value="ne">📡 Na dálku</option>
-        </select>
         <button class="btn btn-outline btn-sm" onclick="vratitPlatbu(${r.id},this)">↺ Vrátit</button>
       </div>
     </div>` : ''}
@@ -2707,7 +2647,6 @@ const zpIdempotence = {};
 async function zaznamenatPlatbu(id, btn) {
   const castka = Number(document.getElementById('platbaCastka').value);
   const zpusob_platby = document.getElementById('platbaZpusob').value;
-  const kontaktni_platba = document.getElementById('platbaKontaktni').value === 'ano';
   if (!castka || castka <= 0) { alert('Zadejte prosím kladnou částku.'); return; }
   if (btn && btn.disabled) return; // dvojité kliknutí/odeslání se ignoruje
   if (btn) btn.disabled = true;
@@ -2720,7 +2659,7 @@ async function zaznamenatPlatbu(id, btn) {
       klic = crypto.randomUUID(); // jiná částka/metoda = nová, samostatná platba
       zpIdempotence[id] = { klic, castka, zpusob_platby };
     }
-    const res = await adminFetch(API + '/admin/rezervace/' + id + '/platba', { method: 'PATCH', body: JSON.stringify({ castka, zpusob_platby, kontaktni_platba, idempotency_klic: klic }) });
+    const res = await adminFetch(API + '/admin/rezervace/' + id + '/platba', { method: 'PATCH', body: JSON.stringify({ castka, zpusob_platby, idempotency_klic: klic }) });
     const data = await res.json();
     if (!res.ok) { alert(data.chyba || 'Zaznamenání platby se nepodařilo.'); return; }
     delete zpIdempotence[id]; // úspěch — příští zápis k téhle rezervaci bude nová platba s novým klíčem
@@ -2777,10 +2716,7 @@ async function vratitPlatbu(id, btn) {
       klic = crypto.randomUUID(); // jiná částka/metoda = nová, samostatná vratka
       vratkaIdempotence[id] = { klic, castka, zpusob_platby };
     }
-    // "Jako poukaz" nevyplácí skutečné peníze — kontaktni_platba tam nedává
-    // smysl, proto se u téhle volby vůbec neposílá (viz aktualizovatVratkaKontaktni).
-    const kontaktni_platba = zpusob_platby === 'poukaz' ? undefined : document.getElementById('vratkaKontaktni').value === 'ano';
-    const res = await adminFetch(API + '/admin/rezervace/' + id + '/platba', { method: 'PATCH', body: JSON.stringify({ castka, zpusob_platby, kontaktni_platba, typ: 'vratka', idempotency_klic: klic }) });
+    const res = await adminFetch(API + '/admin/rezervace/' + id + '/platba', { method: 'PATCH', body: JSON.stringify({ castka, zpusob_platby, typ: 'vratka', idempotency_klic: klic }) });
     const data = await res.json();
     if (!res.ok) { alert(data.chyba || 'Vrácení platby se nepodařilo.'); return; }
     delete vratkaIdempotence[id]; // úspěch — příští vratka k téhle rezervaci bude nová, s novým klíčem
@@ -2888,13 +2824,12 @@ async function dokoncitMasazOdeslat() {
       if (!castka || castka <= 0) { msg.innerHTML = '<div class="error-msg">Zadejte prosím kladnou částku.</div>'; btn.disabled = false; return; }
       if (castka > zbyva) { msg.innerHTML = '<div class="error-msg">Částka převyšuje zbývající dluh (zbývá ' + zbyva.toLocaleString('cs-CZ') + ' Kč).</div>'; btn.disabled = false; return; }
       const zpusob_platby = document.getElementById('dmZpusob').value;
-      const kontaktni_platba = document.getElementById('dmKontaktni').value === 'ano';
       // Klíč se generuje JEDNOU za pokus a při opakování (po chybě kroku 2
       // nebo po chybě spojení v tomhle kroku) se posílá STEJNÝ — server tak
       // pozná skutečné opakování stejného požadavku a druhou platbu nezapíše
       // (viz zkontrolovatIdempotentniPlatbu na serveru).
       if (!dmIdempotencyKlic) dmIdempotencyKlic = crypto.randomUUID();
-      const resPlatba = await adminFetch(API + '/admin/rezervace/' + dmId + '/platba', { method: 'PATCH', body: JSON.stringify({ castka, zpusob_platby, kontaktni_platba, idempotency_klic: dmIdempotencyKlic }) });
+      const resPlatba = await adminFetch(API + '/admin/rezervace/' + dmId + '/platba', { method: 'PATCH', body: JSON.stringify({ castka, zpusob_platby, idempotency_klic: dmIdempotencyKlic }) });
       const dataPlatba = await resPlatba.json();
       if (!resPlatba.ok) { msg.innerHTML = '<div class="error-msg">' + escapeHtml(dataPlatba.chyba || 'Zaznamenání platby se nepodařilo.') + '</div>'; btn.disabled = false; return; }
       dmPlatbaZapsana = true;
@@ -3086,7 +3021,7 @@ async function loadPoukazy() {
 // ještě nic nezaplatilo). Historický poukaz (stav_uhrady NULL) nabízí OBĚ
 // akce zvlášť, nikdy sloučené — buď šlo o skutečně novou platbu právě teď,
 // nebo o dodatečné doplnění dávno proběhlé platby, a admin musí vybrat, které.
-const uhradaZpusobLabelKratky = { hotove: 'hotově', kartou: 'kartou', qr: 'QR', prevodem: 'převodem' };
+const uhradaZpusobLabelKratky = { hotove: 'hotově', kartou: 'kartou', qr: 'QR/převodem' };
 function vykreslitUhradaPoukazu(p) {
   if (p.ucel !== 'prodej') return '—';
   if (p.stav_uhrady === 'zaplaceno') {
@@ -3115,12 +3050,11 @@ function otevritPotvrzeniPlatbyPoukazu(id, mod) {
 }
 async function potvrditPlatbuPoukazuOdeslat() {
   const zpusob_platby = document.getElementById('ppPoukazZpusob').value;
-  const kontaktni_platba = document.getElementById('ppKontaktni').value === 'ano';
   const msg = document.getElementById('ppPoukazMsg');
   const url = ppPoukazMod === 'historicka'
     ? API + '/admin/poukazy/' + ppPoukazId + '/doplnit-historickou-platbu'
     : API + '/admin/poukazy/' + ppPoukazId + '/potvrdit-platbu';
-  const body = { zpusob_platby, kontaktni_platba };
+  const body = { zpusob_platby };
   if (ppPoukazMod === 'historicka') body.zaplaceno_kdy = document.getElementById('ppPoukazDatum').value;
   try {
     const res = await adminFetch(url, { method: 'PATCH', body: JSON.stringify(body) });
@@ -3243,10 +3177,7 @@ async function vydatPoukaz() {
   if (druh === 'masaz') body.cenik_id = id; else body.poukaz_typ_id = id;
   if (ucel === 'prodej') {
     body.zaplaceno = document.getElementById('npZaplaceno').value === '1';
-    if (body.zaplaceno) {
-      body.zpusob_platby = document.getElementById('npZpusobPlatby').value;
-      body.kontaktni_platba = document.getElementById('npKontaktni').value === 'ano';
-    }
+    if (body.zaplaceno) body.zpusob_platby = document.getElementById('npZpusobPlatby').value;
   }
   try {
     const res = await adminFetch(API + '/admin/poukazy', { method: 'POST', body: JSON.stringify(body) });
@@ -4909,8 +4840,8 @@ async function loadProvedeneMasaze() {
 // poukazu, vratka). Viz GET /api/admin/ucetnictvi.
 let posledniUcetnictvi = null;
 let ucetAktivniObdobi = null; // 'den' | 'mesic' | 'rok' | null (ruční výběr) — řídí, která tisková varianta uzávěrky se nabídne
-const uzaverkaZpusobLabel = { hotove: 'Hotově', kartou: 'Kartou', qr: 'QR kód', prevodem: 'Převodem', online: 'Online' };
-const uzaverkaPoradi = ['hotove', 'kartou', 'qr', 'prevodem', 'online'];
+const uzaverkaZpusobLabel = { hotove: 'Hotově', kartou: 'Kartou', qr: 'QR kód', online: 'Online' };
+const uzaverkaPoradi = ['hotove', 'kartou', 'qr', 'online'];
 function tabulkaPodleDne(data, prazdnyText) {
   if (!data.length) return `<div class="empty">${prazdnyText}</div>`;
   return `<table><thead><tr><th>Den</th><th>Částka</th></tr></thead>
@@ -4947,7 +4878,7 @@ async function loadUcetnictvi() {
       `Z toho nově potvrzené platby: ${Math.round(d.prodejPoukazu.nove.celkem).toLocaleString('cs-CZ')} Kč (${d.prodejPoukazu.nove.pocet}×) — počítají se i do B/F. ` +
       `Historické/dodatečně doplněné: ${Math.round(d.prodejPoukazu.historicke.celkem).toLocaleString('cs-CZ')} Kč (${d.prodejPoukazu.historicke.pocet}×) — jen tady, ne v B/F.`;
 
-    const zpusobLabel = { hotove: 'Hotově', kartou: 'Kartou', online: 'Online', qr: 'QR kód', prevodem: 'Převodem', poukaz: 'Poukaz' };
+    const zpusobLabel = { hotove: 'Hotově', kartou: 'Kartou', online: 'Online', qr: 'QR/převodem', poukaz: 'Poukaz' };
     const typLabel = { vratka: '↺ vratka', prodej_poukazu: '🎁 prodej poukazu' };
     document.getElementById('ucetPrijatePlatbySeznam').innerHTML = !d.prijatePlatby.seznam.length ? '<div class="empty">Zatím žádné platby v tomto období</div>' : `
       <table><thead><tr><th>Datum</th><th>Typ</th><th>Způsob</th><th>Rezervace</th><th>Částka</th><th>Tisk</th></tr></thead>
