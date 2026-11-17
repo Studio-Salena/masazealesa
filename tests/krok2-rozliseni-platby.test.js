@@ -113,18 +113,25 @@ async function main() {
   }
   console.log('OK — 0) historické řádky (platby i poukazy) mají kontaktni_platba NULL, žádný backfill' + (historickaPlatbaId ? ` (ověřeno na platby.id=${historickaPlatbaId})` : ' (žádný starý řádek k ověření, DB je prázdná)'));
 
-  // 1) Rezervace — platba: qr a prevodem nově fungují, kontaktni_platba povinná
+  // 1) Rezervace — platba: qr a prevodem nově fungují; kontaktni_platba NENÍ
+  // tvrdě vyžadovaná na úrovni API (zpětná kompatibilita se starší
+  // nasazenou administrací během postupného nasazení — viz jeKontaktniPlatbaPlatna
+  // v server.js), chybějící/neplatná hodnota se tiše uloží jako NULL.
   {
     const r = await vytvorRezervaci(polozka.id, '1');
     const resChybejiciKontakt = await adminFetch(`/admin/rezervace/${r.id}/platba`, {
       method: 'PATCH', body: JSON.stringify({ castka: 1, zpusob_platby: 'qr' })
     });
-    assert.equal(resChybejiciKontakt.status, 400, '1a) chybějící kontaktni_platba u skutečné platby musí být odmítnuta');
+    assert.equal(resChybejiciKontakt.status, 200, '1a) chybějící kontaktni_platba u skutečné platby NESMÍ být odmítnuta (zpětná kompatibilita se starší administrací)');
+    const platba1a = await posledniPlatba(r.id);
+    assert.equal(platba1a.kontaktni_platba, null, '1a) chybějící kontaktni_platba se uloží jako NULL');
 
     const resNeplatnyKontakt = await adminFetch(`/admin/rezervace/${r.id}/platba`, {
       method: 'PATCH', body: JSON.stringify({ castka: 1, zpusob_platby: 'qr', kontaktni_platba: 'ano' })
     });
-    assert.equal(resNeplatnyKontakt.status, 400, '1b) nebooleovská hodnota kontaktni_platba musí být odmítnuta');
+    assert.equal(resNeplatnyKontakt.status, 200, '1b) nebooleovská hodnota kontaktni_platba se tiše ignoruje, požadavek dál uspěje');
+    const platba1b = await posledniPlatba(r.id);
+    assert.equal(platba1b.kontaktni_platba, null, '1b) nebooleovská hodnota kontaktni_platba se uloží jako NULL, ne jako zadaný řetězec');
 
     const resQr = await adminFetch(`/admin/rezervace/${r.id}/platba`, {
       method: 'PATCH', body: JSON.stringify({ castka: 1, zpusob_platby: 'qr', kontaktni_platba: true })
@@ -139,7 +146,7 @@ async function main() {
     const platba2 = await posledniPlatba(r2.id);
     assert.equal(platba2.zpusob_platby, 'prevodem', '1e) uložená metoda musí být přesně prevodem');
     assert.equal(platba2.kontaktni_platba, false, '1e) uložená kontaktni_platba musí být přesně false');
-    console.log('OK — 1) rezervace/platba: qr i prevodem fungují, kontaktni_platba je povinná a ukládá se přesně');
+    console.log('OK — 1) rezervace/platba: qr i prevodem fungují; chybějící/neplatná kontaktni_platba se bezpečně uloží jako NULL (zpětná kompatibilita), platná hodnota se uloží přesně');
   }
 
   // 2) Rezervace — vratka: kontaktni_platba se NEVYŽADUJE (není nový příjem)
@@ -175,12 +182,17 @@ async function main() {
     console.log('OK — 3) rezervace/vratka jako poukaz: kontaktni_platba se nevyžaduje');
   }
 
-  // 4) Poukaz — vydání (zaplaceno=true): kontaktni_platba povinná, prevodem funguje
+  // 4) Poukaz — vydání (zaplaceno=true): prevodem funguje; kontaktni_platba
+  // NENÍ tvrdě vyžadovaná (zpětná kompatibilita, viz bod 1 výš)
   {
     const resChybejici = await adminFetch('/admin/poukazy', {
       method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-KROK2 (smazat)', zaplaceno: true, zpusob_platby: 'prevodem' })
     });
-    assert.equal(resChybejici.status, 400, '4a) chybějící kontaktni_platba u vydání rovnou zaplaceného poukazu musí být odmítnuta');
+    const dataChybejici = await resChybejici.json();
+    assert.equal(resChybejici.status, 200, '4a) chybějící kontaktni_platba u vydání rovnou zaplaceného poukazu NESMÍ být odmítnuta: ' + JSON.stringify(dataChybejici));
+    assert.equal(dataChybejici.poukaz.kontaktni_platba, null, '4a) chybějící kontaktni_platba se uloží jako NULL');
+    uklidPoukazy.push(dataChybejici.poukaz.id);
+    await vycerpatPoukazCele(dataChybejici.poukaz.kod, Number(polozka.cena));
 
     const resOk = await adminFetch('/admin/poukazy', {
       method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-KROK2-PREVODEM (smazat)', zaplaceno: true, zpusob_platby: 'prevodem', kontaktni_platba: false })
@@ -191,10 +203,10 @@ async function main() {
     assert.equal(dataOk.poukaz.kontaktni_platba, false, '4c) uložená kontaktni_platba musí být přesně false');
     uklidPoukazy.push(dataOk.poukaz.id);
     await vycerpatPoukazCele(dataOk.poukaz.kod, Number(polozka.cena));
-    console.log('OK — 4) poukazy (vydání): kontaktni_platba povinná u rovnou zaplaceného poukazu, prevodem funguje a ukládá se přesně');
+    console.log('OK — 4) poukazy (vydání): prevodem funguje; chybějící kontaktni_platba se bezpečně uloží jako NULL, platná hodnota se uloží přesně');
   }
 
-  // 5) Poukaz — potvrdit-platbu: kontaktni_platba povinná
+  // 5) Poukaz — potvrdit-platbu: kontaktni_platba NENÍ tvrdě vyžadovaná
   {
     const nezaplaceny = await adminFetch('/admin/poukazy', {
       method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-KROK2-NEZAPLACENO (smazat)', zaplaceno: false })
@@ -204,40 +216,46 @@ async function main() {
     const resChybejici = await adminFetch(`/admin/poukazy/${nezaplaceny.poukaz.id}/potvrdit-platbu`, {
       method: 'PATCH', body: JSON.stringify({ zpusob_platby: 'qr' })
     });
-    assert.equal(resChybejici.status, 400, '5a) chybějící kontaktni_platba u potvrzení platby poukazu musí být odmítnuta');
+    const dataChybejici = await resChybejici.json();
+    assert.equal(resChybejici.status, 200, '5a) chybějící kontaktni_platba u potvrzení platby poukazu NESMÍ být odmítnuta (stejná admin.html, jako by to dřív poslala starší verze): ' + JSON.stringify(dataChybejici));
+    assert.equal(dataChybejici.poukaz.kontaktni_platba, null, '5a) chybějící kontaktni_platba se uloží jako NULL');
+    await vycerpatPoukazCele(nezaplaceny.poukaz.kod, Number(polozka.cena));
 
-    const resOk = await adminFetch(`/admin/poukazy/${nezaplaceny.poukaz.id}/potvrdit-platbu`, {
+    const nezaplaceny2 = await adminFetch('/admin/poukazy', {
+      method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-KROK2-NEZAPLACENO-2 (smazat)', zaplaceno: false })
+    }).then(r => r.json());
+    uklidPoukazy.push(nezaplaceny2.poukaz.id);
+    const resOk = await adminFetch(`/admin/poukazy/${nezaplaceny2.poukaz.id}/potvrdit-platbu`, {
       method: 'PATCH', body: JSON.stringify({ zpusob_platby: 'qr', kontaktni_platba: true })
     });
     const dataOk = await resOk.json();
     assert.equal(resOk.status, 200, '5b) qr + kontaktni_platba=true musí uspět: ' + JSON.stringify(dataOk));
     assert.equal(dataOk.poukaz.kontaktni_platba, true, '5c) uložená kontaktni_platba musí být přesně true');
-    await vycerpatPoukazCele(nezaplaceny.poukaz.kod, Number(polozka.cena));
-    console.log('OK — 5) poukazy/potvrdit-platbu: kontaktni_platba povinná a ukládá se přesně');
+    await vycerpatPoukazCele(nezaplaceny2.poukaz.kod, Number(polozka.cena));
+    console.log('OK — 5) poukazy/potvrdit-platbu: chybějící kontaktni_platba se bezpečně uloží jako NULL, platná hodnota se uloží přesně');
   }
 
-  // 6) Poukaz — doplnit-historickou-platbu: kontaktni_platba povinná i tady
-  //    (jde o nový ZÁPIS reálné platby, jen s datem v minulosti — ne o starý
-  //    řádek, kterého se týká bod 0 výš)
+  // 6) Poukaz — doplnit-historickou-platbu: kontaktni_platba NENÍ tvrdě
+  //    vyžadovaná ani tady (jde o nový ZÁPIS reálné platby, jen s datem v
+  //    minulosti — ne o starý řádek, kterého se týká bod 0 výš, ale ze
+  //    stejného důvodu zpětné kompatibility se nevynucuje)
   {
-    // historický poukaz se stav_uhrady IS NULL nejde založit přes API (to API
-    // vždy nastaví 'nezaplaceno'/'zaplaceno') — ověříme tedy aspoň validaci
-    // kontaktni_platba na reálném poukazu, který do stavu IS NULL nejde
-    // dostat běžně; místo toho otestujeme přímo na nezaplaceném poukazu, že
-    // tenhle konkrétní endpoint požaduje kontaktni_platba a odmítne ho bez ní
-    // (poukaz.stav_uhrady musí být NULL, jinak endpoint vrátí 400 z jiného
-    // důvodu — proto tu jen ověřujeme, že validace kontaktni_platba běží
-    // PŘED kontrolou stavu, tedy že se o ni endpoint vůbec stará).
     const nezaplaceny = await adminFetch('/admin/poukazy', {
       method: 'POST', body: JSON.stringify({ cenik_id: polozka.id, kupujici_jmeno: 'TEST-KROK2-HISTORICKA (smazat)', zaplaceno: false })
     }).then(r => r.json());
     uklidPoukazy.push(nezaplaceny.poukaz.id);
 
+    // tenhle konkrétní poukaz má stav_uhrady='nezaplaceno' (ne NULL), takže
+    // endpoint ho stejně odmítne (400) — ale z JINÉHO důvodu (stav), ne kvůli
+    // kontaktni_platba. Ověřujeme tedy jen to, že chybějící kontaktni_platba
+    // samo o sobě 400 NEZPŮSOBÍ (viz chybová hláška).
     const resChybejici = await adminFetch(`/admin/poukazy/${nezaplaceny.poukaz.id}/doplnit-historickou-platbu`, {
       method: 'PATCH', body: JSON.stringify({ zpusob_platby: 'prevodem', zaplaceno_kdy: '2026-01-01' })
     });
-    assert.equal(resChybejici.status, 400, '6) chybějící kontaktni_platba u doplnění historické platby musí být odmítnuta (byť tenhle poukaz navíc selže i na stavu — obojí je 400)');
-    console.log('OK — 6) poukazy/doplnit-historickou-platbu: endpoint vyžaduje kontaktni_platba');
+    const dataChybejici = await resChybejici.json();
+    assert.equal(resChybejici.status, 400, '6) tenhle poukaz má stav_uhrady=nezaplaceno, endpoint ho odmítne (400), ale...');
+    assert.doesNotMatch(dataChybejici.chyba || '', /kontaktni_platba|osobně v salonu/, '6) ...důvod odmítnutí NESMÍ být kontaktni_platba (zpětná kompatibilita): ' + JSON.stringify(dataChybejici));
+    console.log('OK — 6) poukazy/doplnit-historickou-platbu: kontaktni_platba se nevynucuje (chyba 400 u tohoto poukazu je jen kvůli jeho stavu, ne kvůli kontaktni_platba)');
   }
 
   // 7) Kombinovaná platba: záloha prevodem (na dálku) + doplatek hotove (v salonu)

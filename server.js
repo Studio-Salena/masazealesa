@@ -55,10 +55,16 @@ const ZPUSOBY_PLATBY_PRODEJNA = ['hotove', 'qr'];
 const ZPUSOBY_PLATBY_PRODUKT = ['hotove', 'kartou', 'online'];
 // Krok 2 — "kontaktní platba": NEZÁVISLÉ na zpusob_platby, protože metoda
 // sama o sobě spolehlivě neurčuje, jestli šlo o kontaktní platbu ve smyslu
-// §6 ZEET (osobně v salonu) nebo platbu na dálku. true/false u NOVĚ
-// zaznamenané skutečně přijaté platby je POVINNÉ (viz validace níž u
-// jednotlivých endpointů) — žádný tichý výchozí odhad na serveru. Historické
-// řádky (před touto migrací) zůstávají NULL navždy, nikdy se nedopočítávají.
+// §6 ZEET (osobně v salonu) nebo platbu na dálku. V admin.html je u nové
+// skutečně přijaté platby vždy jednoznačně určená (viz
+// prednastavitKontaktniPlatbu) — ALE endpointy ji NEVYŽADUJÍ tvrdě (žádné
+// 400 při chybějící hodnotě). Důvod: postupné nasazení (nejdřív backend, pak
+// až po samostatném schválení admin.html) by jinak dočasně úplně rozbilo
+// zaznamenávání plateb ve starší nasazené administraci, která tohle pole
+// ještě neposílá — stejný princip zpětné kompatibility jako u
+// idempotency_klic. Chybějící/neplatná hodnota se prostě uloží jako NULL,
+// stejně jako u historických řádků (před touto migrací), které zůstávají
+// NULL navždy a nikdy se nedopočítávají.
 function jeKontaktniPlatbaPlatna(hodnota) {
   return hodnota === true || hodnota === false;
 }
@@ -2033,13 +2039,14 @@ app.patch('/api/admin/rezervace/:id/platba', async (req, res) => {
   if (klic && klic.length > 100) {
     return res.status(400).json({ chyba: 'Neplatný idempotenční klíč.' });
   }
-  // Krok 2 — u skutečně PŘIJATÉ platby (ne u vratky, ne u čerpání poukazu,
-  // kde nejde o nový pohyb peněz) musí být jednoznačně určené, jestli šlo o
-  // platbu osobně v salonu, nebo na dálku (viz jeKontaktniPlatbaPlatna výš).
-  const vyzadujeKontaktniPlatbu = druh === 'platba' && zpusob_platby !== 'poukaz';
-  if (vyzadujeKontaktniPlatbu && !jeKontaktniPlatbaPlatna(kontaktni_platba)) {
-    return res.status(400).json({ chyba: 'Vyberte prosím, jestli platba proběhla osobně v salonu, nebo na dálku.' });
-  }
+  // Krok 2 — kontaktni_platba NENÍ tvrdě vyžadovaná na úrovni API (viz
+  // stejný princip zpětné kompatibility u idempotency_klic výš) — admin.html
+  // ji posílá vždy (jednoznačně určeno v UI, viz prednastavitKontaktniPlatbu),
+  // ale starší nasazená administrace ji ještě neposílá vůbec. Kdyby ji
+  // endpoint vyžadoval, postupné nasazení (nejdřív backend, admin.html až
+  // po samostatném schválení) by mezitím úplně rozbilo zaznamenávání plateb
+  // ve staré administraci (viz audit 2026-11-17). Neplatná (ne-booleovská)
+  // hodnota, pokud je vůbec poslaná, se tiše ignoruje stejně jako chybějící.
   const kontaktniPlatbaKUlozeni = jeKontaktniPlatbaPlatna(kontaktni_platba) ? kontaktni_platba : null;
   const client = await db.connect();
   try {
@@ -2459,13 +2466,12 @@ app.post('/api/admin/poukazy', async (req, res) => {
       if (!ZPUSOBY_PLATBY_POUKAZ.includes(zpusob_platby)) {
         return res.status(400).json({ chyba: 'Vyberte prosím skutečný způsob platby.' });
       }
-      // Krok 2 — u skutečně PRÁVĚ TEĎ přijaté platby musí být jednoznačně
-      // určené, jestli šlo o platbu osobně v salonu, nebo na dálku (viz
-      // jeKontaktniPlatbaPlatna výš) — žádný tichý odhad podle metody.
-      if (!jeKontaktniPlatbaPlatna(kontaktni_platba)) {
-        return res.status(400).json({ chyba: 'Vyberte prosím, jestli platba proběhla osobně v salonu, nebo na dálku.' });
-      }
-      stavUhrady = 'zaplaceno'; zaplacenoKdy = new Date(); zpusobPlatbyFinal = zpusob_platby; kontaktniPlatbaFinal = kontaktni_platba;
+      // Krok 2 — kontaktni_platba se neukládá natvrdo podle metody, ale
+      // NENÍ ani tvrdě vyžadovaná (viz shodné zdůvodnění zpětné kompatibility
+      // u PATCH /rezervace/:id/platba výš) — chybějící/neplatná hodnota se
+      // uloží jako NULL, stejně jako u starších/historických řádků.
+      stavUhrady = 'zaplaceno'; zaplacenoKdy = new Date(); zpusobPlatbyFinal = zpusob_platby;
+      kontaktniPlatbaFinal = jeKontaktniPlatbaPlatna(kontaktni_platba) ? kontaktni_platba : null;
     } else {
       stavUhrady = 'nezaplaceno';
     }
@@ -2547,12 +2553,11 @@ app.patch('/api/admin/poukazy/:id/potvrdit-platbu', async (req, res) => {
   if (!ZPUSOBY_PLATBY_POUKAZ.includes(zpusob_platby)) {
     return res.status(400).json({ chyba: 'Vyberte prosím skutečný způsob platby.' });
   }
-  // Krok 2 — skutečně nová platba, PRÁVĚ TEĎ potvrzovaná jako přijatá, musí
-  // mít jednoznačně určené, jestli šlo o platbu osobně v salonu, nebo na
-  // dálku (viz jeKontaktniPlatbaPlatna výš).
-  if (!jeKontaktniPlatbaPlatna(kontaktni_platba)) {
-    return res.status(400).json({ chyba: 'Vyberte prosím, jestli platba proběhla osobně v salonu, nebo na dálku.' });
-  }
+  // Krok 2 — kontaktni_platba se neukládá natvrdo podle metody, ale NENÍ
+  // ani tvrdě vyžadovaná (viz shodné zdůvodnění zpětné kompatibility u
+  // PATCH /rezervace/:id/platba výš) — chybějící/neplatná hodnota se uloží
+  // jako NULL.
+  const kontaktniPlatbaKUlozeni = jeKontaktniPlatbaPlatna(kontaktni_platba) ? kontaktni_platba : null;
   const client = await db.connect();
   try {
     await client.query('BEGIN');
@@ -2562,7 +2567,7 @@ app.patch('/api/admin/poukazy/:id/potvrdit-platbu', async (req, res) => {
     if (poukaz.stav_uhrady === 'zaplaceno') { await client.query('ROLLBACK'); return res.status(400).json({ chyba: 'Tento poukaz je už zaznamenaný jako zaplacený.' }); }
     const { rows: [aktualizovany] } = await client.query(
       `UPDATE poukazy SET stav_uhrady = 'zaplaceno', zpusob_platby = $1, zaplaceno_kdy = now(), zaplaceno_zpetne = false, kontaktni_platba = $3 WHERE id = $2 RETURNING *`,
-      [zpusob_platby, req.params.id, kontaktni_platba]
+      [zpusob_platby, req.params.id, kontaktniPlatbaKUlozeni]
     );
     await client.query('COMMIT');
     res.json({ ok: true, poukaz: aktualizovany });
@@ -2591,11 +2596,11 @@ app.patch('/api/admin/poukazy/:id/doplnit-historickou-platbu', async (req, res) 
   if (!datum || Number.isNaN(datum.getTime())) {
     return res.status(400).json({ chyba: 'Zadejte prosím platné datum skutečné platby.' });
   }
-  // Krok 2 — i dodatečné doplnění je NOVÝ zápis reálné platby (jen s datem v
-  // minulosti), takže potřebuje stejně jednoznačně určený charakter platby.
-  if (!jeKontaktniPlatbaPlatna(kontaktni_platba)) {
-    return res.status(400).json({ chyba: 'Vyberte prosím, jestli platba proběhla osobně v salonu, nebo na dálku.' });
-  }
+  // Krok 2 — kontaktni_platba se tu neukládá natvrdo podle metody, ale NENÍ
+  // ani tvrdě vyžadovaná (viz shodné zdůvodnění zpětné kompatibility u
+  // PATCH /rezervace/:id/platba výš) — chybějící/neplatná hodnota se uloží
+  // jako NULL.
+  const kontaktniPlatbaKUlozeni = jeKontaktniPlatbaPlatna(kontaktni_platba) ? kontaktni_platba : null;
   const client = await db.connect();
   try {
     await client.query('BEGIN');
@@ -2608,7 +2613,7 @@ app.patch('/api/admin/poukazy/:id/doplnit-historickou-platbu', async (req, res) 
     }
     const { rows: [aktualizovany] } = await client.query(
       `UPDATE poukazy SET stav_uhrady = 'zaplaceno', zpusob_platby = $1, zaplaceno_kdy = $2, zaplaceno_zpetne = true, kontaktni_platba = $4 WHERE id = $3 RETURNING *`,
-      [zpusob_platby, datum.toISOString(), req.params.id, kontaktni_platba]
+      [zpusob_platby, datum.toISOString(), req.params.id, kontaktniPlatbaKUlozeni]
     );
     await client.query('COMMIT');
     res.json({ ok: true, poukaz: aktualizovany });
