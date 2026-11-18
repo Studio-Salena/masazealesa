@@ -1095,6 +1095,31 @@ async function vykreslitEmail(klic, promenne) {
   return { predmet: vyplnitSablonu(s.predmet, promenne), html: emailSablona(vyplnitSablonu(s.telo, promenne)) };
 }
 
+// Automatická účtenka e-mailem (viz PATCH /rezervace/:id/platba,
+// PATCH /poukazy/:id/potvrdit-platbu a POST /admin/poukazy) — posílá se jen
+// u SKUTEČNĚ PRÁVĚ TEĎ přijaté platby, nikdy u "doplnit-historickou-platbu"
+// (to je dodatečný zápis staré platby, ne nový příjem — e-mail o účtence za
+// něco z minulosti by klientku jen zmátl). "Fire and forget" — volá se AŽ
+// PO úspěšném uložení platby a nikdy nesmí ovlivnit odpověď endpointu ani
+// zablokovat/zrušit už uloženou platbu, i kdyby odeslání e-mailu selhalo
+// (stejný princip jako ostatní notifikační e-maily v appce).
+function odeslatUctenkuEmailem({ email, jmeno, polozky, castka, zpusobPlatby }) {
+  if (!email) return;
+  const zpusobLabel = { hotove: 'Hotově', kartou: 'Kartou', online: 'Online', qr: 'QR kódem', prevodem: 'Převodem', poukaz: 'Poukazem' }[zpusobPlatby] || zpusobPlatby;
+  const radky = polozky.map(p => `<tr><td style="padding:4px 0;color:#555">${p.label}</td><td style="padding:4px 0;text-align:right;white-space:nowrap">${p.hodnota}</td></tr>`).join('');
+  const telo = `<h2>Dobrý den${jmeno ? ', ' + jmeno : ''},</h2>
+    <p>děkuji za platbu. Tady je vaše účtenka:</p>
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin:12px 0">
+      ${radky}
+      <tr><td style="padding:8px 0 4px;border-top:1px solid #e8ded4;font-weight:700">Zaplaceno</td><td style="padding:8px 0 4px;border-top:1px solid #e8ded4;text-align:right;font-weight:700;white-space:nowrap">${Number(castka).toLocaleString('cs-CZ')} Kč (${zpusobLabel})</td></tr>
+    </table>
+    <p style="font-size:0.85rem;color:#777">Alena Hasalová · Masáže Alesa · Včelín 1211, 768 24 Hulín · IČO: 03237885</p>
+    <p>S pozdravem,<br><strong>Alena Hasalová</strong><br>Masáže Alesa</p>`;
+  // Nečeká se na výsledek (fire and forget) — odpověď endpointu na tom
+  // nesmí záviset, viz komentář výš.
+  odeslatEmail(email, 'Účtenka – Masáže Alesa', emailSablona(telo)).catch(() => {});
+}
+
 // ── LOGIN (admin) ──
 app.post('/api/login', (req, res) => {
   const { heslo } = req.body || {};
@@ -2120,6 +2145,15 @@ app.patch('/api/admin/rezervace/:id/platba', async (req, res) => {
     const aktualizovana = await prepocitatSouhrnRezervace(client, req.params.id);
     await client.query('COMMIT');
     res.json({ ok: true, rezervace: aktualizovana, poukaz: novyPoukaz });
+    // Účtenka e-mailem — jen u skutečně PRÁVĚ TEĎ přijaté platby (ne vratka,
+    // ne čerpání poukazu — to už bylo jednou zaplaceno při prodeji poukazu).
+    if (druh === 'platba' && zpusob_platby !== 'poukaz' && r.email) {
+      odeslatUctenkuEmailem({
+        email: r.email, jmeno: r.jmeno,
+        polozky: [{ label: r.masaz, hodnota: '' }],
+        castka: castkaNum, zpusobPlatby: zpusob_platby
+      });
+    }
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch {}
     res.status(500).json({ chyba: e.message });
@@ -2504,6 +2538,13 @@ app.post('/api/admin/poukazy', async (req, res) => {
     });
     await client.query('COMMIT');
     res.json({ ok: true, poukaz });
+    if (stavUhrady === 'zaplaceno') {
+      odeslatUctenkuEmailem({
+        email: poukaz.kupujici_email, jmeno: poukaz.kupujici_jmeno,
+        polozky: [{ label: 'Dárkový poukaz' + (poukaz.konkretni_masaz ? ' – ' + poukaz.konkretni_masaz : '') + ' (kód ' + poukaz.kod + ')', hodnota: '' }],
+        castka: Number(poukaz.hodnota) - Number(poukaz.sleva_kc || 0), zpusobPlatby: zpusobPlatbyFinal
+      });
+    }
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch {}
     res.status(500).json({ chyba: e.message });
@@ -2571,6 +2612,11 @@ app.patch('/api/admin/poukazy/:id/potvrdit-platbu', async (req, res) => {
     );
     await client.query('COMMIT');
     res.json({ ok: true, poukaz: aktualizovany });
+    odeslatUctenkuEmailem({
+      email: aktualizovany.kupujici_email, jmeno: aktualizovany.kupujici_jmeno,
+      polozky: [{ label: 'Dárkový poukaz' + (aktualizovany.konkretni_masaz ? ' – ' + aktualizovany.konkretni_masaz : '') + ' (kód ' + aktualizovany.kod + ')', hodnota: '' }],
+      castka: Number(aktualizovany.hodnota) - Number(aktualizovany.sleva_kc || 0), zpusobPlatby: zpusob_platby
+    });
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch {}
     res.status(500).json({ chyba: e.message });
@@ -3342,6 +3388,72 @@ app.post('/api/admin/newsletter/odeslat', async (req, res) => {
       [predmet, obsah, odeslano]
     );
     res.json({ ok: true, odeslano, celkem: odberatele.length });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
+// -- Recenze --
+// Veřejný endpoint (bez hesla) — jen zveřejněné recenze, pro web. "jmeno"
+// je vždy jen křestní, na webu se navíc skládá do "Paní {jmeno}" — ochrana
+// soukromí (nikdy se tu neposílá celé jméno/příjmení).
+app.get('/api/recenze', async (req, res) => {
+  try {
+    const { rows } = await db.query(
+      `SELECT id, jmeno, text, hvezdicky FROM recenze WHERE stav = 'zverejneno' ORDER BY poradi ASC, zverejneno_kdy DESC`
+    );
+    res.json(rows);
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
+app.get('/api/admin/recenze', async (req, res) => {
+  try {
+    const { rows } = await db.query('SELECT * FROM recenze ORDER BY stav = \'koncept\' DESC, poradi ASC, vytvoreno DESC');
+    res.json(rows);
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
+app.post('/api/admin/recenze', async (req, res) => {
+  const { jmeno, text, hvezdicky, poradi } = req.body || {};
+  if (!jmeno || !jmeno.trim() || !text || !text.trim()) {
+    return res.status(400).json({ chyba: 'Vyplňte prosím jméno a text recenze.' });
+  }
+  const hvezdickyNum = Number(hvezdicky) || 5;
+  if (hvezdickyNum < 1 || hvezdickyNum > 5) return res.status(400).json({ chyba: 'Počet hvězdiček musí být 1 až 5.' });
+  try {
+    const { rows: [recenze] } = await db.query(
+      `INSERT INTO recenze (jmeno, text, hvezdicky, poradi) VALUES ($1,$2,$3,$4) RETURNING *`,
+      [jmeno.trim(), text.trim(), hvezdickyNum, Number(poradi) || 0]
+    );
+    res.json({ ok: true, recenze });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
+// Upravuje text/jméno/hvězdičky/pořadí I stav (koncept↔zverejneno) — jeden
+// endpoint pro obojí, ať se nemusí řešit dva zvlášť pro malou administraci.
+app.patch('/api/admin/recenze/:id', async (req, res) => {
+  const existujici = (await db.query('SELECT * FROM recenze WHERE id = $1', [req.params.id])).rows[0];
+  if (!existujici) return res.status(404).json({ chyba: 'Recenze nebyla nalezena.' });
+  const jmeno = req.body?.jmeno !== undefined ? String(req.body.jmeno).trim() : existujici.jmeno;
+  const text = req.body?.text !== undefined ? String(req.body.text).trim() : existujici.text;
+  const hvezdicky = req.body?.hvezdicky !== undefined ? Number(req.body.hvezdicky) : existujici.hvezdicky;
+  const poradi = req.body?.poradi !== undefined ? Number(req.body.poradi) : existujici.poradi;
+  const stav = req.body?.stav !== undefined ? req.body.stav : existujici.stav;
+  if (!jmeno || !text) return res.status(400).json({ chyba: 'Vyplňte prosím jméno a text recenze.' });
+  if (!Number.isFinite(hvezdicky) || hvezdicky < 1 || hvezdicky > 5) return res.status(400).json({ chyba: 'Počet hvězdiček musí být 1 až 5.' });
+  if (!['koncept', 'zverejneno'].includes(stav)) return res.status(400).json({ chyba: 'Neplatný stav.' });
+  try {
+    const zverejnenoKdy = stav === 'zverejneno' && existujici.stav !== 'zverejneno' ? new Date() : existujici.zverejneno_kdy;
+    const { rows: [recenze] } = await db.query(
+      `UPDATE recenze SET jmeno=$1, text=$2, hvezdicky=$3, poradi=$4, stav=$5, zverejneno_kdy=$6 WHERE id=$7 RETURNING *`,
+      [jmeno, text, hvezdicky, poradi, stav, zverejnenoKdy, req.params.id]
+    );
+    res.json({ ok: true, recenze });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
+app.delete('/api/admin/recenze/:id', async (req, res) => {
+  try {
+    await db.query('DELETE FROM recenze WHERE id = $1', [req.params.id]);
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 

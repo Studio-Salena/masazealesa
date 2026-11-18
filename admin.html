@@ -411,6 +411,7 @@ tr:hover td{background:var(--cream)}
       </button>
       <div class="nav-subitems">
         <button type="button" class="nav-item nav-subitem" onclick="showPage('newsletter',this)" title="Newsletter"><span class="icon">💌</span><span class="nav-text"> Newsletter</span></button>
+        <button type="button" class="nav-item nav-subitem" onclick="showPage('recenze',this)" title="Recenze"><span class="icon">⭐</span><span class="nav-text"> Recenze</span></button>
         <button type="button" class="nav-item nav-subitem" onclick="showPage('sablony',this)" title="Šablony e-mailů"><span class="icon">✉️</span><span class="nav-text"> Šablony e-mailů</span></button>
       </div>
     </div>
@@ -718,6 +719,53 @@ tr:hover td{background:var(--cream)}
       <p style="padding:0 4px;font-size:0.82rem;color:var(--text-light)">Text automatických e-mailů, které klientky dostávají (potvrzení, připomínka, zrušení...). Úprava se projeví hned na dalším odeslaném e-mailu daného typu.</p>
       <div class="table-wrap">
         <div id="sablonyTable"><div class="loading">Načítám...</div></div>
+      </div>
+    </div>
+
+    <!-- RECENZE NA WEB -->
+    <div class="page" id="page-recenze">
+      <div class="page-header">
+        <div class="page-title">⭐ Recenze</div>
+        <div class="table-actions">
+          <button class="btn btn-primary" onclick="otevritNovouRecenzi()">+ Přidat recenzi</button>
+          <button class="refresh-btn" onclick="loadRecenze()">↻ Obnovit</button>
+        </div>
+      </div>
+      <p style="padding:0 4px;font-size:0.82rem;color:var(--text-light)">Recenze, co vám klientky pošlou e-mailem (třeba když nemají Facebook), sem můžete přidat ručně. Jméno zadávejte jen křestní — na webu se vždy zobrazí jako "Paní [jméno]", nikdy celé příjmení. Nová recenze je nejdřív jen "Koncept" (vidíte ji jen vy tady) — na web se dostane, až kliknete "Zveřejnit".</p>
+      <div class="table-wrap">
+        <div id="recenzeTable"><div class="loading">Načítám...</div></div>
+      </div>
+    </div>
+
+    <!-- MODAL: Přidat/upravit recenzi -->
+    <div class="modal-overlay" id="modalRecenze">
+      <div class="modal">
+        <h3 id="recenzeModalTitulek">Přidat recenzi</h3>
+        <div id="recenzeModalMsg"></div>
+        <div class="form-group">
+          <label>Křestní jméno</label>
+          <input type="text" id="recJmeno" placeholder="např. Jana" oninput="aktualizovatNahledRecenze()">
+          <div style="font-size:0.78rem;color:var(--text-light);margin-top:3px">Na webu se zobrazí jako: <strong id="recNahledJmeno">Paní …</strong></div>
+        </div>
+        <div class="form-group">
+          <label>Text recenze</label>
+          <textarea id="recText" rows="4" style="width:100%;border:1px solid var(--tan-light);border-radius:6px;padding:6px 8px;font-family:'Nunito',sans-serif;resize:vertical"></textarea>
+        </div>
+        <div class="form-group">
+          <label>Hvězdičky</label>
+          <select id="recHvezdicky">
+            <option value="5">★★★★★ (5)</option>
+            <option value="4">★★★★☆ (4)</option>
+            <option value="3">★★★☆☆ (3)</option>
+            <option value="2">★★☆☆☆ (2)</option>
+            <option value="1">★☆☆☆☆ (1)</option>
+          </select>
+        </div>
+        <input type="hidden" id="recId">
+        <div class="modal-footer">
+          <button class="btn btn-outline" onclick="closeModal('modalRecenze')">Zrušit</button>
+          <button class="btn btn-primary" onclick="ulozitRecenzi()">Uložit jako koncept</button>
+        </div>
       </div>
     </div>
 
@@ -1759,6 +1807,7 @@ function showPage(name, el) {
   if (name === 'zakaznici') loadZakaznici();
   if (name === 'newsletter') loadNewsletter();
   if (name === 'sablony') loadSablony();
+  if (name === 'recenze') loadRecenze();
   if (name === 'cenik') loadCenik();
   if (name === 'produkty') loadProdukty();
   if (name === 'kupony') loadKupony();
@@ -4290,6 +4339,92 @@ async function poslatTestSablony() {
     if (!res.ok) { msg.innerHTML = '<div class="error-msg">' + (data.chyba || 'Odeslání testu se nepodařilo.') + '</div>'; return; }
     msg.innerHTML = '<div style="color:var(--tan);font-size:0.85rem">✅ Testovací e-mail odeslán na ' + escapeHtml(email) + '.</div>';
   } catch (e) { msg.innerHTML = '<div class="error-msg">Nejde se připojit k serveru.</div>'; }
+}
+
+// ── RECENZE NA WEB ──
+let posledniRecenze = [];
+async function loadRecenze() {
+  try {
+    posledniRecenze = await adminFetch(API + '/admin/recenze').then(r => r.json());
+    vykreslitRecenze();
+  } catch (e) {
+    document.getElementById('recenzeTable').innerHTML = '<div class="error-msg">Chyba načítání.</div>';
+  }
+}
+function vykreslitRecenze() {
+  if (!posledniRecenze.length) { document.getElementById('recenzeTable').innerHTML = '<div class="empty">Zatím žádné recenze</div>'; return; }
+  document.getElementById('recenzeTable').innerHTML = `
+    <table><thead><tr><th>Stav</th><th>Jméno na webu</th><th>Text</th><th>Hvězdičky</th><th></th></tr></thead>
+    <tbody>${posledniRecenze.map(r => `<tr>
+      <td>${r.stav === 'zverejneno' ? '<span class="badge badge-ok">✅ Zveřejněno</span>' : '<span class="badge badge-cekajici">📝 Koncept</span>'}</td>
+      <td>Paní ${escapeHtml(r.jmeno)}</td>
+      <td style="max-width:320px">${escapeHtml(r.text).slice(0, 140)}${r.text.length > 140 ? '…' : ''}</td>
+      <td>${'★'.repeat(r.hvezdicky)}${'☆'.repeat(5 - r.hvezdicky)}</td>
+      <td style="white-space:nowrap">
+        <button class="btn btn-outline btn-sm" onclick="otevritUpravitRecenzi(${r.id})">✏️</button>
+        ${r.stav === 'zverejneno'
+          ? `<button class="btn btn-outline btn-sm" onclick="prepnoutStavRecenze(${r.id},'koncept')" title="Skrýt z webu">🙈 Skrýt</button>`
+          : `<button class="btn btn-green btn-sm" onclick="prepnoutStavRecenze(${r.id},'zverejneno')" title="Zveřejnit na webu">🌐 Zveřejnit</button>`}
+        <button class="btn btn-red btn-sm" onclick="smazatRecenzi(${r.id})">🗑️</button>
+      </td>
+    </tr>`).join('')}</tbody></table>
+  `;
+}
+function aktualizovatNahledRecenze() {
+  const jmeno = document.getElementById('recJmeno').value.trim();
+  document.getElementById('recNahledJmeno').textContent = 'Paní ' + (jmeno || '…');
+}
+function otevritNovouRecenzi() {
+  document.getElementById('recenzeModalTitulek').textContent = 'Přidat recenzi';
+  document.getElementById('recId').value = '';
+  document.getElementById('recJmeno').value = '';
+  document.getElementById('recText').value = '';
+  document.getElementById('recHvezdicky').value = '5';
+  document.getElementById('recenzeModalMsg').innerHTML = '';
+  aktualizovatNahledRecenze();
+  openModal('modalRecenze');
+}
+function otevritUpravitRecenzi(id) {
+  const r = posledniRecenze.find(x => x.id === id);
+  if (!r) return;
+  document.getElementById('recenzeModalTitulek').textContent = 'Upravit recenzi';
+  document.getElementById('recId').value = r.id;
+  document.getElementById('recJmeno').value = r.jmeno;
+  document.getElementById('recText').value = r.text;
+  document.getElementById('recHvezdicky').value = r.hvezdicky;
+  document.getElementById('recenzeModalMsg').innerHTML = '';
+  aktualizovatNahledRecenze();
+  openModal('modalRecenze');
+}
+async function ulozitRecenzi() {
+  const id = document.getElementById('recId').value;
+  const jmeno = document.getElementById('recJmeno').value.trim();
+  const text = document.getElementById('recText').value.trim();
+  const hvezdicky = Number(document.getElementById('recHvezdicky').value);
+  const msg = document.getElementById('recenzeModalMsg');
+  if (!jmeno || !text) { msg.innerHTML = '<div class="error-msg">Vyplňte prosím jméno i text recenze.</div>'; return; }
+  try {
+    const res = id
+      ? await adminFetch(API + '/admin/recenze/' + id, { method: 'PATCH', body: JSON.stringify({ jmeno, text, hvezdicky }) })
+      : await adminFetch(API + '/admin/recenze', { method: 'POST', body: JSON.stringify({ jmeno, text, hvezdicky }) });
+    const data = await res.json();
+    if (!res.ok) { msg.innerHTML = '<div class="error-msg">' + escapeHtml(data.chyba || 'Uložení se nepodařilo.') + '</div>'; return; }
+    closeModal('modalRecenze');
+    loadRecenze();
+  } catch (e) { msg.innerHTML = '<div class="error-msg">Nejde se připojit k serveru.</div>'; }
+}
+async function prepnoutStavRecenze(id, novyStav) {
+  const potvrzeniText = novyStav === 'zverejneno' ? 'Zveřejnit tuhle recenzi na webu?' : 'Skrýt tuhle recenzi z webu? (zůstane uložená jako koncept)';
+  if (!confirm(potvrzeniText)) return;
+  const res = await adminFetch(API + '/admin/recenze/' + id, { method: 'PATCH', body: JSON.stringify({ stav: novyStav }) });
+  if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.chyba || 'Uložení se nepodařilo.'); return; }
+  loadRecenze();
+}
+async function smazatRecenzi(id) {
+  if (!confirm('Smazat tuhle recenzi natrvalo?')) return;
+  const res = await adminFetch(API + '/admin/recenze/' + id, { method: 'DELETE' });
+  if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.chyba || 'Smazání se nepodařilo.'); return; }
+  loadRecenze();
 }
 
 // ── CENÍK ── (skupiny masáží s variantami)
