@@ -2614,21 +2614,9 @@ app.post('/api/admin/poukazy', async (req, res) => {
   try {
     await client.query('BEGIN');
 
-    // Krok 3b — kontrola idempotence NEJDŘÍV (ještě před dopočtem hodnoty),
-    // stejný princip jako u platby rezervace: při shodě klíče a kupující
-    // jména (zaplacená/i nezaplacená hodnota se porovná až níž, po dopočtu).
-    if (klic) {
-      const { rows: [existujici] } = await client.query('SELECT * FROM poukazy WHERE idempotency_klic = $1', [klic]);
-      if (existujici) {
-        await client.query('COMMIT');
-        if ((existujici.kupujici_jmeno || null) === (kupujici_jmeno || null)) {
-          return res.json({ ok: true, poukaz: existujici, idempotentni: true });
-        }
-        return res.status(409).json(CHYBA_IDEMPOTENTNI_KONFLIKT);
-      }
-      // klíč zatím volný => pokračuje se normálním zápisem níž
-    }
-
+    // Dopočet hodnoty PŘED kontrolou idempotence — čisté SELECTy (cenik/typ),
+    // žádný vedlejší účinek, takže je bezpečné je provést dřív, aby šlo
+    // porovnat i hodnotu, ne jen kupujici_jmeno (Krok 3b, audit bodu 2).
     let hodnota, platnostMesicu, konkretniMasaz = null;
     if (cenik_id) {
       const { rows: [polozka] } = await client.query('SELECT * FROM cenik WHERE id = $1', [cenik_id]);
@@ -2641,6 +2629,20 @@ app.post('/api/admin/poukazy', async (req, res) => {
       if (!typ) { await client.query('ROLLBACK'); return res.status(404).json({ chyba: 'Tato varianta poukazu nebyla nalezena.' }); }
       hodnota = typ.hodnota;
       platnostMesicu = typ.platnost_mesicu;
+    }
+
+    // Krok 3b — kontrola idempotence: shoda klíče MUSÍ sedět i v hodnotě a
+    // kupujícím jméně, jinak jde o jiný požadavek se stejným (znovu použitým)
+    // klíčem → 409, ne tiché vrácení cizího poukazu.
+    if (klic) {
+      const { rows: [existujici] } = await client.query('SELECT * FROM poukazy WHERE idempotency_klic = $1', [klic]);
+      if (existujici) {
+        await client.query('COMMIT');
+        const sedi = Number(existujici.hodnota) === Number(hodnota) && (existujici.kupujici_jmeno || null) === (kupujici_jmeno || null);
+        if (sedi) return res.json({ ok: true, poukaz: existujici, idempotentni: true });
+        return res.status(409).json(CHYBA_IDEMPOTENTNI_KONFLIKT);
+      }
+      // klíč zatím volný => pokračuje se normálním zápisem níž
     }
     // Klientka (Fáze 6D) — jen pokud je vyplněný telefon; bez telefonu zůstává
     // klientka_id NULL (nelze bezpečně určit jen podle jména/e-mailu).
@@ -2664,7 +2666,9 @@ app.post('/api/admin/poukazy', async (req, res) => {
         const clientOverit = await db.connect();
         try {
           const { rows: [existujici] } = await clientOverit.query('SELECT * FROM poukazy WHERE idempotency_klic = $1', [klic]);
-          if (existujici) return res.json({ ok: true, poukaz: existujici, idempotentni: true });
+          if (existujici && Number(existujici.hodnota) === Number(hodnota) && (existujici.kupujici_jmeno || null) === (kupujici_jmeno || null)) {
+            return res.json({ ok: true, poukaz: existujici, idempotentni: true });
+          }
           return res.status(409).json(CHYBA_IDEMPOTENTNI_KONFLIKT);
         } finally {
           clientOverit.release();
@@ -3725,6 +3729,29 @@ app.post('/api/admin/prodejna', async (req, res) => {
   // vstupu, ale je VŽDY true — explicitní sloupec, ne jen předpoklad v kódu.
   const kontaktniPlatbaKUlozeni = true;
   const client = await db.connect();
+  // Krok 3b oprava — některé "už spotřebováno/vyčerpáno" chyby níž mohou
+  // nastat NE proto, že by kód/poukaz byl použitý na něco JINÉHO, ale
+  // protože souběžný požadavek SE STEJNÝM idempotenčním klíčem mezitím
+  // doběhl a commitnul (viz FOR UPDATE / implicitní zámek na UPDATE níž —
+  // druhý požadavek čeká na zámek, a po jeho uvolnění vidí stav PO prvním
+  // požadavku, ne "beze změny"). Před vrácením takové chyby se proto vždy
+  // nejdřív zkontroluje, jestli klíč už nemá svůj vlastní, úspěšně dokončený
+  // výsledek — pokud ano, vrátí se TEN (idempotentní odpověď), ne chyba.
+  // Vrací null (klíč zatím volný), nebo { sedi, existujici } — "sedi" říká,
+  // jestli uložený řádek pod tímhle klíčem odpovídá TÉTO žádosti (masáž +
+  // cena) — jinak jde o znovu použitý klíč na JINOU žádost, ne o opakování/
+  // souběh téže (Krok 3b, audit bodu 2).
+  async function zkusIdempotentniShoduPredChybou() {
+    if (!klic) return null;
+    const { rows: [existujici] } = await client.query('SELECT * FROM prodeje WHERE idempotency_klic = $1', [klic]);
+    if (!existujici) return null;
+    const sedi = existujici.masaz === masaz && Number(existujici.cena) === cenaNum;
+    return { sedi, existujici };
+  }
+  function odpovedetIdempotentneNeboKonflikt(vysledek) {
+    if (vysledek.sedi) return res.json({ ok: true, prodej: vysledek.existujici, idempotentni: true });
+    return res.status(409).json(CHYBA_IDEMPOTENTNI_KONFLIKT);
+  }
   try {
     await client.query('BEGIN');
 
@@ -3732,10 +3759,10 @@ app.post('/api/admin/prodejna', async (req, res) => {
     // — opakovaný/souběžný požadavek se stejným klíčem nesmí žádný z nich
     // spotřebovat podruhé.
     if (klic) {
-      const { rows: [existujici] } = await client.query('SELECT * FROM prodeje WHERE idempotency_klic = $1', [klic]);
-      if (existujici) {
-        await client.query('COMMIT');
-        return res.json({ ok: true, prodej: existujici, idempotentni: true });
+      const vysledek = await zkusIdempotentniShoduPredChybou();
+      if (vysledek) {
+        await client.query(vysledek.sedi ? 'COMMIT' : 'ROLLBACK');
+        return odpovedetIdempotentneNeboKonflikt(vysledek);
       }
     }
 
@@ -3745,6 +3772,8 @@ app.post('/api/admin/prodejna', async (req, res) => {
         [kupon_kod.trim()]
       );
       if (!spotrebovan) {
+        const vysledek = await zkusIdempotentniShoduPredChybou();
+        if (vysledek) { await client.query(vysledek.sedi ? 'COMMIT' : 'ROLLBACK'); return odpovedetIdempotentneNeboKonflikt(vysledek); }
         const { rows: [existuje] } = await client.query('SELECT pouzito_kdy FROM slevove_kupony WHERE upper(kod) = upper($1)', [kupon_kod.trim()]);
         await client.query('ROLLBACK');
         if (existuje) return res.status(400).json({ chyba: 'Tento kupón už byl použit.' });
@@ -3766,7 +3795,12 @@ app.post('/api/admin/prodejna', async (req, res) => {
       const { rows: [poukaz] } = await client.query('SELECT * FROM poukazy WHERE upper(kod) = upper($1) FOR UPDATE', [poukaz_kod.trim()]);
       if (!poukaz) { await client.query('ROLLBACK'); return res.status(404).json({ chyba: 'Poukaz s tímto kódem nebyl nalezen.' }); }
       if (poukaz.stav === 'zruseny') { await client.query('ROLLBACK'); return res.status(400).json({ chyba: 'Poukaz je zrušený, nelze ho uplatnit.' }); }
-      if (poukaz.stav === 'pouzity' || Number(poukaz.zustatek) <= 0) { await client.query('ROLLBACK'); return res.status(400).json({ chyba: 'Poukaz je už plně vyčerpaný.' }); }
+      if (poukaz.stav === 'pouzity' || Number(poukaz.zustatek) <= 0) {
+        const vysledek = await zkusIdempotentniShoduPredChybou();
+        if (vysledek) { await client.query(vysledek.sedi ? 'COMMIT' : 'ROLLBACK'); return odpovedetIdempotentneNeboKonflikt(vysledek); }
+        await client.query('ROLLBACK');
+        return res.status(400).json({ chyba: 'Poukaz je už plně vyčerpaný.' });
+      }
       // Etapa 2 — stejná kontrola jako u POST .../uplatnit: čekající-na-platbu
       // poukaz nelze uplatnit ani zde. Historické (stav_uhrady NULL) nedotčeny.
       if (poukaz.ucel === 'prodej' && poukaz.stav_uhrady === 'nezaplaceno') {
@@ -3816,7 +3850,9 @@ app.post('/api/admin/prodejna', async (req, res) => {
         const clientOverit = await db.connect();
         try {
           const { rows: [existujici] } = await clientOverit.query('SELECT * FROM prodeje WHERE idempotency_klic = $1', [klic]);
-          if (existujici) return res.json({ ok: true, prodej: existujici, idempotentni: true });
+          if (existujici && existujici.masaz === masaz && Number(existujici.cena) === cenaNum) {
+            return res.json({ ok: true, prodej: existujici, idempotentni: true });
+          }
           return res.status(409).json(CHYBA_IDEMPOTENTNI_KONFLIKT);
         } finally {
           clientOverit.release();
@@ -4075,6 +4111,14 @@ app.post('/api/admin/produkty/:id/prodat', async (req, res) => {
     const { rows: [produkt] } = await client.query('SELECT * FROM produkty WHERE id = $1 FOR UPDATE', [req.params.id]);
     if (!produkt) { await client.query('ROLLBACK'); return res.status(404).json({ chyba: 'Produkt nebyl nalezen.' }); }
     if (produkt.sklad < mnozstviNum) {
+      // Krok 3b oprava — stejný princip jako u prodejny: tahle chyba může
+      // nastat PROTO, že souběžný požadavek SE STEJNÝM klíčem mezitím
+      // doběhl a snížil sklad (FOR UPDATE výš čekal na jeho zámek) — ne
+      // proto, že by na skladě skutečně nebylo dost kusů na TUTO žádost.
+      if (klic) {
+        const vysledekIdempotence = await zkontrolovatIdempotentniProdejProduktu(client, klic, req.params.id, mnozstviNum, zpusob_platby);
+        if (vysledekIdempotence) { await client.query('COMMIT'); return res.json(vysledekIdempotence); }
+      }
       await client.query('ROLLBACK');
       return res.status(400).json({ chyba: `Na skladě je jen ${produkt.sklad} ks.` });
     }

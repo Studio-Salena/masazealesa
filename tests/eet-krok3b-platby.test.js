@@ -69,9 +69,13 @@ async function zdrojeTrzby(zdrojTyp, zdrojId) {
   radky.forEach(r => uklidTrzbaId.add(r.id));
   return radky;
 }
+// Delegováno na zdrojeTrzby (ne vlastní dotaz) — jinak by řádky zjištěné
+// JEN přes pocetZdroju nebyly v uklidTrzbaId a po testu by v databázi
+// osaměly (reálně se to stalo — viz oprava po auditu bodu 5/7: takhle
+// osamělé evidované tržby ze SPOLEČNÉ TEST databáze narušily jiný test,
+// eet-krok3a.test.js scénář 4b, přetížením fronty).
 async function pocetZdroju(zdrojTyp, zdrojId) {
-  const r = await dotaz(`SELECT count(*) FROM evidovana_trzba_zdroje WHERE zdroj_typ = $1 AND zdroj_id = $2`, [zdrojTyp, zdrojId]);
-  return Number(r[0].count);
+  return (await zdrojeTrzby(zdrojTyp, zdrojId)).length;
 }
 
 const uklidRezervace = [];
@@ -109,9 +113,6 @@ async function vytvorRezervaci(cenikId, sufix) {
 
 async function main() {
   console.log('--- Krok 3b EET: napojení skutečných plateb na evidenci ---');
-
-  const { rows: [cfg] } = await c.query(`SELECT hodnota FROM nastaveni WHERE klic = 'eet_evidence_zapnuta'`);
-  assert.equal(cfg && cfg.hodnota, 'true', 'TEST databáze musí mít eet_evidence_zapnuta=true, jinak test nic neověří (viz hlavička souboru)');
 
   const cenikRes = await adminFetch('/admin/cenik').then(r => r.json());
   const polozka = cenikRes.find(p => Number(p.cena) > 0 && p.rezervovatelna !== false);
@@ -425,12 +426,188 @@ async function main() {
     }
   }
 
+  // ── Audit idempotentních operací (dodatečné schválení) ──────────────────
+
+  // 16) Prodejna + kupón — SKUTEČNÝ souběh dvou požadavků se stejným klíčem
+  //     a stejným kupónem: oprava bodu 1 — druhý nesmí dostat "kupón už
+  //     použit", musí dostat stejný idempotentní výsledek.
+  {
+    const resKupon = await adminFetch('/admin/slevove-kupony/vygenerovat', {
+      method: 'POST', body: JSON.stringify({ pocet: 1, nazev_akce: 'TEST-EET3B-kupon', sleva_castka: 50 })
+    });
+    const kupon = (await resKupon.json()).kupony[0];
+    const klic = require('crypto').randomUUID();
+    const telo = JSON.stringify({ masaz: 'TEST-EET3B kupon soubeh', cena: 450, zpusob_platby: 'hotove', kupon_kod: kupon.kod, idempotency_klic: klic });
+    const [r1, r2] = await Promise.all([
+      adminFetch('/admin/prodejna', { method: 'POST', body: telo }),
+      adminFetch('/admin/prodejna', { method: 'POST', body: telo })
+    ]);
+    const [d1, d2] = await Promise.all([r1.json(), r2.json()]);
+    assert.equal(r1.status, 200, '16a) první požadavek s kupónem musí uspět: ' + JSON.stringify(d1));
+    assert.equal(r2.status, 200, '16b) druhý (souběžný) požadavek musí uspět idempotentně, NE "kupón už byl použit": ' + JSON.stringify(d2));
+    assert.equal(d1.prodej.id, d2.prodej.id, '16c) oba musí vrátit tentýž prodej');
+    uklidProdejny.push(d1.prodej.id);
+    const pocetProdeju = Number((await dotaz('SELECT count(*) FROM prodeje WHERE idempotency_klic = $1', [klic]))[0].count);
+    assert.equal(pocetProdeju, 1, '16d) jen JEDEN prodej, kupón spotřebovaný jen jednou');
+    const kuponPo = (await dotaz('SELECT pouzito_kdy FROM slevove_kupony WHERE id = $1', [kupon.id]))[0];
+    assert.ok(kuponPo.pouzito_kdy, '16e) kupón musí být označený jako použitý (přesně jednou)');
+    console.log('OK — 16) prodejna + kupón: souběh se stejným klíčem nevrací chybně "kupón už použit"');
+  }
+
+  // 17) Prodejna + poukaz (plné vyčerpání) — SKUTEČNÝ souběh, oprava bodu 1
+  //     (stejná třída chyby jako kupón, jen na straně poukazu).
+  {
+    const resVydani = await adminFetch('/admin/poukazy', {
+      method: 'POST', body: JSON.stringify({ poukaz_typ_id: poukazTypId, kupujici_jmeno: 'TEST-EET3B Soubeh-vycerpani (smazat)', zaplaceno: true, zpusob_platby: 'hotove' })
+    });
+    const poukaz = (await resVydani.json()).poukaz;
+    uklidPoukazy.push(poukaz.id);
+    const klic = require('crypto').randomUUID();
+    const telo = JSON.stringify({ masaz: 'TEST-EET3B vycerpani soubeh', cena: Number(poukaz.hodnota), zpusob_platby: 'hotove', poukaz_kod: poukaz.kod, idempotency_klic: klic });
+    const [r1, r2] = await Promise.all([
+      adminFetch('/admin/prodejna', { method: 'POST', body: telo }),
+      adminFetch('/admin/prodejna', { method: 'POST', body: telo })
+    ]);
+    const [d1, d2] = await Promise.all([r1.json(), r2.json()]);
+    assert.equal(r1.status, 200, '17a) první požadavek musí uspět: ' + JSON.stringify(d1));
+    assert.equal(r2.status, 200, '17b) druhý (souběžný) požadavek musí uspět idempotentně, NE "poukaz je už plně vyčerpaný": ' + JSON.stringify(d2));
+    assert.equal(d1.prodej.id, d2.prodej.id, '17c) oba musí vrátit tentýž prodej');
+    uklidProdejny.push(d1.prodej.id);
+    const poukazPo = (await adminFetch('/admin/poukazy').then(r => r.json())).find(p => p.id === poukaz.id);
+    assert.equal(Number(poukazPo.zustatek), 0, '17d) zůstatek musí klesnout na 0 jen JEDNOU (ne do minusu)');
+    console.log('OK — 17) prodejna + plné vyčerpání poukazu: souběh se stejným klíčem nevrací chybně "už vyčerpaný"');
+  }
+
+  // 18) Prodejna — stejný klíč, ale JINÁ cena → 409, původní prodej nedotčen
+  {
+    const klic = require('crypto').randomUUID();
+    const res1 = await adminFetch('/admin/prodejna', { method: 'POST', body: JSON.stringify({ masaz: 'TEST-EET3B konflikt', cena: 300, zpusob_platby: 'hotove', idempotency_klic: klic }) });
+    const d1 = await res1.json();
+    assert.equal(res1.status, 200, '18a) první požadavek musí uspět');
+    uklidProdejny.push(d1.prodej.id);
+    const res2 = await adminFetch('/admin/prodejna', { method: 'POST', body: JSON.stringify({ masaz: 'TEST-EET3B konflikt', cena: 999, zpusob_platby: 'hotove', idempotency_klic: klic }) });
+    assert.equal(res2.status, 409, '18b) stejný klíč s JINOU cenou musí vrátit 409, ne tiše vrátit starý prodej');
+    const pocet = Number((await dotaz('SELECT count(*) FROM prodeje WHERE idempotency_klic = $1', [klic]))[0].count);
+    assert.equal(pocet, 1, '18c) musí zůstat jen ten PŮVODNÍ prodej (300 Kč), žádný druhý nevznikl');
+    console.log('OK — 18) prodejna: znovu použitý klíč s jinými parametry vrací 409, ne cizí/špatný výsledek');
+  }
+
+  // 19) Produkty — stejný klíč, jiné množství → 409
+  {
+    const resProdukt = await adminFetch('/admin/produkty', { method: 'POST', body: JSON.stringify({ skupina: 'TEST-EET3B', varianta: 'konflikt (smazat)', cena: 99, sklad: 50 }) });
+    const produkt = (await resProdukt.json()).produkt;
+    uklidProdukty.push(produkt.id);
+    const klic = require('crypto').randomUUID();
+    const res1 = await adminFetch(`/admin/produkty/${produkt.id}/prodat`, { method: 'POST', body: JSON.stringify({ mnozstvi: 1, zpusob_platby: 'hotove', idempotency_klic: klic }) });
+    assert.equal(res1.status, 200, '19a) první požadavek musí uspět');
+    const res2 = await adminFetch(`/admin/produkty/${produkt.id}/prodat`, { method: 'POST', body: JSON.stringify({ mnozstvi: 2, zpusob_platby: 'hotove', idempotency_klic: klic }) });
+    assert.equal(res2.status, 409, '19b) stejný klíč s JINÝM množstvím musí vrátit 409');
+    const sklad = (await adminFetch('/admin/produkty').then(r => r.json())).find(p => p.id === produkt.id).sklad;
+    assert.equal(sklad, 49, '19c) sklad se musí snížit jen o původní 1 ks, ne o 1+2');
+    console.log('OK — 19) produkty: znovu použitý klíč s jiným množstvím vrací 409');
+  }
+
+  // 20) Produkty — sekvenční retry PO "výpadku spojení" (ne souběh)
+  {
+    const resProdukt = await adminFetch('/admin/produkty', { method: 'POST', body: JSON.stringify({ skupina: 'TEST-EET3B', varianta: 'retry (smazat)', cena: 50, sklad: 10 }) });
+    const produkt = (await resProdukt.json()).produkt;
+    uklidProdukty.push(produkt.id);
+    const klic = require('crypto').randomUUID();
+    const telo = JSON.stringify({ mnozstvi: 3, zpusob_platby: 'kartou', idempotency_klic: klic });
+    const res1 = await adminFetch(`/admin/produkty/${produkt.id}/prodat`, { method: 'POST', body: telo });
+    assert.equal(res1.status, 200, '20a) první požadavek musí uspět');
+    const res2 = await adminFetch(`/admin/produkty/${produkt.id}/prodat`, { method: 'POST', body: telo });
+    const d2 = await res2.json();
+    assert.equal(res2.status, 200, '20b) retry po výpadku musí uspět idempotentně');
+    assert.equal(d2.idempotentni, true, '20c) musí se poznat jako idempotentní replay');
+    const sklad = (await adminFetch('/admin/produkty').then(r => r.json())).find(p => p.id === produkt.id).sklad;
+    assert.equal(sklad, 7, '20d) sklad se musí snížit jen o 3 ks, ne o 6');
+    console.log('OK — 20) produkty: sekvenční retry po výpadku spojení nezdvojí prodej');
+  }
+
+  // 21) Poukaz vydání — sekvenční retry PO "výpadku spojení"
+  let poukazRetryId;
+  {
+    const klic = require('crypto').randomUUID();
+    const telo = JSON.stringify({ poukaz_typ_id: poukazTypId, kupujici_jmeno: 'TEST-EET3B Retry (smazat)', zaplaceno: true, zpusob_platby: 'hotove', idempotency_klic: klic });
+    const res1 = await adminFetch('/admin/poukazy', { method: 'POST', body: telo });
+    const d1 = await res1.json();
+    assert.equal(res1.status, 200, '21a) první požadavek musí uspět');
+    poukazRetryId = d1.poukaz.id;
+    uklidPoukazy.push(poukazRetryId);
+    const res2 = await adminFetch('/admin/poukazy', { method: 'POST', body: telo });
+    const d2 = await res2.json();
+    assert.equal(res2.status, 200, '21b) retry po výpadku musí uspět idempotentně');
+    assert.equal(d2.idempotentni, true, '21c) musí se poznat jako idempotentní replay');
+    assert.equal(d2.poukaz.id, poukazRetryId, '21d) musí vrátit TENTÝŽ poukaz, ne nový');
+    const pocet = Number((await dotaz('SELECT count(*) FROM poukazy WHERE idempotency_klic = $1', [klic]))[0].count);
+    assert.equal(pocet, 1, '21e) v databázi musí existovat jen JEDEN poukaz s tímto klíčem');
+    console.log('OK — 21) vydání poukazu: sekvenční retry po výpadku spojení nezdvojí poukaz');
+  }
+
+  // 22) Poukaz vydání — stejný klíč, JINÉ kupující jméno → 409
+  {
+    const klic = require('crypto').randomUUID();
+    const res1 = await adminFetch('/admin/poukazy', { method: 'POST', body: JSON.stringify({ poukaz_typ_id: poukazTypId, kupujici_jmeno: 'TEST-EET3B Puvodni (smazat)', zaplaceno: false, idempotency_klic: klic }) });
+    const d1 = await res1.json();
+    assert.equal(res1.status, 200, '22a) první požadavek musí uspět');
+    uklidPoukazy.push(d1.poukaz.id);
+    const res2 = await adminFetch('/admin/poukazy', { method: 'POST', body: JSON.stringify({ poukaz_typ_id: poukazTypId, kupujici_jmeno: 'TEST-EET3B JINE JMENO (smazat)', zaplaceno: false, idempotency_klic: klic }) });
+    assert.equal(res2.status, 409, '22b) stejný klíč s jiným kupujícím jménem musí vrátit 409');
+    const pocet = Number((await dotaz('SELECT count(*) FROM poukazy WHERE idempotency_klic = $1', [klic]))[0].count);
+    assert.equal(pocet, 1, '22c) musí zůstat jen PŮVODNÍ poukaz');
+    console.log('OK — 22) vydání poukazu: znovu použitý klíč s jiným jménem vrací 409');
+  }
+
+  // 23) Poukaz vydání — SKUTEČNÝ souběh dvou požadavků se stejným klíčem
+  {
+    const klic = require('crypto').randomUUID();
+    const telo = JSON.stringify({ poukaz_typ_id: poukazTypId, kupujici_jmeno: 'TEST-EET3B Soubeh (smazat)', zaplaceno: true, zpusob_platby: 'qr', idempotency_klic: klic });
+    const [r1, r2] = await Promise.all([
+      adminFetch('/admin/poukazy', { method: 'POST', body: telo }),
+      adminFetch('/admin/poukazy', { method: 'POST', body: telo })
+    ]);
+    const [d1, d2] = await Promise.all([r1.json(), r2.json()]);
+    assert.equal(r1.status, 200, '23a) první souběžný požadavek musí uspět: ' + JSON.stringify(d1));
+    assert.equal(r2.status, 200, '23b) druhý souběžný požadavek musí uspět idempotentně: ' + JSON.stringify(d2));
+    assert.equal(d1.poukaz.id, d2.poukaz.id, '23c) oba musí vrátit tentýž poukaz');
+    uklidPoukazy.push(d1.poukaz.id);
+    const pocet = Number((await dotaz('SELECT count(*) FROM poukazy WHERE idempotency_klic = $1', [klic]))[0].count);
+    assert.equal(pocet, 1, '23d) v databázi musí existovat jen JEDEN poukaz, i při skutečném souběhu');
+    console.log('OK — 23) vydání poukazu: skutečný souběh dvou požadavků se stejným klíčem vytvoří jen jeden poukaz');
+  }
+
+  // 24) Rollback nezanechává "mrtvý" klíč — neúspěšný pokus (neplatný typ)
+  //     se stejným klíčem nesmí zablokovat NÁSLEDNÝ platný požadavek.
+  {
+    const klic = require('crypto').randomUUID();
+    const resNeplatny = await adminFetch('/admin/poukazy', { method: 'POST', body: JSON.stringify({ poukaz_typ_id: 999999999, kupujici_jmeno: 'TEST-EET3B Rollback (smazat)', idempotency_klic: klic }) });
+    assert.equal(resNeplatny.status, 404, '24a) neplatný poukaz_typ_id musí vrátit 404');
+    const pocetPoChybe = Number((await dotaz('SELECT count(*) FROM poukazy WHERE idempotency_klic = $1', [klic]))[0].count);
+    assert.equal(pocetPoChybe, 0, '24b) po ROLLBACKu nesmí zůstat žádný řádek s tímto klíčem');
+    const resPlatny = await adminFetch('/admin/poukazy', { method: 'POST', body: JSON.stringify({ poukaz_typ_id: poukazTypId, kupujici_jmeno: 'TEST-EET3B Rollback (smazat)', idempotency_klic: klic }) });
+    const dataPlatny = await resPlatny.json();
+    assert.equal(resPlatny.status, 200, '24c) STEJNÝ klíč musí po neúspěšném pokusu jít znovu použít na platný požadavek: ' + JSON.stringify(dataPlatny));
+    uklidPoukazy.push(dataPlatny.poukaz.id);
+    console.log('OK — 24) neúspěšný pokus (ROLLBACK) nezanechá klíč "mrtvý" — stejný klíč lze použít znovu');
+  }
+
   console.log('\n✅ VŠECHNY TESTY KROKU 3b PROŠLY');
 }
 
 (async () => {
   c = new Client({ connectionString: DB_URL, ssl: { rejectUnauthorized: false } });
   await c.connect();
+  // Zapnutí evidence je OHRANIČENÉ jen na dobu běhu tohohle souboru — původní
+  // hodnotu si uložíme a na konci vrátíme zpět. Jinak by tenhle test nechal
+  // "eet_evidence_zapnuta" globálně zapnuté i pro ZBYTEK regresní sady, a
+  // VŠECHNY ostatní testovací soubory (co běžně vytvářejí rezervace/platby/
+  // poukazy, aniž by o EET vůbec věděly) by tím nevědomky plnily EET frontu
+  // — přesně tohle se stalo a rozbilo to eet-krok3a.test.js scénář 4b
+  // (přetížená fronta). Viz audit bodu 5/7 ve zprávě k Kroku 3b.
+  const { rows: [puvodniCfg] } = await c.query(`SELECT hodnota FROM nastaveni WHERE klic = 'eet_evidence_zapnuta'`);
+  const puvodniHodnota = puvodniCfg ? puvodniCfg.hodnota : 'false';
+  await c.query(`UPDATE nastaveni SET hodnota = 'true' WHERE klic = 'eet_evidence_zapnuta'`);
   try {
     await main();
     process.exitCode = 0;
@@ -438,41 +615,52 @@ async function main() {
     console.error('❌ CHYBA TESTU:', e.message);
     process.exitCode = 1;
   } finally {
+    await c.query(`UPDATE nastaveni SET hodnota = $1 WHERE klic = 'eet_evidence_zapnuta'`, [puvodniHodnota]).catch(() => {});
     // Úklid přímým SQL (ne přes API) — řádky, co tenhle test evidoval pro
     // EET, jsou teď API záměrně nemazatelné (to je přesně ta ochrana, kterou
     // scénář 13 ověřuje) — stejný princip jako smazatRezervaciNatvrdo, jen
     // navíc pro EET zdroje/evidenci.
-    try {
-      if (uklidPoukazy.length) await c.query(`DELETE FROM evidovana_trzba_zdroje WHERE zdroj_typ = 'poukaz' AND zdroj_id = ANY($1)`, [uklidPoukazy]);
-      if (uklidPoukazy.length || uklidProdejny.length) await c.query(
-        `DELETE FROM evidovana_trzba_zdroje WHERE zdroj_typ = 'poukaz_historie' AND zdroj_id IN
-           (SELECT id FROM poukazy_historie WHERE poukaz_id = ANY($1) OR prodej_id = ANY($2))`,
-        [uklidPoukazy, uklidProdejny]
-      );
-      if (uklidProdejny.length) await c.query(`DELETE FROM evidovana_trzba_zdroje WHERE zdroj_typ = 'prodej' AND zdroj_id = ANY($1)`, [uklidProdejny]);
-      if (uklidProdukty.length) await c.query(
-        `DELETE FROM evidovana_trzba_zdroje WHERE zdroj_typ = 'prodej_produktu' AND zdroj_id IN (SELECT id FROM prodeje_produktu WHERE produkt_id = ANY($1))`,
-        [uklidProdukty]
-      );
-      if (uklidRezervace.length) await c.query(
-        `DELETE FROM evidovana_trzba_zdroje WHERE zdroj_typ = 'platba' AND zdroj_id IN (SELECT id FROM platby WHERE rezervace_id = ANY($1))`,
-        [uklidRezervace]
-      );
-      // Jen tržby, co tenhle test SÁM vytvořil (uklidTrzbaId) — nikdy hromadný
-      // dotaz na "cokoli bez zdroje", aby se nesáhlo na data jiných testů
-      // (např. eet-krok3a.test.js), které mohou mít vlastní, odlišný životní
-      // cyklus (a klidně i vlastní eet_odeslani záznamy, co se nikdy nemažou).
-      for (const id of uklidTrzbaId) {
-        await c.query(`DELETE FROM evidovana_trzba WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM eet_odeslani WHERE evidovana_trzba_id = $1)`, [id]).catch(() => {});
-      }
-      if (uklidPoukazy.length || uklidProdejny.length) await c.query(`DELETE FROM poukazy_historie WHERE poukaz_id = ANY($1) OR prodej_id = ANY($2)`, [uklidPoukazy, uklidProdejny]);
-      if (uklidProdejny.length) await c.query(`DELETE FROM prodeje WHERE id = ANY($1)`, [uklidProdejny]);
-      if (uklidProdukty.length) await c.query(`DELETE FROM prodeje_produktu WHERE produkt_id = ANY($1)`, [uklidProdukty]);
-      if (uklidPoukazy.length) await c.query(`DELETE FROM poukazy WHERE id = ANY($1)`, [uklidPoukazy]);
-      if (uklidProdukty.length) await c.query(`DELETE FROM produkty WHERE id = ANY($1)`, [uklidProdukty]);
-    } catch (e) {
-      console.error('(úklid se nepodařil beze zbytku, ale testy už doběhly):', e.message);
+    // Každý úklidový příkaz má VLASTNÍ catch — jedna chyba (např. cizí
+    // zámek řádku) nesmí shodit zbytek úklidu, jak se dřív mohlo stát s
+    // jedním velkým try/catch kolem všeho.
+    const bezpecne = async (sql, params, popis) => { try { await c.query(sql, params); } catch (e) { console.error(`(úklid "${popis}" se nepodařil):`, e.message); } };
+    if (uklidPoukazy.length) await bezpecne(`DELETE FROM evidovana_trzba_zdroje WHERE zdroj_typ = 'poukaz' AND zdroj_id = ANY($1)`, [uklidPoukazy], 'zdroje poukaz');
+    if (uklidPoukazy.length || uklidProdejny.length) await bezpecne(
+      `DELETE FROM evidovana_trzba_zdroje WHERE zdroj_typ = 'poukaz_historie' AND zdroj_id IN
+         (SELECT id FROM poukazy_historie WHERE poukaz_id = ANY($1) OR prodej_id = ANY($2))`,
+      [uklidPoukazy, uklidProdejny], 'zdroje poukaz_historie'
+    );
+    if (uklidProdejny.length) await bezpecne(`DELETE FROM evidovana_trzba_zdroje WHERE zdroj_typ = 'prodej' AND zdroj_id = ANY($1)`, [uklidProdejny], 'zdroje prodej');
+    if (uklidProdukty.length) await bezpecne(
+      `DELETE FROM evidovana_trzba_zdroje WHERE zdroj_typ = 'prodej_produktu' AND zdroj_id IN (SELECT id FROM prodeje_produktu WHERE produkt_id = ANY($1))`,
+      [uklidProdukty], 'zdroje prodej_produktu'
+    );
+    if (uklidRezervace.length) await bezpecne(
+      `DELETE FROM evidovana_trzba_zdroje WHERE zdroj_typ = 'platba' AND zdroj_id IN (SELECT id FROM platby WHERE rezervace_id = ANY($1))`,
+      [uklidRezervace], 'zdroje platba'
+    );
+    // Jen tržby, co tenhle test SÁM vytvořil (uklidTrzbaId) — nikdy hromadný
+    // dotaz na "cokoli bez zdroje", aby se nesáhlo na data jiných testů
+    // (např. eet-krok3a.test.js), které mohou mít vlastní, odlišný životní
+    // cyklus (a klidně i vlastní eet_odeslani záznamy, co se nikdy nemažou).
+    for (const id of uklidTrzbaId) {
+      await bezpecne(`DELETE FROM evidovana_trzba WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM eet_odeslani WHERE evidovana_trzba_id = $1)`, [id], 'evidovana_trzba ' + id);
     }
+    if (uklidPoukazy.length || uklidProdejny.length) await bezpecne(`DELETE FROM poukazy_historie WHERE poukaz_id = ANY($1) OR prodej_id = ANY($2)`, [uklidPoukazy, uklidProdejny], 'poukazy_historie');
+    if (uklidProdejny.length) await bezpecne(`DELETE FROM prodeje WHERE id = ANY($1)`, [uklidProdejny], 'prodeje');
+    if (uklidProdukty.length) await bezpecne(`DELETE FROM prodeje_produktu WHERE produkt_id = ANY($1)`, [uklidProdukty], 'prodeje_produktu');
+    if (uklidPoukazy.length) await bezpecne(`DELETE FROM poukazy WHERE id = ANY($1)`, [uklidPoukazy], 'poukazy');
+    if (uklidProdukty.length) await bezpecne(`DELETE FROM produkty WHERE id = ANY($1)`, [uklidProdukty], 'produkty');
+    // Pojistka navíc — řádek s NULOVÝM počtem zdrojů není NIKDY legitimní
+    // trvalý stav (eet_zaevidovat_zdroj vždy vytvoří evidovana_trzba a
+    // zdroj SPOLEČNĚ) — bezpečné smazat i bez konkrétního id v uklidTrzbaId,
+    // narozdíl od hromadného dotazu to NIKDY nesmí smazat řádek, co má
+    // eet_odeslani historii (ta se musí zachovat navždy).
+    await bezpecne(
+      `DELETE FROM evidovana_trzba WHERE id NOT IN (SELECT DISTINCT evidovana_trzba_id FROM evidovana_trzba_zdroje)
+         AND NOT EXISTS (SELECT 1 FROM eet_odeslani WHERE eet_odeslani.evidovana_trzba_id = evidovana_trzba.id)`,
+      [], 'osamele evidovane trzby bez zdroje'
+    );
     for (const id of uklidRezervace) { await uklidRezervaciSFallbackem(adminFetch, id).catch(() => {}); }
     await c.end();
   }
