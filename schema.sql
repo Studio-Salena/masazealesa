@@ -747,7 +747,7 @@ create index if not exists evidovana_trzba_fronta_idx on evidovana_trzba (stav_e
 create table if not exists evidovana_trzba_zdroje (
   id serial primary key,
   evidovana_trzba_id integer not null references evidovana_trzba(id),
-  zdroj_typ text not null check (zdroj_typ in ('platba','poukaz_historie','prodej','prodej_produktu')),
+  zdroj_typ text not null check (zdroj_typ in ('platba','poukaz','poukaz_historie','prodej','prodej_produktu')), -- 'poukaz' = Krok 3b, prodej poukazu samotného
   zdroj_id integer not null,
   castka numeric not null,
   vytvoreno timestamptz not null default now(),
@@ -945,6 +945,32 @@ end $$;
 -- zatím nečte ani nezapisuje (to až Krok 3b/3d).
 insert into nastaveni (klic, hodnota) values ('eet_aktivovano_od', '') on conflict (klic) do nothing;
 insert into nastaveni (klic, hodnota) values ('eet_odesilani_pozastaveno', 'true') on conflict (klic) do nothing;
+
+-- ══════════════════════════════════════════════════════════
+-- Krok 3b EET 2.0 — napojení skutečných plateb na databázovou evidenci.
+-- Idempotenční klíče (ochrana proti dvojkliku/opakování/souběhu) na
+-- prodejně/produktech/poukazech — stejný ověřený vzor jako platby.
+alter table prodeje           add column if not exists idempotency_klic text;
+alter table prodeje_produktu  add column if not exists idempotency_klic text;
+alter table poukazy           add column if not exists idempotency_klic text;
+create unique index if not exists prodeje_idempotency_klic_idx on prodeje (idempotency_klic) where idempotency_klic is not null;
+create unique index if not exists prodeje_produktu_idempotency_klic_idx on prodeje_produktu (idempotency_klic) where idempotency_klic is not null;
+create unique index if not exists poukazy_idempotency_klic_idx on poukazy (idempotency_klic) where idempotency_klic is not null;
+
+-- Explicitní kontaktní platba u prodejny a produktů (viz Krok 2 výš, stejný
+-- princip) — v appce jde VŽDY o osobní prodej v salonu, server.js ji proto
+-- vždy ukládá jako true, ale jako explicitní sloupec, ne jen předpoklad v kódu.
+alter table prodeje           add column if not exists kontaktni_platba boolean;
+alter table prodeje_produktu  add column if not exists kontaktni_platba boolean;
+
+-- Vytváření evidence (server.js) je NEZÁVISLÉ na odesílání výš — dokud je
+-- 'false' (výchozí), nevzniká žádný nový řádek v evidovana_trzba. Zapnutí
+-- je samostatné, výslovné rozhodnutí (přímý UPDATE), ne součást nasazení.
+insert into nastaveni (klic, hodnota) values ('eet_evidence_zapnuta', 'false') on conflict (klic) do nothing;
+-- Identifikátory pokladny z EET registrace — prázdné jsou jen pro TEST,
+-- v produkci nutné doplnit PŘED zapnutím evidence.
+insert into nastaveni (klic, hodnota) values ('eet_id_jednotky', '') on conflict (klic) do nothing;
+insert into nastaveni (klic, hodnota) values ('eet_id_pokl', '') on conflict (klic) do nothing;
 
 -- ══════════════════════════════════════════════════════════
 -- Recenze na web — spravované v adminu, zobrazené na veřejném webu.

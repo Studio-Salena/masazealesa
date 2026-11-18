@@ -564,7 +564,7 @@ tr:hover td{background:var(--cream)}
       <div class="page-header">
         <div class="page-title">🎁 Dárkové poukazy</div>
         <div class="table-actions">
-          <button class="btn btn-primary" onclick="openModal('modalNovyPoukaz');prepnoutNpUhradu()">+ Vydat poukaz</button>
+          <button class="btn btn-primary" onclick="npIdempotencyKlic=null;openModal('modalNovyPoukaz');prepnoutNpUhradu()">+ Vydat poukaz</button>
           <button class="btn btn-outline" onclick="otevritPrazdnePoukazy()">🖨️ Tisk prázdných poukazů</button>
           <button class="refresh-btn" onclick="loadPoukazy()">↻ Obnovit</button>
         </div>
@@ -2869,6 +2869,10 @@ async function zmenitStavRez(id, stav, aktualniStav, bezPotvrzeni) {
 // POTOM selže zápis stavu, peníze jsou bezpečně zapsané a jde jen zopakovat
 // krok 2; v obráceném pořadí by hrozilo tiché "dokončeno, ale nezaplaceno".
 let dmId = null, dmPlatbaZapsana = false, dmIdempotencyKlic = null;
+// Krok 3b — stejný princip (klíč se generuje jednou za pokus, při opakování
+// po chybě spojení/dvojkliku se posílá stejný, server tak pozná skutečné
+// opakování a nezapíše prodej/produkt/poukaz podruhé).
+let npIdempotencyKlic = null, rpIdempotencyKlic = null, ppIdempotencyKlic = null;
 function otevritDokonceniMasaze(id) {
   const r = vsechnyRezervace.find(x => x.id === id);
   if (!r) return;
@@ -3297,6 +3301,9 @@ async function vydatPoukaz() {
       body.kontaktni_platba = document.getElementById('npKontaktni').value === 'ano';
     }
   }
+  // Krok 3b — viz pozn. u dmIdempotencyKlic výš.
+  if (!npIdempotencyKlic) npIdempotencyKlic = crypto.randomUUID();
+  body.idempotency_klic = npIdempotencyKlic;
   try {
     const res = await adminFetch(API + '/admin/poukazy', { method: 'POST', body: JSON.stringify(body) });
     const data = await res.json();
@@ -4567,6 +4574,7 @@ async function loadProdejna() {
   } catch (e) { document.getElementById('prodejnaTable').innerHTML = '<div class="error-msg">Chyba načítání.</div>'; }
 }
 function otevritProdej(id, nazev, cena) {
+  rpIdempotencyKlic = null; // Krok 3b — nový prodej = nový pokus, viz pozn. u dmIdempotencyKlic výš
   document.getElementById('prodejForm').style.display = 'block';
   document.getElementById('prodejForm').dataset.masaz = nazev;
   document.getElementById('prodejForm').dataset.puvodniCena = cena;
@@ -4627,8 +4635,9 @@ async function potvrditProdej() {
   const poukaz_kod = document.getElementById('prodejPoukazKod').value.trim();
   const msg = document.getElementById('prodejMsg');
   if (!cena) { msg.innerHTML = '<div class="error-msg">Zadejte cenu.</div>'; return; }
+  if (!rpIdempotencyKlic) rpIdempotencyKlic = crypto.randomUUID();
   try {
-    const res = await adminFetch(API + '/admin/prodejna', { method: 'POST', body: JSON.stringify({ masaz, cena, zpusob_platby, kupon_kod: kupon_kod || undefined, poukaz_kod: poukaz_kod || undefined }) });
+    const res = await adminFetch(API + '/admin/prodejna', { method: 'POST', body: JSON.stringify({ masaz, cena, zpusob_platby, kupon_kod: kupon_kod || undefined, poukaz_kod: poukaz_kod || undefined, idempotency_klic: rpIdempotencyKlic }) });
     const data = await res.json();
     if (res.ok) {
       document.getElementById('prodejForm').style.display = 'none';
@@ -4754,6 +4763,7 @@ function otevritProdatProdukt(id) {
   const p = posledniProdukty.find(p => p.id === id);
   if (!p) return;
   aktivniProduktId = id;
+  ppIdempotencyKlic = null; // Krok 3b — nový prodej = nový pokus, viz pozn. u dmIdempotencyKlic výš
   document.getElementById('ppNazev').textContent = p.skupina + ' – ' + p.varianta;
   document.getElementById('ppSkladem').textContent = p.sklad;
   document.getElementById('ppMnozstvi').value = 1;
@@ -4765,8 +4775,9 @@ async function potvrditProdejProduktu() {
   const mnozstvi = document.getElementById('ppMnozstvi').value;
   const zpusob_platby = document.getElementById('ppZpusobPlatby').value;
   const msg = document.getElementById('ppMsg');
+  if (!ppIdempotencyKlic) ppIdempotencyKlic = crypto.randomUUID();
   try {
-    const res = await adminFetch(API + '/admin/produkty/' + aktivniProduktId + '/prodat', { method: 'POST', body: JSON.stringify({ mnozstvi, zpusob_platby }) });
+    const res = await adminFetch(API + '/admin/produkty/' + aktivniProduktId + '/prodat', { method: 'POST', body: JSON.stringify({ mnozstvi, zpusob_platby, idempotency_klic: ppIdempotencyKlic }) });
     const data = await res.json();
     if (!res.ok) { msg.innerHTML = '<div class="error-msg">' + (data.chyba || 'Prodej se nepodařil.') + '</div>'; return; }
     closeModal('modalProdatProdukt');

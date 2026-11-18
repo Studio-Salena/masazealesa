@@ -800,14 +800,18 @@ async function vytvoritPoukaz(client, {
   stavUhrady = null, zaplacenoKdy = null,
   // Krok 2 — viz jeKontaktniPlatbaPlatna výš. null jen když se poukaz
   // nevydává jako rovnou zaplacený (stavUhrady !== 'zaplaceno').
-  kontaktniPlatba = null
+  kontaktniPlatba = null,
+  // Krok 3b — nepovinný idempotenční klíč (ochrana proti dvojkliku/opakování
+  // při vydání poukazu); vratka-jako-poukaz ho nepoužívá (chráněná klíčem na
+  // "platby", viz PATCH /rezervace/:id/platba výš).
+  idempotencyKlic = null
 }) {
   const platnostDo = new Date();
   platnostDo.setMonth(platnostDo.getMonth() + platnostMesicu);
   const { rows: [poukaz] } = await client.query(
-    `INSERT INTO poukazy (kod, hodnota, zustatek, platnost_do, zakoupeno_kde, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, konkretni_masaz, zpusob_platby, stav, klientka_id, ucel, sleva_kc, stav_uhrady, zaplaceno_kdy, zaplaceno_zpetne, kontaktni_platba)
-     VALUES ($1,$2,$2,$3,$4,$5,$6,$7,$8,$9,$10,'aktivni',$11,$12,$13,$14,$15,false,$16) RETURNING *`,
-    [vygenerovatKod(ucel), hodnota, platnostDo.toISOString().slice(0, 10), zakoupenoKde, kupujiciJmeno || null, kupujiciEmail || null, kupujiciTelefon || null, proKoho, konkretniMasaz, zpusobPlatby, klientkaId, ucel, Number(slevaKc) || 0, stavUhrady, zaplacenoKdy, kontaktniPlatba]
+    `INSERT INTO poukazy (kod, hodnota, zustatek, platnost_do, zakoupeno_kde, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, konkretni_masaz, zpusob_platby, stav, klientka_id, ucel, sleva_kc, stav_uhrady, zaplaceno_kdy, zaplaceno_zpetne, kontaktni_platba, idempotency_klic)
+     VALUES ($1,$2,$2,$3,$4,$5,$6,$7,$8,$9,$10,'aktivni',$11,$12,$13,$14,$15,false,$16,$17) RETURNING *`,
+    [vygenerovatKod(ucel), hodnota, platnostDo.toISOString().slice(0, 10), zakoupenoKde, kupujiciJmeno || null, kupujiciEmail || null, kupujiciTelefon || null, proKoho, konkretniMasaz, zpusobPlatby, klientkaId, ucel, Number(slevaKc) || 0, stavUhrady, zaplacenoKdy, kontaktniPlatba, idempotencyKlic]
   );
   return poukaz;
 }
@@ -2039,6 +2043,77 @@ async function zkontrolovatIdempotentniPlatbu(client, klic, rezervaceId, castkaN
 }
 const CHYBA_IDEMPOTENTNI_KONFLIKT = { chyba: 'Tento idempotenční klíč byl už použit pro jinou platbu (jinou rezervaci, částku, typ nebo způsob platby).' };
 
+// ── Krok 3b: napojení skutečných plateb na databázovou EET evidenci (Krok 3a) ──
+//
+// Vytváření evidence (tahle sekce) je ZÁMĚRNĚ nezávislé na odesílání (to řeší
+// "eet_odesilani_pozastaveno" z Kroku 3a a zatím žádný kód ho nemění) —
+// dokud je "eet_evidence_zapnuta" v "nastaveni" na 'false' (výchozí stav po
+// migraci), nevzniká ani jeden nový řádek v evidovana_trzba, byť by kód níž
+// byl nasazený. Zapnutí je samostatné, výslovné rozhodnutí (přímý UPDATE v
+// databázi), ne součást nasazení kódu.
+async function ziskatEetKonfiguraci(client) {
+  const { rows } = await client.query(
+    `SELECT klic, hodnota FROM nastaveni WHERE klic IN ('eet_evidence_zapnuta','eet_id_jednotky','eet_id_pokl')`
+  );
+  const m = {};
+  rows.forEach(r => { m[r.klic] = r.hodnota; });
+  return { zapnuta: m.eet_evidence_zapnuta === 'true', idJednotky: m.eet_id_jednotky || '', idPokl: m.eet_id_pokl || '' };
+}
+
+// Zaevidování JEDNOHO zdroje skutečné platby/vratky do evidovana_trzba —
+// vždy voláno PO zápisu reálného peněžního řádku (platby/prodeje/poukazy/...)
+// a PŘED COMMIT téže transakce, takže se obojí zapíše, nebo nic (atomicita).
+// Žádná zvláštní ochrana proti duplicitě tady není potřeba navíc — tu už
+// garantuje databázová funkce eet_zaevidovat_zdroj z Kroku 3a (unikátní
+// (zdroj_typ, zdroj_id) na evidovana_trzba_zdroje).
+async function zaevidovatEetZdroj(client, cfg, { pokladniUdalostId, smer, zdrojTyp, zdrojId, castka, datTrzby, urcenoCerpZuct = null, cerpZuct = null }) {
+  if (!cfg.zapnuta) return null;
+  const { rows: [vysledek] } = await client.query(
+    `SELECT trzba_id, nove_zapocitano FROM eet_zaevidovat_zdroj($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+    [pokladniUdalostId, smer, zdrojTyp, zdrojId, castka, cfg.idJednotky, cfg.idPokl, datTrzby, urcenoCerpZuct, cerpZuct]
+  );
+  return vysledek;
+}
+
+// "pokladni_udalost_id" — jednoznačný identifikátor pokladní operace, podle
+// návrhu Kroku 3a generovaný klientem stejným principem jako idempotency_klic
+// (admin.html ho už vždy generuje jako crypto.randomUUID()). Když ho volající
+// request nemá (starší administrace, nebo endpoint bez idempotence), nebo
+// nemá tvar UUID, vygeneruje se nové UUID jen pro tenhle jeden zápis — u
+// kombinované platby (poukaz + hotovost v JEDNOM requestu) handler vždy
+// zavolá tuhle funkci jen JEDNOU a výsledek použije pro VŠECHNY zdroje toho
+// requestu, aby se sloučily do jedné evidované tržby (jedna zpráva).
+const UUID_TVAR = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function ziskatPokladniUdalostId(klic) {
+  return (klic && UUID_TVAR.test(klic)) ? klic : crypto.randomUUID();
+}
+
+// Idempotence prodejny/produktů/vydání poukazu — STEJNÝ ověřený vzor jako
+// zkontrolovatIdempotentniPlatbu výš (SELECT jako rychlý early-exit, ale
+// skutečná ochrana proti souběhu je unikátní index + catch 23505 na INSERTu
+// u volajícího endpointu, ne tahle kontrola samotná).
+async function zkontrolovatIdempotentniProdejProduktu(client, klic, produktId, mnozstvi, zpusobPlatby) {
+  const { rows: [existujici] } = await client.query('SELECT * FROM prodeje_produktu WHERE idempotency_klic = $1', [klic]);
+  if (!existujici) return null;
+  const sedi = Number(existujici.produkt_id) === Number(produktId) && Number(existujici.mnozstvi) === Number(mnozstvi) && existujici.zpusob_platby === zpusobPlatby;
+  if (!sedi) return false;
+  const { rows: [produkt] } = await client.query('SELECT * FROM produkty WHERE id = $1', [produktId]);
+  return { ok: true, prodej: existujici, produkt: produkt || null, idempotentni: true };
+}
+// Krok 3b, bod 5 (ZATÍM NEOVĚŘENO) — "vratka jako poukaz" nevyplácí žádnou
+// hotovost (klientka dostane nový poukaz místo peněz zpět) a dosavadní
+// účetnictví (GET /api/admin/ucetnictvi, kategorie D) ji proto nepočítá
+// jako skutečnou vratku. Jestli tahle situace právně vyžaduje EET storno,
+// se mi nepodařilo ověřit v dostupných úředních zdrojích (viz zpráva k
+// Kroku 3b) — NEPŘEVÁDÍ se sem žádný automatický závěr. Tahle funkce je
+// JEDINÉ místo, které by bylo nutné upravit, až bude pravidlo potvrzené
+// (např. s daňovou poradkyní) — zatím vždy vrací null a žádný řádek v
+// evidovana_trzba nevzniká. Testy (eet-krok3b-vratky.test.js) ověřují, že
+// se při vratce-jako-poukaz skutečně NIC neeviduje.
+async function eetVratkaJakoPoukazZatimNeevidovat() {
+  return null;
+}
+
 // Zaznamenání platby NEBO vratky k rezervaci — zapíše řádek do deníku "platby"
 // a ve STEJNÉ transakci přepočte souhrn na rezervaci (viz prepocitatSouhrnRezervace).
 // Buď se zapíše obojí, nebo nic (žádný poloviční zápis). Stav platby je záměrně
@@ -2113,14 +2188,15 @@ app.patch('/api/admin/rezervace/:id/platba', async (req, res) => {
       });
     }
 
+    let platbaRadek;
     try {
       // poukaz_id se vyplňuje jen u vratky-jako-poukazu (novyPoukaz výš) —
       // ať zkontrolovatIdempotentniPlatbu umí při opakování stejného
       // požadavku dohledat KTERÝ poukaz tahle vratka vytvořila.
-      await client.query(
-        `INSERT INTO platby (rezervace_id, castka, typ, zpusob_platby, idempotency_klic, poukaz_id, kontaktni_platba) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      ({ rows: [platbaRadek] } = await client.query(
+        `INSERT INTO platby (rezervace_id, castka, typ, zpusob_platby, idempotency_klic, poukaz_id, kontaktni_platba) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, vytvoreno`,
         [req.params.id, druh === 'vratka' ? -castkaNum : castkaNum, druh, zpusob_platby, klic, novyPoukaz ? novyPoukaz.id : null, kontaktniPlatbaKUlozeni]
-      );
+      ));
     } catch (e) {
       // Souběh dvou požadavků se STEJNÝM klíčem: mezi kontrolou výš a tímhle
       // INSERTEM mohl druhý požadavek (jiné spojení) stihnout vložit svůj
@@ -2140,6 +2216,26 @@ app.patch('/api/admin/rezervace/:id/platba', async (req, res) => {
         }
       }
       throw e;
+    }
+
+    // Krok 3b — EET evidence (jen když je "eet_evidence_zapnuta", viz výš).
+    // zpusob_platby==='poukaz' se NEeviduje nikdy: u platby jde o čerpání
+    // poukazu (ten se eviduje přes POST /poukazy/:id/uplatnit, ne tady,
+    // stejně jako v účetnictví, kategorie B), u vratky jde o "vratku jako
+    // poukaz" — bod 5 zprávy k Kroku 3b, neověřený právní závěr, zatím
+    // výslovně NEimplementováno (viz eetVratkaJakoPoukazZatimNeevidovat).
+    if (zpusob_platby !== 'poukaz') {
+      const eetCfg = await ziskatEetKonfiguraci(client);
+      await zaevidovatEetZdroj(client, eetCfg, {
+        pokladniUdalostId: ziskatPokladniUdalostId(klic),
+        smer: druh === 'vratka' ? 'storno' : 'prijem',
+        zdrojTyp: 'platba',
+        zdrojId: platbaRadek.id,
+        castka: druh === 'vratka' ? -castkaNum : castkaNum,
+        datTrzby: platbaRadek.vytvoreno
+      });
+    } else if (druh === 'vratka') {
+      await eetVratkaJakoPoukazZatimNeevidovat();
     }
 
     const aktualizovana = await prepocitatSouhrnRezervace(client, req.params.id);
@@ -2488,8 +2584,12 @@ app.get('/api/admin/poukazy', async (req, res) => {
 // na konkrétní masáž (cenik_id) — pak se hodnota poukazu vezme přímo z ceníku,
 // místo aby se vždycky vynucovala první/vybraná peněžní varianta.
 app.post('/api/admin/poukazy', async (req, res) => {
-  const { poukaz_typ_id, cenik_id, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, zakoupeno_kde, ucel, zaplaceno, zpusob_platby, kontaktni_platba } = req.body || {};
+  const { poukaz_typ_id, cenik_id, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, zakoupeno_kde, ucel, zaplaceno, zpusob_platby, kontaktni_platba, idempotency_klic } = req.body || {};
   if (!poukaz_typ_id && !cenik_id) return res.status(400).json({ chyba: 'Vyberte variantu poukazu nebo konkrétní masáž.' });
+  // Krok 3b — nepovinný idempotenční klíč, stejný princip zpětné kompatibility
+  // jako u ostatních plateb (chybějící = starší administrace, chová se jako dřív).
+  const klic = idempotency_klic ? String(idempotency_klic).trim() : null;
+  if (klic && klic.length > 100) return res.status(400).json({ chyba: 'Neplatný idempotenční klíč.' });
   const ucelPoukazu = ucel === 'dar' ? 'dar' : 'prodej'; // výchozí "prodej", "dar" jen na výslovnou volbu v adminu
   // Etapa 2 — u daru se platba vůbec neřeší (nikdy nevzniká tržba). U prodeje
   // musí admin výslovně zvolit, zda je zaplaceno hned (a jakou metodou), nebo
@@ -2513,6 +2613,22 @@ app.post('/api/admin/poukazy', async (req, res) => {
   const client = await db.connect();
   try {
     await client.query('BEGIN');
+
+    // Krok 3b — kontrola idempotence NEJDŘÍV (ještě před dopočtem hodnoty),
+    // stejný princip jako u platby rezervace: při shodě klíče a kupující
+    // jména (zaplacená/i nezaplacená hodnota se porovná až níž, po dopočtu).
+    if (klic) {
+      const { rows: [existujici] } = await client.query('SELECT * FROM poukazy WHERE idempotency_klic = $1', [klic]);
+      if (existujici) {
+        await client.query('COMMIT');
+        if ((existujici.kupujici_jmeno || null) === (kupujici_jmeno || null)) {
+          return res.json({ ok: true, poukaz: existujici, idempotentni: true });
+        }
+        return res.status(409).json(CHYBA_IDEMPOTENTNI_KONFLIKT);
+      }
+      // klíč zatím volný => pokračuje se normálním zápisem níž
+    }
+
     let hodnota, platnostMesicu, konkretniMasaz = null;
     if (cenik_id) {
       const { rows: [polozka] } = await client.query('SELECT * FROM cenik WHERE id = $1', [cenik_id]);
@@ -2530,12 +2646,47 @@ app.post('/api/admin/poukazy', async (req, res) => {
     // klientka_id NULL (nelze bezpečně určit jen podle jména/e-mailu).
     const klientkaId = await najitNeboVytvoritKlientku(client, { jmeno: kupujici_jmeno, telefon: kupujici_telefon, email: kupujici_email });
 
-    const poukaz = await vytvoritPoukaz(client, {
-      hodnota, platnostMesicu, zakoupenoKde: zakoupeno_kde || 'osobne',
-      kupujiciJmeno: kupujici_jmeno, kupujiciEmail: kupujici_email, kupujiciTelefon: kupujici_telefon,
-      proKoho: pro_koho || null, konkretniMasaz, klientkaId, ucel: ucelPoukazu,
-      zpusobPlatby: zpusobPlatbyFinal, stavUhrady, zaplacenoKdy, kontaktniPlatba: kontaktniPlatbaFinal
-    });
+    let poukaz;
+    try {
+      poukaz = await vytvoritPoukaz(client, {
+        hodnota, platnostMesicu, zakoupenoKde: zakoupeno_kde || 'osobne',
+        kupujiciJmeno: kupujici_jmeno, kupujiciEmail: kupujici_email, kupujiciTelefon: kupujici_telefon,
+        proKoho: pro_koho || null, konkretniMasaz, klientkaId, ucel: ucelPoukazu,
+        zpusobPlatby: zpusobPlatbyFinal, stavUhrady, zaplacenoKdy, kontaktniPlatba: kontaktniPlatbaFinal,
+        idempotencyKlic: klic
+      });
+    } catch (e) {
+      // Souběh dvou požadavků se STEJNÝM klíčem — stejný princip jako u
+      // platby rezervace: unikátní index na poukazy.idempotency_klic je tu
+      // skutečná pojistka, SELECT výš je jen rychlý early-exit.
+      if (klic && e.code === '23505') {
+        await client.query('ROLLBACK');
+        const clientOverit = await db.connect();
+        try {
+          const { rows: [existujici] } = await clientOverit.query('SELECT * FROM poukazy WHERE idempotency_klic = $1', [klic]);
+          if (existujici) return res.json({ ok: true, poukaz: existujici, idempotentni: true });
+          return res.status(409).json(CHYBA_IDEMPOTENTNI_KONFLIKT);
+        } finally {
+          clientOverit.release();
+        }
+      }
+      throw e;
+    }
+
+    // Krok 3b — EET evidence prodeje poukazu (jen "prodej", ne "dar"; jen
+    // když je skutečně zaplaceno PRÁVĚ TEĎ, ne u nezaplaceného/daru).
+    if (stavUhrady === 'zaplaceno') {
+      const eetCfg = await ziskatEetKonfiguraci(client);
+      await zaevidovatEetZdroj(client, eetCfg, {
+        pokladniUdalostId: ziskatPokladniUdalostId(klic),
+        smer: 'prijem',
+        zdrojTyp: 'poukaz',
+        zdrojId: poukaz.id,
+        castka: Number(poukaz.hodnota) - Number(poukaz.sleva_kc || 0),
+        datTrzby: poukaz.zaplaceno_kdy
+      });
+    }
+
     await client.query('COMMIT');
     res.json({ ok: true, poukaz });
     if (stavUhrady === 'zaplaceno') {
@@ -2610,6 +2761,18 @@ app.patch('/api/admin/poukazy/:id/potvrdit-platbu', async (req, res) => {
       `UPDATE poukazy SET stav_uhrady = 'zaplaceno', zpusob_platby = $1, zaplaceno_kdy = now(), zaplaceno_zpetne = false, kontaktni_platba = $3 WHERE id = $2 RETURNING *`,
       [zpusob_platby, req.params.id, kontaktniPlatbaKUlozeni]
     );
+    // Krok 3b — EET evidence (bezpečné i bez idempotency_klic: souběžné
+    // potvrzení stejného poukazu chrání "FOR UPDATE" zámek výš + kontrola
+    // stav_uhrady, druhý požadavek nikdy nedojde až sem).
+    const eetCfg = await ziskatEetKonfiguraci(client);
+    await zaevidovatEetZdroj(client, eetCfg, {
+      pokladniUdalostId: ziskatPokladniUdalostId(null),
+      smer: 'prijem',
+      zdrojTyp: 'poukaz',
+      zdrojId: aktualizovany.id,
+      castka: Number(aktualizovany.hodnota) - Number(aktualizovany.sleva_kc || 0),
+      datTrzby: aktualizovany.zaplaceno_kdy
+    });
     await client.query('COMMIT');
     res.json({ ok: true, poukaz: aktualizovany });
     odeslatUctenkuEmailem({
@@ -2744,10 +2907,28 @@ app.post('/api/admin/poukazy/:id/uplatnit', async (req, res) => {
     );
     // Historie čerpání (viz poukazy_historie v schema.sql) — zapisuje se VŽDY,
     // i bez návázání na rezervaci, ať je tahle částka v budoucnu dohledatelná.
-    await client.query(
-      `INSERT INTO poukazy_historie (poukaz_id, castka, rezervace_id) VALUES ($1,$2,$3)`,
+    const { rows: [historieRadek] } = await client.query(
+      `INSERT INTO poukazy_historie (poukaz_id, castka, rezervace_id) VALUES ($1,$2,$3) RETURNING id, vytvoreno`,
       [req.params.id, castka, rezervaceId]
     );
+    // Krok 3b — EET evidence ČERPÁNÍ poukazu. Jen u poukazu "na částku"
+    // (konkretni_masaz je NULL) — u poukazu na konkrétní službu se evidovaná
+    // tržba vytvořila už při PRODEJI (viz POST /poukazy výš) a čerpání
+    // samo o sobě novou tržbu nevytváří (odběr už dřív zaplacené služby,
+    // viz zpráva k Kroku 3b, bod 5 — úředně potvrzené, ne neověřené).
+    if (!poukaz.konkretni_masaz) {
+      const eetCfg = await ziskatEetKonfiguraci(client);
+      await zaevidovatEetZdroj(client, eetCfg, {
+        pokladniUdalostId: ziskatPokladniUdalostId(null),
+        smer: 'prijem',
+        zdrojTyp: 'poukaz_historie',
+        zdrojId: historieRadek.id,
+        castka,
+        datTrzby: historieRadek.vytvoreno,
+        urcenoCerpZuct: castka,
+        cerpZuct: castka
+      });
+    }
     await client.query('COMMIT');
     res.json({ ok: true, poukaz: aktualizovany, rezervace: aktualizovanaRezervace });
   } catch (e) {
@@ -3531,12 +3712,33 @@ app.get('/api/admin/prodejna', async (req, res) => {
 // nepřepočítává/nekontroluje proti slevě — stejná důvěra jako u zbytku
 // tohohle formuláře, kde admin cenu může volně upravit pro libovolný důvod.
 app.post('/api/admin/prodejna', async (req, res) => {
-  const { masaz, cena, zpusob_platby, poznamka, kupon_kod, poukaz_kod } = req.body || {};
+  const { masaz, cena, zpusob_platby, poznamka, kupon_kod, poukaz_kod, idempotency_klic, kontaktni_platba } = req.body || {};
   if (!masaz || !cena) return res.status(400).json({ chyba: 'Vyberte masáž a zadejte cenu.' });
   const cenaNum = Number(cena);
+  // Krok 3b — nepovinný idempotenční klíč (ochrana proti dvojkliku/opakování
+  // po výpadku spojení/souběžnému requestu); chybějící = starší administrace,
+  // chová se jako dřív.
+  const klic = idempotency_klic ? String(idempotency_klic).trim() : null;
+  if (klic && klic.length > 100) return res.status(400).json({ chyba: 'Neplatný idempotenční klíč.' });
+  // Krok 3b, bod 4 — prodejna je VŽDY osobní prodej v salonu (žádný vzdálený
+  // prodej v appce neexistuje), takže kontaktni_platba se nedosazuje podle
+  // vstupu, ale je VŽDY true — explicitní sloupec, ne jen předpoklad v kódu.
+  const kontaktniPlatbaKUlozeni = true;
   const client = await db.connect();
   try {
     await client.query('BEGIN');
+
+    // Idempotentní návrat HNED na začátku, PŘED spotřebováním kupónu/poukazu
+    // — opakovaný/souběžný požadavek se stejným klíčem nesmí žádný z nich
+    // spotřebovat podruhé.
+    if (klic) {
+      const { rows: [existujici] } = await client.query('SELECT * FROM prodeje WHERE idempotency_klic = $1', [klic]);
+      if (existujici) {
+        await client.query('COMMIT');
+        return res.json({ ok: true, prodej: existujici, idempotentni: true });
+      }
+    }
+
     if (kupon_kod && kupon_kod.trim()) {
       const { rows: [spotrebovan] } = await client.query(
         `UPDATE slevove_kupony SET pouzito_kdy = now() WHERE upper(kod) = upper($1) AND pouzito_kdy IS NULL RETURNING *`,
@@ -3558,6 +3760,7 @@ app.post('/api/admin/prodejna', async (req, res) => {
     // jeho zůstatek, zbytek ceny platí vybraný zpusob_platby (hotove/qr).
     let poukazId = null;
     let poukazCastka = null;
+    let poukazKonkretniMasaz = null;
     let zbytek = cenaNum;
     if (poukaz_kod && poukaz_kod.trim()) {
       const { rows: [poukaz] } = await client.query('SELECT * FROM poukazy WHERE upper(kod) = upper($1) FOR UPDATE', [poukaz_kod.trim()]);
@@ -3581,6 +3784,7 @@ app.post('/api/admin/prodejna', async (req, res) => {
         [novyZustatek, novyStav, poukaz.id]
       );
       poukazId = poukaz.id;
+      poukazKonkretniMasaz = poukaz.konkretni_masaz;
     }
     // Zbytek ceny (po odečtení poukazu, pokud byl zadaný) musí mít platný,
     // VÝSLOVNĚ potvrzený způsob platby — bez poukazu je tohle prostě celá
@@ -3596,16 +3800,58 @@ app.post('/api/admin/prodejna', async (req, res) => {
     }
     const zpusobPlatbyFinal = zbytek <= 0 ? 'poukaz' : zpusob_platby;
 
-    const { rows: [prodej] } = await client.query(
-      'INSERT INTO prodeje (masaz, cena, zpusob_platby, poznamka, poukaz_id, poukaz_castka) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
-      [masaz, cenaNum, zpusobPlatbyFinal, poznamka || null, poukazId, poukazCastka]
-    );
-    if (poukazId) {
-      await client.query(
-        `INSERT INTO poukazy_historie (poukaz_id, castka, prodej_id) VALUES ($1,$2,$3)`,
-        [poukazId, poukazCastka, prodej.id]
-      );
+    let prodej;
+    try {
+      ({ rows: [prodej] } = await client.query(
+        'INSERT INTO prodeje (masaz, cena, zpusob_platby, poznamka, poukaz_id, poukaz_castka, idempotency_klic, kontaktni_platba) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
+        [masaz, cenaNum, zpusobPlatbyFinal, poznamka || null, poukazId, poukazCastka, klic, kontaktniPlatbaKUlozeni]
+      ));
+    } catch (e) {
+      // Souběh dvou požadavků se STEJNÝM klíčem — unikátní index na
+      // prodeje.idempotency_klic je tu skutečná pojistka (SELECT na začátku
+      // je jen rychlý early-exit). Kupón/poukaz spotřebovaný TOUHLE transakcí
+      // se vrátí zpět ROLLBACKEM níž, žádné dvojí odečtení nepřežije.
+      if (klic && e.code === '23505') {
+        await client.query('ROLLBACK');
+        const clientOverit = await db.connect();
+        try {
+          const { rows: [existujici] } = await clientOverit.query('SELECT * FROM prodeje WHERE idempotency_klic = $1', [klic]);
+          if (existujici) return res.json({ ok: true, prodej: existujici, idempotentni: true });
+          return res.status(409).json(CHYBA_IDEMPOTENTNI_KONFLIKT);
+        } finally {
+          clientOverit.release();
+        }
+      }
+      throw e;
     }
+    let historieRadek = null;
+    if (poukazId) {
+      ({ rows: [historieRadek] } = await client.query(
+        `INSERT INTO poukazy_historie (poukaz_id, castka, prodej_id) VALUES ($1,$2,$3) RETURNING id, vytvoreno`,
+        [poukazId, poukazCastka, prodej.id]
+      ));
+    }
+
+    // Krok 3b — EET evidence, případně KOMBINOVANÁ (poukaz na částku + zbytek
+    // v hotovosti/QR v JEDNÉ zprávě, viz zpráva k Kroku 3b, bod 7). Poukaz na
+    // konkrétní službu se tu NEeviduje (byl evidovaný už při prodeji).
+    const eetCfg = await ziskatEetKonfiguraci(client);
+    const pokladniUdalostId = ziskatPokladniUdalostId(klic);
+    if (poukazId && Number(poukazCastka) > 0 && !poukazKonkretniMasaz) {
+      await zaevidovatEetZdroj(client, eetCfg, {
+        pokladniUdalostId, smer: 'prijem', zdrojTyp: 'poukaz_historie',
+        zdrojId: historieRadek.id,
+        castka: Number(poukazCastka), datTrzby: prodej.vytvoreno,
+        urcenoCerpZuct: Number(poukazCastka), cerpZuct: Number(poukazCastka)
+      });
+    }
+    if (zbytek > 0) {
+      await zaevidovatEetZdroj(client, eetCfg, {
+        pokladniUdalostId, smer: 'prijem', zdrojTyp: 'prodej',
+        zdrojId: prodej.id, castka: Number(zbytek), datTrzby: prodej.vytvoreno
+      });
+    }
+
     await client.query('COMMIT');
     res.json({ ok: true, prodej });
   } catch (e) {
@@ -3627,6 +3873,21 @@ app.delete('/api/admin/prodejna/:id', async (req, res) => {
     await client.query('BEGIN');
     const { rows: [prodej] } = await client.query('SELECT * FROM prodeje WHERE id = $1 FOR UPDATE', [req.params.id]);
     if (!prodej) { await client.query('ROLLBACK'); return res.status(404).json({ chyba: 'Prodej nebyl nalezen.' }); }
+    // Krok 3b, bod 6 — stejná ochrana jako u poukazů/produktů: smazání
+    // prodeje, který je už zaevidovaný pro EET (přímo, nebo přes čerpání
+    // poukazu navázané na tenhle prodej), by nenávratně odpojilo evidovanou
+    // tržbu od jejího zdroje. Opravu chybného prodeje řeší storno/korekce v
+    // samotné EET evidenci (budoucí Krok), ne mazání obchodního záznamu.
+    const { rows: [eetKontrola] } = await client.query(
+      `SELECT count(*) FROM evidovana_trzba_zdroje
+         WHERE (zdroj_typ = 'prodej' AND zdroj_id = $1)
+            OR (zdroj_typ = 'poukaz_historie' AND zdroj_id IN (SELECT id FROM poukazy_historie WHERE prodej_id = $1))`,
+      [req.params.id]
+    );
+    if (Number(eetKontrola.count) > 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ chyba: 'Tento prodej je už evidovaný pro EET, nelze ho smazat — pro opravu chybného prodeje použijte storno (viz zpráva k Kroku 3b).' });
+    }
     if (prodej.poukaz_id && Number(prodej.poukaz_castka) > 0) {
       const { rows: [poukaz] } = await client.query('SELECT * FROM poukazy WHERE id = $1 FOR UPDATE', [prodej.poukaz_id]);
       if (poukaz) {
@@ -3790,7 +4051,7 @@ app.delete('/api/admin/produkty/:id', async (req, res) => {
 // produktu chrání proti dvěma souběžným prodejům, co by si jinak mohly
 // přečíst stejný "sklad" a oba projít, i když by dohromady přečerpaly zásobu).
 app.post('/api/admin/produkty/:id/prodat', async (req, res) => {
-  const { mnozstvi, zpusob_platby } = req.body || {};
+  const { mnozstvi, zpusob_platby, idempotency_klic } = req.body || {};
   const mnozstviNum = Number(mnozstvi);
   if (!Number.isInteger(mnozstviNum) || mnozstviNum <= 0) return res.status(400).json({ chyba: 'Zadejte prosím kladný celočíselný počet kusů.' });
   // Krok 1 (sjednocení plateb) — dřív tu nebyla žádná validace a chybějící
@@ -3798,9 +4059,19 @@ app.post('/api/admin/produkty/:id/prodat', async (req, res) => {
   if (!ZPUSOBY_PLATBY_PRODUKT.includes(zpusob_platby)) {
     return res.status(400).json({ chyba: 'Vyberte prosím způsob platby.' });
   }
+  // Krok 3b — nepovinný idempotenční klíč, stejný princip jako u prodejny.
+  const klic = idempotency_klic ? String(idempotency_klic).trim() : null;
+  if (klic && klic.length > 100) return res.status(400).json({ chyba: 'Neplatný idempotenční klíč.' });
   const client = await db.connect();
   try {
     await client.query('BEGIN');
+
+    if (klic) {
+      const vysledekIdempotence = await zkontrolovatIdempotentniProdejProduktu(client, klic, req.params.id, mnozstviNum, zpusob_platby);
+      if (vysledekIdempotence) { await client.query('COMMIT'); return res.json(vysledekIdempotence); }
+      if (vysledekIdempotence === false) { await client.query('ROLLBACK'); return res.status(409).json(CHYBA_IDEMPOTENTNI_KONFLIKT); }
+    }
+
     const { rows: [produkt] } = await client.query('SELECT * FROM produkty WHERE id = $1 FOR UPDATE', [req.params.id]);
     if (!produkt) { await client.query('ROLLBACK'); return res.status(404).json({ chyba: 'Produkt nebyl nalezen.' }); }
     if (produkt.sklad < mnozstviNum) {
@@ -3808,12 +4079,42 @@ app.post('/api/admin/produkty/:id/prodat', async (req, res) => {
       return res.status(400).json({ chyba: `Na skladě je jen ${produkt.sklad} ks.` });
     }
     const cenaCelkem = Number(produkt.cena) * mnozstviNum;
-    const { rows: [prodej] } = await client.query(
-      `INSERT INTO prodeje_produktu (produkt_id, nazev, mnozstvi, cena_za_kus, cena_celkem, zpusob_platby)
-       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [produkt.id, produkt.skupina + ' – ' + produkt.varianta, mnozstviNum, produkt.cena, cenaCelkem, zpusob_platby]
-    );
+    // Krok 3b, bod 4 — prodej produktu je VŽDY osobní prodej v salonu (žádný
+    // vzdálený prodej v appce neexistuje) — kontaktni_platba je VŽDY true,
+    // jako explicitní sloupec, ne jen předpoklad v kódu.
+    let prodej;
+    try {
+      ({ rows: [prodej] } = await client.query(
+        `INSERT INTO prodeje_produktu (produkt_id, nazev, mnozstvi, cena_za_kus, cena_celkem, zpusob_platby, idempotency_klic, kontaktni_platba)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,true) RETURNING *`,
+        [produkt.id, produkt.skupina + ' – ' + produkt.varianta, mnozstviNum, produkt.cena, cenaCelkem, zpusob_platby, klic]
+      ));
+    } catch (e) {
+      // Souběh dvou požadavků se STEJNÝM klíčem — unikátní index je tu
+      // skutečná pojistka (kontrola výš je jen rychlý early-exit).
+      if (klic && e.code === '23505') {
+        await client.query('ROLLBACK');
+        const clientOverit = await db.connect();
+        try {
+          const vysledekIdempotence = await zkontrolovatIdempotentniProdejProduktu(clientOverit, klic, req.params.id, mnozstviNum, zpusob_platby);
+          if (vysledekIdempotence) return res.json(vysledekIdempotence);
+          return res.status(409).json(CHYBA_IDEMPOTENTNI_KONFLIKT);
+        } finally {
+          clientOverit.release();
+        }
+      }
+      throw e;
+    }
     const { rows: [aktualizovany] } = await client.query('UPDATE produkty SET sklad = sklad - $1 WHERE id = $2 RETURNING *', [mnozstviNum, produkt.id]);
+
+    // Krok 3b — EET evidence prodeje produktu.
+    const eetCfg = await ziskatEetKonfiguraci(client);
+    await zaevidovatEetZdroj(client, eetCfg, {
+      pokladniUdalostId: ziskatPokladniUdalostId(klic),
+      smer: 'prijem', zdrojTyp: 'prodej_produktu', zdrojId: prodej.id,
+      castka: Number(cenaCelkem), datTrzby: prodej.vytvoreno
+    });
+
     await client.query('COMMIT');
     res.json({ ok: true, prodej, produkt: aktualizovany });
   } catch (e) {
