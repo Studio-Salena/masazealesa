@@ -20,6 +20,21 @@ function pemNaBase64Der(certPem) {
     .replace(/\s+/g, '');
 }
 
+// Opak pemNaBase64Der výš — z holého base64 DER (jak je uložen v
+// BinarySecurityToken) složí standardní PEM s hlavičkami a zalomením na 64
+// znaků (vyžaduje to crypto.X509Certificate i xml-crypto). Používá to jen
+// přijímací/testovací strana (mock server), ne samotné podepisování.
+function base64DerNaPem(base64Der) {
+  const radky = base64Der.match(/.{1,64}/g) || [];
+  return `-----BEGIN CERTIFICATE-----\n${radky.join('\n')}\n-----END CERTIFICATE-----\n`;
+}
+
+// Vytáhne base64 DER obsah <wsse:BinarySecurityToken> ze SOAP obálky.
+function extrahovatBstBase64Der(soapXml, bstId = 'X509Token') {
+  const shoda = soapXml.match(new RegExp(`<wsse:BinarySecurityToken[^>]*wsu:Id="${bstId}"[^>]*>([^<]+)</wsse:BinarySecurityToken>`));
+  return shoda ? shoda[1] : null;
+}
+
 // bstId/bodyId: hodnoty atributu wsu:Id — výchozí "X509Token"/"Body" jsou
 // jen konvence téhle implementace, spec konkrétní jména nepředepisuje (jde o
 // "relativní odkaz v rámci SOAP zprávy").
@@ -48,4 +63,4 @@ function extrahovatTrzbu(soapXml) {
   return shoda[0];
 }
 
-module.exports = { NS, pemNaBase64Der, sestavitNepodepsanouObalku, extrahovatTrzbu };
+module.exports = { NS, pemNaBase64Der, base64DerNaPem, extrahovatBstBase64Der, sestavitNepodepsanouObalku, extrahovatTrzbu };
