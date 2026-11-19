@@ -1038,6 +1038,51 @@ returns setof evidovana_trzba language sql as $$
   returning e.*;
 $$;
 
+-- Ruční "reset" báze pokusů po manuálním vyřešení trvalé chyby — viz
+-- eet_znovu_zaradit_do_fronty níž.
+alter table evidovana_trzba add column if not exists rucni_reset_kdy timestamptz;
+alter table evidovana_trzba add column if not exists rucni_reset_poznamka text;
+
+-- Bezpečné znovu-zařazení evidované tržby, která skončila ve stavu 'chyba',
+-- zpět do fronty. VÝSLOVNĚ ruční akce (administrátor ji spustí teprve po
+-- opravě skutečné příčiny — např. opravě chybných dat nebo konfigurace
+-- certifikátu) — nikdy se nevolá automaticky z žádného kódu. Posune "bázi"
+-- počítání pokusů (eet_max_pokusu) na tento okamžik, aby znovu zařazená
+-- tržba dostala plný nový rozpočet pokusů, ale STARÉ pokusy (eet_odeslani)
+-- se nemažou ani nemění — zůstávají jako trvalý audit toho, co se dělo
+-- předtím (stejný princip jako jinde v projektu).
+create or replace function eet_znovu_zaradit_do_fronty(p_trzba_id integer, p_poznamka text)
+returns boolean language plpgsql as $$
+declare
+  v_pocet integer;
+begin
+  update evidovana_trzba
+  set stav_evidence = 'nova',
+      zpracovava_se_od = null, zpracovava_worker_id = null, aktualni_pokus_id = null,
+      rucni_reset_kdy = now(), rucni_reset_poznamka = p_poznamka
+  where id = p_trzba_id and stav_evidence = 'chyba';
+  get diagnostics v_pocet = row_count;
+  return v_pocet > 0;
+end $$;
+
+-- Uvolnění zámku BEZ zápisu výsledku a BEZE ZMĚNY stav_evidence — pro
+-- případ, kdy pokus o odeslání ztroskotal na INFRASTRUKTURNÍ příčině (chybí
+-- nebo neplatný certifikát/klíč), ne na datech samotné tržby. Takový pokus
+-- se NESMÍ počítat do eet_max_pokusu ani tržbu trvale uzavřít jako 'chyba' —
+-- jen se vrátí zpět do fronty, ať to zkusí další pokus (jiný worker, nebo
+-- tentýž po opravě konfigurace), bez čekání na 5minutové "stale" okno.
+create or replace function eet_uvolnit_zamek_bez_vysledku(p_trzba_id integer, p_pokus_id uuid)
+returns boolean language plpgsql as $$
+declare
+  v_pocet integer;
+begin
+  update evidovana_trzba
+  set zpracovava_se_od = null, zpracovava_worker_id = null
+  where id = p_trzba_id and aktualni_pokus_id = p_pokus_id;
+  get diagnostics v_pocet = row_count;
+  return v_pocet > 0;
+end $$;
+
 -- ══════════════════════════════════════════════════════════
 -- Recenze na web — spravované v adminu, zobrazené na veřejném webu.
 -- "jmeno" je jen křestní jméno (Alena ho zadává sama, typicky z e-mailu,

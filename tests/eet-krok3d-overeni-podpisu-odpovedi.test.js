@@ -6,7 +6,7 @@ const { sestavitXmlTrzby } = require('../eet/xml-zprava');
 const { sestavitNepodepsanouObalku } = require('../eet/soap-obalka');
 const { podepsatObalku, vytvoritTestovaciKlic } = require('../eet/podpis');
 const { REZIM, odeslatZpravu } = require('../eet/playground-klient');
-const { overitPodpisAKotvuOdpovedi } = require('../eet/overeni-odpovedi-fs');
+const { overitPodpisAKotvuOdpovedi, overitPlatnostKotvy } = require('../eet/overeni-odpovedi-fs');
 const { TESTOVACI_EIC } = require('../eet/specifikace');
 const { spustitMockEetServer } = require('./helpers/mock-eet-server');
 const { vytvoritTestovaciCaARetezec } = require('./helpers/testovaci-ca');
@@ -96,6 +96,42 @@ async function main() {
     const vysledek = overitPodpisAKotvuOdpovedi('<soapenv:Envelope/>', { duveryhodneKotvyPem: [] });
     assert.equal(vysledek.duveryhodny, false);
     console.log('OK 5 — bez dodané důvěryhodné kotvy je ověření vždy odmítnuto');
+  }
+
+  // 6) Zadání, bod 9: NIKDY nezaměnit veřejný CA certifikát za soukromý
+  //    podpisový klíč — pokud by se omylem jako "kotva" dostal soukromý
+  //    klíč, musí to být výslovně rozpoznáno a odmítnuto.
+  {
+    const kontrola = overitPlatnostKotvy(ca1.leafPrivateKeyPem);
+    assert.equal(kontrola.ok, false);
+    assert.ok(kontrola.duvod.toLowerCase().includes('soukrom'), `musí jasně pojmenovat, že jde o soukromý klíč: ${kontrola.duvod}`);
+    console.log('OK 6 — soukromý klíč nasazený jako "kotva" je výslovně rozpoznán a odmítnut (nikdy zaměněn za CA certifikát)');
+  }
+
+  // 7) Certifikát, který NENÍ certifikační autoritou (CA:true), nemůže
+  //    sloužit jako důvěryhodná kotva, i kdyby byl jinak platný X.509 —
+  //    použijeme leaf (koncový) certifikát odesílatele, který CA není.
+  {
+    const kontrola = overitPlatnostKotvy(ca1.leafCertificatePem);
+    assert.equal(kontrola.ok, false);
+    assert.ok(kontrola.duvod.includes('CA:true'), `musí jasně pojmenovat chybějící CA:true: ${kontrola.duvod}`);
+    console.log('OK 7 — certifikát bez CA:true (koncový, ne certifikační autorita) je jako kotva odmítnut');
+  }
+
+  // 8) Platnost certifikátu ODPOVĚDI (notBefore/notAfter) — matematicky
+  //    platný podpis s PROŠLÝM certifikátem se nesmí uznat.
+  {
+    const proslaCa = vytvoritTestovaciCaARetezec({ cnRoot: 'TEST Root CA — prošlý leaf', leafNotAfter: new Date(Date.now() - 24 * 3600 * 1000) }); // platnost skončila včera
+    const mock = await spustitMockEetServer({ podepisovatOdpovedi: { certificatePem: proslaCa.leafCertificatePem, privateKeyPem: proslaCa.leafPrivateKeyPem } });
+    try {
+      const odpovedXml = await odeslatAZiskatOdpoved(mock);
+      const vysledek = overitPodpisAKotvuOdpovedi(odpovedXml, { duveryhodneKotvyPem: [proslaCa.kotvaPem] });
+      assert.equal(vysledek.duveryhodny, false, 'odpověď podepsaná PROŠLÝM certifikátem nesmí být uznána');
+      assert.ok(vysledek.poznamka.includes('platnosti'), vysledek.poznamka);
+      console.log('OK 8 — odpověď podepsaná certifikátem po konci platnosti je odmítnuta, i když je podpis matematicky platný');
+    } finally {
+      await mock.zastavit();
+    }
   }
 
   console.log('\n✅ VŠECHNY TESTY OVĚŘENÍ PODPISU ODPOVĚDI PROŠLY');

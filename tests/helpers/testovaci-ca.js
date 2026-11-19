@@ -9,7 +9,17 @@ const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
-function vytvoritTestovaciCaARetezec({ cnRoot = 'TEST Root CA (NEdůvěryhodná)', cnLeaf = 'TEST FS Response Signer' } = {}) {
+// "leafNotAfter"/"leafNotBefore" (nepovinné, Date) — pro testování platnosti
+// certifikátu (eet/overeni-odpovedi-fs.js): nastaví konec/začátek platnosti
+// LEAF certifikátu na konkrétní okamžik (např. v minulosti, aby šlo
+// otestovat odmítnutí již PROŠLÉHO certifikátu), místo výchozího "1 den od
+// teď".
+function opensslCas(d) {
+  // formát openssl -not_after/-not_before: YYYYMMDDHHMMSSZ (vždy UTC)
+  return d.toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z').replace('T', '');
+}
+
+function vytvoritTestovaciCaARetezec({ cnRoot = 'TEST Root CA (NEdůvěryhodná)', cnLeaf = 'TEST FS Response Signer', leafNotAfter = null, leafNotBefore = null } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'eet-test-ca-'));
   const rootKey = path.join(dir, 'root-key.pem');
   const rootCert = path.join(dir, 'root-cert.pem');
@@ -25,10 +35,14 @@ function vytvoritTestovaciCaARetezec({ cnRoot = 'TEST Root CA (NEdůvěryhodná)
       'req', '-newkey', 'rsa:2048', '-keyout', leafKey, '-out', leafCsr,
       '-nodes', '-subj', `/CN=${cnLeaf}`
     ], { stdio: 'pipe' });
-    execFileSync('openssl', [
-      'x509', '-req', '-in', leafCsr, '-CA', rootCert, '-CAkey', rootKey, '-CAcreateserial',
-      '-out', leafCert, '-days', '1', '-sha256'
-    ], { stdio: 'pipe' });
+    const leafArgs = ['x509', '-req', '-in', leafCsr, '-CA', rootCert, '-CAkey', rootKey, '-CAcreateserial', '-out', leafCert, '-sha256'];
+    if (leafNotAfter) {
+      leafArgs.push('-not_after', opensslCas(leafNotAfter));
+      leafArgs.push('-not_before', opensslCas(leafNotBefore || new Date(leafNotAfter.getTime() - 86400000)));
+    } else {
+      leafArgs.push('-days', '1');
+    }
+    execFileSync('openssl', leafArgs, { stdio: 'pipe' });
   } catch (e) {
     fs.rmSync(dir, { recursive: true, force: true });
     throw new Error(`Nepodařilo se vygenerovat testovací CA/leaf (je "openssl" v PATH?): ${e.message}`);

@@ -34,17 +34,41 @@ const { overitPodpisObalky } = require('./podpis');
 // procházel celý řetězec; tady stačí jedna úroveň, protože lokální TEST
 // kotva/leaf dvojice (viz tests/helpers/testovaci-ca.js) je právě tak
 // hluboká a mechanismus je identický pro libovolnou délku řetězce.
+// Nikdy nezaměnit veřejný CA certifikát za soukromý podpisový klíč (zadání,
+// bod 9) — PEM se soukromým klíčem se do "duveryhodneKotvyPem" nemá co
+// dostat vůbec (je to pole CERTIFIKÁTŮ, ne klíčů), ale kdyby ano (např. záměna
+// cesty v konfiguraci), kontrola to výslovně odmítne namísto tiše selhat na
+// X509Certificate parsování s nejasnou chybou. Zároveň se ověří, že kotva má
+// nastavený "CA: true" (basicConstraints) — certifikát, který NENÍ CA, nemá
+// co vydávat jiné certifikáty, i kdyby matematicky "podepsal" něco, co
+// vypadá jako platný leaf (např. sebepodepsaný koncový cert).
+function overitPlatnostKotvy(kotvaPem) {
+  if (/-----BEGIN (RSA |EC )?PRIVATE KEY-----/.test(kotvaPem)) {
+    return { ok: false, duvod: 'Vstup vypadá jako SOUKROMÝ KLÍČ, ne jako veřejný CA certifikát — nikdy se nesmí použít jako důvěryhodná kotva.' };
+  }
+  let kotva;
+  try {
+    kotva = new crypto.X509Certificate(kotvaPem);
+  } catch (e) {
+    return { ok: false, duvod: `Nejde o platný X.509 certifikát: ${e.message}` };
+  }
+  if (kotva.ca !== true) {
+    return { ok: false, duvod: `Certifikát "${kotva.subject}" nemá CA:true (basicConstraints) — nejde o certifikační autoritu, nelze ho použít jako kotvu.` };
+  }
+  const ted = Date.now();
+  if (ted < new Date(kotva.validFrom).getTime() || ted > new Date(kotva.validTo).getTime()) {
+    return { ok: false, duvod: `Kotva "${kotva.subject}" není v okně platnosti (${kotva.validFrom} – ${kotva.validTo}).` };
+  }
+  return { ok: true, kotva };
+}
+
 function vydanoDuveryhodnouKotvou(leafCert, kotvyPem) {
   for (const kotvaPem of kotvyPem) {
-    let kotva;
+    const kontrola = overitPlatnostKotvy(kotvaPem);
+    if (!kontrola.ok) continue; // neplatná/nedůvěryhodná kotva se jen tiše přeskočí, ne spadne celé ověření
     try {
-      kotva = new crypto.X509Certificate(kotvaPem);
-    } catch {
-      continue;
-    }
-    try {
-      if (leafCert.checkIssued(kotva) && leafCert.verify(kotva.publicKey)) {
-        return { ano: true, kotvaSubjekt: kotva.subject };
+      if (leafCert.checkIssued(kontrola.kotva) && leafCert.verify(kontrola.kotva.publicKey)) {
+        return { ano: true, kotvaSubjekt: kontrola.kotva.subject };
       }
     } catch {
       // leafCert.verify() vyhazuje, pokud algoritmus/klíč nesedí — to je
@@ -80,6 +104,14 @@ function overitPodpisAKotvuOdpovedi(soapXmlOdpovedi, { duveryhodneKotvyPem } = {
     return { duveryhodny: false, poznamka: `XML-DSig podpis odpovědi je neplatný: ${overeniPodpisu.duvod}`, certifikatSubjekt: leaf.subject };
   }
 
+  // Platnost certifikátu (notBefore/notAfter) — matematicky platný podpis s
+  // PROŠLÝM (nebo ještě neplatným) certifikátem se nesmí uznat jen proto,
+  // že klíč/matematika sedí.
+  const ted = Date.now();
+  if (ted < new Date(leaf.validFrom).getTime() || ted > new Date(leaf.validTo).getTime()) {
+    return { duveryhodny: false, poznamka: `Certifikát odpovědi není v okně platnosti (${leaf.validFrom} – ${leaf.validTo}).`, certifikatSubjekt: leaf.subject };
+  }
+
   const kotva = vydanoDuveryhodnouKotvou(leaf, duveryhodneKotvyPem);
   if (!kotva.ano) {
     return { duveryhodny: false, poznamka: `Podpis je matematicky platný, ale certifikát ("${leaf.subject}") nevede k žádné důvěryhodné kotvě.`, certifikatSubjekt: leaf.subject };
@@ -88,4 +120,4 @@ function overitPodpisAKotvuOdpovedi(soapXmlOdpovedi, { duveryhodneKotvyPem } = {
   return { duveryhodny: true, poznamka: `Podpis platný, certifikát vydán důvěryhodnou kotvou "${kotva.kotvaSubjekt}".`, certifikatSubjekt: leaf.subject };
 }
 
-module.exports = { overitPodpisAKotvuOdpovedi };
+module.exports = { overitPodpisAKotvuOdpovedi, overitPlatnostKotvy };
