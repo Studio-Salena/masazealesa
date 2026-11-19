@@ -2053,11 +2053,11 @@ const CHYBA_IDEMPOTENTNI_KONFLIKT = { chyba: 'Tento idempotenční klíč byl u�
 // databázi), ne součást nasazení kódu.
 async function ziskatEetKonfiguraci(client) {
   const { rows } = await client.query(
-    `SELECT klic, hodnota FROM nastaveni WHERE klic IN ('eet_evidence_zapnuta','eet_id_jednotky','eet_id_pokl')`
+    `SELECT klic, hodnota FROM nastaveni WHERE klic IN ('eet_evidence_zapnuta','eet_id_jednotky','eet_id_pokl','eet_eic_popl')`
   );
   const m = {};
   rows.forEach(r => { m[r.klic] = r.hodnota; });
-  return { zapnuta: m.eet_evidence_zapnuta === 'true', idJednotky: m.eet_id_jednotky || '', idPokl: m.eet_id_pokl || '' };
+  return { zapnuta: m.eet_evidence_zapnuta === 'true', idJednotky: m.eet_id_jednotky || '', idPokl: m.eet_id_pokl || '', eicPopl: m.eet_eic_popl || '' };
 }
 
 // Zaevidování JEDNOHO zdroje skutečné platby/vratky do evidovana_trzba —
@@ -2073,6 +2073,54 @@ async function zaevidovatEetZdroj(client, cfg, { pokladniUdalostId, smer, zdrojT
     [pokladniUdalostId, smer, zdrojTyp, zdrojId, castka, cfg.idJednotky, cfg.idPokl, datTrzby, urcenoCerpZuct, cerpZuct]
   );
   return vysledek;
+}
+
+// ── Krok 3d: okamžité odeslání PO PLATBĚ (jen lokální TEST/mock — zadání) ──
+//
+// Záměrně VÍCE VRSTEV, co musí všechny platit, než se vůbec zkusí síťové
+// volání — každá je nezávislá a chybí jí výchozí hodnota, která by to
+// tiše zapnula:
+//   1) zaevidovatEetZdroj výš vrátil nove_zapocitano===true (reálně nová
+//      evidenční povinnost, ne opakování stejného zdroje)
+//   2) "eet_odesilani_pozastaveno" v nastaveni je výslovně 'false'
+//      (výchozí po migraci je 'true' — Krok 3a)
+//   3) EET_TEST_MOCK_URL je nastavené v prostředí (adresa lokálního mock
+//      serveru z eet/odesilaci-sluzba.js — NIKDY Playground/produkce,
+//      REZIM.LOCAL_MOCK to navíc vynucuje na úrovni klienta)
+//   4) EET_PLAYGROUND_CERT_PEM/EET_PLAYGROUND_KEY_PEM jsou nastavené (stejné
+//      proměnné jako u ručního ověřovacího pokusu, Krok 3c/3d — NIKDY natvrdo
+//      v kódu ani v databázi)
+// Bez i JEDNÉ z nich zůstává tahle funkce úplným no-op — to je výchozí stav
+// v každém reálném nasazení (produkce i TEST), dokud to někdo výslovně
+// nenastaví. Běží AŽ PO COMMITU platby (nikdy uvnitř stejné transakce) a
+// NIKDY nevyhodí chybu do HTTP odpovědi na samotnou platbu — ta je už
+// bezpečně zapsaná bez ohledu na výsledek EET odeslání.
+async function naplanovatOkamziteOdeslaniPoPlatbe(vysledekZaevidovani) {
+  if (!vysledekZaevidovani || !vysledekZaevidovani.nove_zapocitano) return;
+  try {
+    const { rows } = await db.query(`SELECT hodnota FROM nastaveni WHERE klic = 'eet_odesilani_pozastaveno'`);
+    if (!rows[0] || rows[0].hodnota !== 'false') return; // výchozí: zapauzováno
+    const mockUrl = process.env.EET_TEST_MOCK_URL;
+    const certificatePem = process.env.EET_PLAYGROUND_CERT_PEM && require('fs').readFileSync(process.env.EET_PLAYGROUND_CERT_PEM, 'utf8');
+    const privateKeyPem = process.env.EET_PLAYGROUND_KEY_PEM && require('fs').readFileSync(process.env.EET_PLAYGROUND_KEY_PEM, 'utf8');
+    if (!mockUrl || !certificatePem || !privateKeyPem) return; // chybí TEST konfigurace → no-op
+    const duveryhodnaKotvaPath = process.env.EET_TEST_DUVERYHODNA_KOTVA_PEM;
+    const duveryhodneKotvyPem = duveryhodnaKotvaPath ? [require('fs').readFileSync(duveryhodnaKotvaPath, 'utf8')] : [];
+
+    const eetCfg = await ziskatEetKonfiguraci(db);
+    const { rows: maxRows } = await db.query(`SELECT hodnota FROM nastaveni WHERE klic = 'eet_max_pokusu'`);
+    const maxPokusu = Number(maxRows[0]?.hodnota) || 10;
+
+    const { odeslatIhned } = require('./eet/odesilaci-sluzba');
+    const { REZIM } = require('./eet/playground-klient');
+    const vysledek = await odeslatIhned(db, vysledekZaevidovani.trzba_id, {
+      rezim: REZIM.LOCAL_MOCK, mockUrl, certificatePem, privateKeyPem,
+      eicPopl: eetCfg.eicPopl, duveryhodneKotvyPem, maxPokusu
+    });
+    console.log(`EET okamžité odeslání (trzba_id=${vysledekZaevidovani.trzba_id}):`, JSON.stringify({ zamceno: vysledek.zamceno, stav: vysledek.stav }));
+  } catch (e) {
+    console.error(`EET okamžité odeslání selhalo (trzba_id=${vysledekZaevidovani.trzba_id}), platba samotná zůstává zapsaná:`, e.message);
+  }
 }
 
 // "pokladni_udalost_id" — jednoznačný identifikátor pokladní operace, podle
@@ -2224,9 +2272,10 @@ app.patch('/api/admin/rezervace/:id/platba', async (req, res) => {
     // stejně jako v účetnictví, kategorie B), u vratky jde o "vratku jako
     // poukaz" — bod 5 zprávy k Kroku 3b, neověřený právní závěr, zatím
     // výslovně NEimplementováno (viz eetVratkaJakoPoukazZatimNeevidovat).
+    let eetVysledekZaevidovani = null;
     if (zpusob_platby !== 'poukaz') {
       const eetCfg = await ziskatEetKonfiguraci(client);
-      await zaevidovatEetZdroj(client, eetCfg, {
+      eetVysledekZaevidovani = await zaevidovatEetZdroj(client, eetCfg, {
         pokladniUdalostId: ziskatPokladniUdalostId(klic),
         smer: druh === 'vratka' ? 'storno' : 'prijem',
         zdrojTyp: 'platba',
@@ -2240,6 +2289,7 @@ app.patch('/api/admin/rezervace/:id/platba', async (req, res) => {
 
     const aktualizovana = await prepocitatSouhrnRezervace(client, req.params.id);
     await client.query('COMMIT');
+    naplanovatOkamziteOdeslaniPoPlatbe(eetVysledekZaevidovani);
     res.json({ ok: true, rezervace: aktualizovana, poukaz: novyPoukaz });
     // Účtenka e-mailem — jen u skutečně PRÁVĚ TEĎ přijaté platby (ne vratka,
     // ne čerpání poukazu — to už bylo jednou zaplaceno při prodeji poukazu).
@@ -2692,9 +2742,10 @@ app.post('/api/admin/poukazy', async (req, res) => {
 
     // Krok 3b — EET evidence prodeje poukazu (jen "prodej", ne "dar"; jen
     // když je skutečně zaplaceno PRÁVĚ TEĎ, ne u nezaplaceného/daru).
+    let eetVysledekZaevidovani = null;
     if (stavUhrady === 'zaplaceno') {
       const eetCfg = await ziskatEetKonfiguraci(client);
-      await zaevidovatEetZdroj(client, eetCfg, {
+      eetVysledekZaevidovani = await zaevidovatEetZdroj(client, eetCfg, {
         pokladniUdalostId: ziskatPokladniUdalostId(klic),
         smer: 'prijem',
         zdrojTyp: 'poukaz',
@@ -2705,6 +2756,7 @@ app.post('/api/admin/poukazy', async (req, res) => {
     }
 
     await client.query('COMMIT');
+    naplanovatOkamziteOdeslaniPoPlatbe(eetVysledekZaevidovani);
     res.json({ ok: true, poukaz });
     if (stavUhrady === 'zaplaceno') {
       odeslatUctenkuEmailem({
@@ -2782,7 +2834,7 @@ app.patch('/api/admin/poukazy/:id/potvrdit-platbu', async (req, res) => {
     // potvrzení stejného poukazu chrání "FOR UPDATE" zámek výš + kontrola
     // stav_uhrady, druhý požadavek nikdy nedojde až sem).
     const eetCfg = await ziskatEetKonfiguraci(client);
-    await zaevidovatEetZdroj(client, eetCfg, {
+    const eetVysledekZaevidovani = await zaevidovatEetZdroj(client, eetCfg, {
       pokladniUdalostId: ziskatPokladniUdalostId(null),
       smer: 'prijem',
       zdrojTyp: 'poukaz',
@@ -2791,6 +2843,7 @@ app.patch('/api/admin/poukazy/:id/potvrdit-platbu', async (req, res) => {
       datTrzby: aktualizovany.zaplaceno_kdy
     });
     await client.query('COMMIT');
+    naplanovatOkamziteOdeslaniPoPlatbe(eetVysledekZaevidovani);
     res.json({ ok: true, poukaz: aktualizovany });
     odeslatUctenkuEmailem({
       email: aktualizovany.kupujici_email, jmeno: aktualizovany.kupujici_jmeno,
@@ -2933,9 +2986,10 @@ app.post('/api/admin/poukazy/:id/uplatnit', async (req, res) => {
     // tržba vytvořila už při PRODEJI (viz POST /poukazy výš) a čerpání
     // samo o sobě novou tržbu nevytváří (odběr už dřív zaplacené služby,
     // viz zpráva k Kroku 3b, bod 5 — úředně potvrzené, ne neověřené).
+    let eetVysledekZaevidovani = null;
     if (!poukaz.konkretni_masaz) {
       const eetCfg = await ziskatEetKonfiguraci(client);
-      await zaevidovatEetZdroj(client, eetCfg, {
+      eetVysledekZaevidovani = await zaevidovatEetZdroj(client, eetCfg, {
         pokladniUdalostId: ziskatPokladniUdalostId(null),
         smer: 'prijem',
         zdrojTyp: 'poukaz_historie',
@@ -2947,6 +3001,7 @@ app.post('/api/admin/poukazy/:id/uplatnit', async (req, res) => {
       });
     }
     await client.query('COMMIT');
+    naplanovatOkamziteOdeslaniPoPlatbe(eetVysledekZaevidovani);
     res.json({ ok: true, poukaz: aktualizovany, rezervace: aktualizovanaRezervace });
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch {}
@@ -3886,8 +3941,9 @@ app.post('/api/admin/prodejna', async (req, res) => {
     // konkrétní službu se tu NEeviduje (byl evidovaný už při prodeji).
     const eetCfg = await ziskatEetKonfiguraci(client);
     const pokladniUdalostId = ziskatPokladniUdalostId(klic);
+    let eetVysledekZaevidovani = null;
     if (poukazId && Number(poukazCastka) > 0 && !poukazKonkretniMasaz) {
-      await zaevidovatEetZdroj(client, eetCfg, {
+      eetVysledekZaevidovani = await zaevidovatEetZdroj(client, eetCfg, {
         pokladniUdalostId, smer: 'prijem', zdrojTyp: 'poukaz_historie',
         zdrojId: historieRadek.id,
         castka: Number(poukazCastka), datTrzby: prodej.vytvoreno,
@@ -3895,13 +3951,19 @@ app.post('/api/admin/prodejna', async (req, res) => {
       });
     }
     if (zbytek > 0) {
-      await zaevidovatEetZdroj(client, eetCfg, {
+      // Stejná pokladniUdalostId jako zdroj výš → sloučí se do STEJNÉ
+      // evidované tržby (eet_zaevidovat_zdroj, Krok 3a) — vysledek z tohoto
+      // druhého volání nese stejné trzba_id, takže stačí ho použít k
+      // naplánování odeslání (nepřepisuje se zbytečně dvakrát, jde o tutéž
+      // tržbu, odeslání se spustí jen jednou podle finálního výsledku).
+      eetVysledekZaevidovani = await zaevidovatEetZdroj(client, eetCfg, {
         pokladniUdalostId, smer: 'prijem', zdrojTyp: 'prodej',
         zdrojId: prodej.id, castka: Number(zbytek), datTrzby: prodej.vytvoreno
       });
     }
 
     await client.query('COMMIT');
+    naplanovatOkamziteOdeslaniPoPlatbe(eetVysledekZaevidovani);
     res.json({ ok: true, prodej });
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch {}
@@ -4166,13 +4228,14 @@ app.post('/api/admin/produkty/:id/prodat', async (req, res) => {
 
     // Krok 3b — EET evidence prodeje produktu.
     const eetCfg = await ziskatEetKonfiguraci(client);
-    await zaevidovatEetZdroj(client, eetCfg, {
+    const eetVysledekZaevidovani = await zaevidovatEetZdroj(client, eetCfg, {
       pokladniUdalostId: ziskatPokladniUdalostId(klic),
       smer: 'prijem', zdrojTyp: 'prodej_produktu', zdrojId: prodej.id,
       castka: Number(cenaCelkem), datTrzby: prodej.vytvoreno
     });
 
     await client.query('COMMIT');
+    naplanovatOkamziteOdeslaniPoPlatbe(eetVysledekZaevidovani);
     res.json({ ok: true, prodej, produkt: aktualizovany });
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch {}

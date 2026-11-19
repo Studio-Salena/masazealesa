@@ -907,6 +907,19 @@ $$;
 -- odpovídá pokusu, který výsledek nese (compare-and-swap). Pokud mezitím
 -- úlohu převzal někdo jiný (stale claim), p_pokus_id už nesedí a zápis se
 -- tiše neprovede (zapsano=false) — volající to musí zalogovat, ne ignorovat.
+-- Rozšířeno v Kroku 3d o nepovinné p_fs_podpis_duveryhodny/p_fs_podpis_poznamka
+-- (konec parametrů, se default null) — volání z Kroku 3a/3b beze změny dál
+-- fungují stejně, jen nový volající (eet/odesilaci-sluzba.js) navíc zapisuje
+-- výsledek kryptografického ověření podpisu ODPOVĚDI (eet_odeslani sloupce
+-- přidané níž v sekci Krok 3d).
+--
+-- DŮLEŽITÉ: "create or replace function" se změněným seznamem parametrů v
+-- PostgreSQL NENAHRADÍ starou verzi, ale vytvoří DRUHOU, přetíženou funkci
+-- se stejným jménem (přetížení podle typů parametrů) — obě by pak při
+-- volání s počtem argumentů, který sedí na výchozí hodnoty obou verzí,
+-- způsobily chybu "is not unique". Proto se stará (Krok 3a) desetiparametrová
+-- podoba musí nejdřív výslovně zrušit.
+drop function if exists eet_zapsat_vysledek(integer, uuid, text, uuid, boolean, text, text, text, text, integer);
 create or replace function eet_zapsat_vysledek(
   p_trzba_id integer,
   p_pokus_id uuid,
@@ -918,13 +931,15 @@ create or replace function eet_zapsat_vysledek(
   p_chyba_kod text default null,
   p_chyba_text text default null,
   p_http_status integer default null,
+  p_fs_podpis_duveryhodny boolean default null,
+  p_fs_podpis_poznamka text default null,
   out zapsano boolean
 ) language plpgsql as $$
 declare
   v_pocet integer;
 begin
-  insert into eet_odeslani (evidovana_trzba_id, pokus_id, uuid_zpravy, prvni_zaslani, stav, pok, chyba_kod, chyba_text, http_status)
-  select p_trzba_id, p_pokus_id, p_uuid_zpravy, p_prvni_zaslani, p_odeslani_stav, p_pok, p_chyba_kod, p_chyba_text, p_http_status
+  insert into eet_odeslani (evidovana_trzba_id, pokus_id, uuid_zpravy, prvni_zaslani, stav, pok, chyba_kod, chyba_text, http_status, fs_podpis_duveryhodny, fs_podpis_poznamka)
+  select p_trzba_id, p_pokus_id, p_uuid_zpravy, p_prvni_zaslani, p_odeslani_stav, p_pok, p_chyba_kod, p_chyba_text, p_http_status, p_fs_podpis_duveryhodny, p_fs_podpis_poznamka
   where exists (select 1 from evidovana_trzba where id = p_trzba_id and aktualni_pokus_id = p_pokus_id);
   get diagnostics v_pocet = row_count;
   zapsano := v_pocet > 0;
@@ -971,6 +986,57 @@ insert into nastaveni (klic, hodnota) values ('eet_evidence_zapnuta', 'false') o
 -- v produkci nutné doplnit PŘED zapnutím evidence.
 insert into nastaveni (klic, hodnota) values ('eet_id_jednotky', '') on conflict (klic) do nothing;
 insert into nastaveni (klic, hodnota) values ('eet_id_pokl', '') on conflict (klic) do nothing;
+
+-- ══════════════════════════════════════════════════════════
+-- Krok 3d EET 2.0 — koordinované odesílání (okamžitě po platbě + záložní
+-- worker), POUZE lokální příprava/TEST. Čistě aditivní k Kroku 3a/3b — žádná
+-- existující tabulka/funkce se neduplikuje, jen se doplňuje to, co chybělo:
+-- EIČ poplatníka (eic_popl byl dřív jen v xml-zprava.js jako parametr, teď
+-- má i konfigurační místo v "nastaveni", stejně jako id_jednotky/id_pokl),
+-- strop počtu pokusů (aby trvale nedostupná FS nevedla k nekonečné frontě)
+-- a kryptografické ověření podpisu ODPOVĚDI (ne jen naší odchozí zprávy —
+-- to už řešil Krok 3c). Odesílání samo (eet/odesilaci-sluzba.js) zůstává
+-- pod stejnou páčkou "eet_odesilani_pozastaveno" z Kroku 3a (výchozí
+-- 'true' = zůstává zapauzované) — tahle migrace tu páčku nemění.
+insert into nastaveni (klic, hodnota) values ('eet_eic_popl', '') on conflict (klic) do nothing;
+-- Po tomto počtu PO SOBĚ JDOUCÍCH neúspěšných/nejistých pokusů o jednu
+-- evidovanou tržbu přejde do stav_evidence='chyba' (vyžaduje ruční zásah) i
+-- v případě, že šlo o přechodnou chybu — bez stropu by trvalý výpadek FS
+-- vedl k neomezenému opakování navždy (viz eet/odesilaci-sluzba.js).
+insert into nastaveni (klic, hodnota) values ('eet_max_pokusu', '10') on conflict (klic) do nothing;
+
+-- Výsledek kryptografického ověření podpisu PŘIJATÉ odpovědi (ne naší
+-- odchozí zprávy) proti důvěryhodné certifikační kotvě — viz
+-- eet/overeni-odpovedi-fs.js. "fs_podpis_duveryhodny" je NULL, pokud
+-- odpověď žádný podpis neobsahovala (např. lokální mock bez podepisování
+-- odpovědí) nebo ověření ještě neproběhlo; false znamená, že odpověď NELZE
+-- považovat za důvěryhodnou (podpis neplatný NEBO nevede k důvěryhodné
+-- kotvě) — takový výsledek se NIKDY nezapisuje jako stav_evidence='potvrzeno',
+-- i kdyby XML samo říkalo "potvrzeni"/POK (viz zpracovatOdpovedFs).
+alter table eet_odeslani add column if not exists fs_podpis_duveryhodny boolean;
+alter table eet_odeslani add column if not exists fs_podpis_poznamka text;
+
+-- Zamknutí JEDNÉ KONKRÉTNÍ evidované tržby (ne další dávky) — stejná
+-- koordinovaná cesta (stejná WHERE podmínka, stejné "stale" okno, stejný
+-- CAS ticket aktualni_pokus_id) jako eet_zamknout_dalsi_davku výš, jen
+-- omezená na jedno id. Používá ji OKAMŽITÉ odeslání (hned po platbě) i
+-- záložní worker (eet_zamknout_dalsi_davku) — obě cesty tak procházejí
+-- přesně stejným zamykacím mechanismem, žádný druhý nezávislý na něm.
+create or replace function eet_zamknout_konkretni(p_trzba_id integer, p_worker_id text)
+returns setof evidovana_trzba language sql as $$
+  with kandidat as (
+    select id from evidovana_trzba
+    where id = p_trzba_id
+      and stav_evidence in ('nova', 'nejiste')
+      and (zpracovava_se_od is null or zpracovava_se_od < now() - interval '5 minutes')
+    for update skip locked
+  )
+  update evidovana_trzba e
+  set zpracovava_se_od = now(), zpracovava_worker_id = p_worker_id, aktualni_pokus_id = gen_random_uuid()
+  from kandidat
+  where e.id = kandidat.id
+  returning e.*;
+$$;
 
 -- ══════════════════════════════════════════════════════════
 -- Recenze na web — spravované v adminu, zobrazené na veřejném webu.

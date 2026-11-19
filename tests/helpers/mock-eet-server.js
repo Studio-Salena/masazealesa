@@ -11,30 +11,47 @@
 // klientský timeoutMs, aby test neběžel zbytečně dlouho).
 const http = require('node:http');
 const { validovatProtiXsd } = require('../../eet/xsd-validace');
-const { extrahovatTrzbu, extrahovatBstBase64Der, base64DerNaPem } = require('../../eet/soap-obalka');
-const { overitPodpisObalky } = require('../../eet/podpis');
+const { extrahovatTrzbu, extrahovatBstBase64Der, base64DerNaPem, sestavitNepodepsanouObalku } = require('../../eet/soap-obalka');
+const { overitPodpisObalky, podepsatObalku } = require('../../eet/podpis');
 const { vygenerovatFiktivniPok, CHYBOVE_KODY } = require('../../eet/simulator');
 
-function sestavitPotvrzeniXml(uuidZpravy) {
-  return (
-    `<?xml version="1.0" encoding="UTF-8"?>` +
-    `<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">` +
-    `<soapenv:Body><tns:Odpoved xmlns:tns="http://fs.gov.cz/eet/schema/v4">` +
-    `<tns:Hlavicka uuid_zpravy="${uuidZpravy}" dat_prij="${new Date().toISOString()}"/>` +
-    `<tns:Potvrzeni pok="${vygenerovatFiktivniPok()}" test="true"/>` +
-    `</tns:Odpoved></soapenv:Body></soapenv:Envelope>`
-  );
+// "podepisovatOdpovedi" (nepovinné, Krok 3d): { certificatePem, privateKeyPem }
+// — pokud dodáno, mock server odpovědi skutečně XML-DSig podepíše (stejným
+// eet/podpis.js jako naše odchozí zprávy), aby šlo testovat
+// eet/overeni-odpovedi-fs.js na opravdu podepsané odpovědi. Bez tohoto
+// parametru (výchozí, zpětně kompatibilní se všemi staršími testy) odpovědi
+// zůstávají nepodepsané, přesně jako dřív (jen prostý SOAP XML).
+function obalitOdpoved(odpovedFragmentXml, podepisovatOdpovedi) {
+  if (!podepisovatOdpovedi) {
+    return (
+      `<?xml version="1.0" encoding="UTF-8"?>` +
+      `<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">` +
+      `<soapenv:Body>${odpovedFragmentXml}</soapenv:Body></soapenv:Envelope>`
+    );
+  }
+  const { certificatePem, privateKeyPem } = podepisovatOdpovedi;
+  const nepodepsana = sestavitNepodepsanouObalku(odpovedFragmentXml, { certificatePem });
+  return podepsatObalku(nepodepsana, { privateKeyPem, certificatePem });
 }
 
-function sestavitChybaXml(uuidZpravy, kod, text) {
-  return (
-    `<?xml version="1.0" encoding="UTF-8"?>` +
-    `<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">` +
-    `<soapenv:Body><tns:Odpoved xmlns:tns="http://fs.gov.cz/eet/schema/v4">` +
+function sestavitPotvrzeniXml(uuidZpravy, podepisovatOdpovedi) {
+  const fragment = (
+    `<tns:Odpoved xmlns:tns="http://fs.gov.cz/eet/schema/v4">` +
+    `<tns:Hlavicka uuid_zpravy="${uuidZpravy}" dat_prij="${new Date().toISOString()}"/>` +
+    `<tns:Potvrzeni pok="${vygenerovatFiktivniPok()}" test="true"/>` +
+    `</tns:Odpoved>`
+  );
+  return obalitOdpoved(fragment, podepisovatOdpovedi);
+}
+
+function sestavitChybaXml(uuidZpravy, kod, text, podepisovatOdpovedi) {
+  const fragment = (
+    `<tns:Odpoved xmlns:tns="http://fs.gov.cz/eet/schema/v4">` +
     `<tns:Hlavicka ${uuidZpravy ? `uuid_zpravy="${uuidZpravy}"` : ''} dat_odmit="${new Date().toISOString()}"/>` +
     `<tns:Chyba kod="${kod}" test="true">${text}</tns:Chyba>` +
-    `</tns:Odpoved></soapenv:Body></soapenv:Envelope>`
+    `</tns:Odpoved>`
   );
+  return obalitOdpoved(fragment, podepisovatOdpovedi);
 }
 
 function ziskatUuidZpravy(soapXml) {
@@ -42,7 +59,7 @@ function ziskatUuidZpravy(soapXml) {
   return m ? m[1] : null;
 }
 
-async function obsluhaPozadavku(req, res) {
+async function obsluhaPozadavku(req, res, podepisovatOdpovedi) {
   if (req.method !== 'POST') {
     res.writeHead(405).end();
     return;
@@ -62,39 +79,39 @@ async function obsluhaPozadavku(req, res) {
     trzbaXml = extrahovatTrzbu(telo);
   } catch (e) {
     res.writeHead(200, { 'Content-Type': 'text/xml; charset=utf-8' });
-    res.end(sestavitChybaXml(uuidZpravy, CHYBOVE_KODY.XSD.kod, CHYBOVE_KODY.XSD.text));
+    res.end(sestavitChybaXml(uuidZpravy, CHYBOVE_KODY.XSD.kod, CHYBOVE_KODY.XSD.text, podepisovatOdpovedi));
     return;
   }
 
   const xsdVysledek = await validovatProtiXsd(trzbaXml);
   if (!xsdVysledek.valid) {
     res.writeHead(200, { 'Content-Type': 'text/xml; charset=utf-8' });
-    res.end(sestavitChybaXml(uuidZpravy, CHYBOVE_KODY.XSD.kod, CHYBOVE_KODY.XSD.text));
+    res.end(sestavitChybaXml(uuidZpravy, CHYBOVE_KODY.XSD.kod, CHYBOVE_KODY.XSD.text, podepisovatOdpovedi));
     return;
   }
 
   const bstBase64 = extrahovatBstBase64Der(telo);
   if (!bstBase64) {
     res.writeHead(200, { 'Content-Type': 'text/xml; charset=utf-8' });
-    res.end(sestavitChybaXml(uuidZpravy, CHYBOVE_KODY.PODPIS.kod, CHYBOVE_KODY.PODPIS.text));
+    res.end(sestavitChybaXml(uuidZpravy, CHYBOVE_KODY.PODPIS.kod, CHYBOVE_KODY.PODPIS.text, podepisovatOdpovedi));
     return;
   }
   const certificatePem = base64DerNaPem(bstBase64);
   const overeniPodpisu = overitPodpisObalky(telo, { certificatePem });
   if (!overeniPodpisu.valid) {
     res.writeHead(200, { 'Content-Type': 'text/xml; charset=utf-8' });
-    res.end(sestavitChybaXml(uuidZpravy, CHYBOVE_KODY.PODPIS.kod, CHYBOVE_KODY.PODPIS.text));
+    res.end(sestavitChybaXml(uuidZpravy, CHYBOVE_KODY.PODPIS.kod, CHYBOVE_KODY.PODPIS.text, podepisovatOdpovedi));
     return;
   }
 
   res.writeHead(200, { 'Content-Type': 'text/xml; charset=utf-8' });
-  res.end(sestavitPotvrzeniXml(uuidZpravy));
+  res.end(sestavitPotvrzeniXml(uuidZpravy, podepisovatOdpovedi));
 }
 
-function spustitMockEetServer() {
+function spustitMockEetServer({ podepisovatOdpovedi = null } = {}) {
   return new Promise((resolve) => {
     const server = http.createServer((req, res) => {
-      obsluhaPozadavku(req, res).catch((e) => {
+      obsluhaPozadavku(req, res, podepisovatOdpovedi).catch((e) => {
         res.writeHead(500).end(String(e));
       });
     });
