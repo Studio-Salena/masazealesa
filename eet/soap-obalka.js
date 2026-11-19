@@ -13,11 +13,21 @@ const NS = {
 
 // Base64 DER (bez PEM hlaviček/zalomení řádků) — formát, ve kterém WS-Security
 // BinarySecurityToken certifikát vyžaduje.
+//
+// DŮLEŽITÉ (nalezeno diagnostikou chyby 4 "Neplatny podpis SOAP zpravy" na
+// Playgroundu, 19.11.2026): `openssl pkcs12 -clcerts -nokeys` — běžný způsob
+// získání certifikátu z .p12 — před samotný "-----BEGIN CERTIFICATE-----"
+// blok vkládá řádky "Bag Attributes" / "subject=" / "issuer=". Dřívější verze
+// této funkce jen odstraňovala BEGIN/END markery a mezery, takže tyto řádky
+// zůstaly a splynuly s base64 obsahem — výsledkem byl neplatný, nedekódovatelný
+// "certifikát" v BinarySecurityToken. Proto se teď obsah bere VÝHRADNĚ z toho,
+// co je mezi BEGIN a END markery, cokoli mimo (před i po) se ignoruje.
 function pemNaBase64Der(certPem) {
-  return certPem
-    .replace(/-----BEGIN CERTIFICATE-----/g, '')
-    .replace(/-----END CERTIFICATE-----/g, '')
-    .replace(/\s+/g, '');
+  const shoda = certPem.match(/-----BEGIN CERTIFICATE-----([\s\S]+?)-----END CERTIFICATE-----/);
+  if (!shoda) {
+    throw new Error('pemNaBase64Der: vstup neobsahuje platný PEM blok (-----BEGIN/END CERTIFICATE-----).');
+  }
+  return shoda[1].replace(/\s+/g, '');
 }
 
 // Opak pemNaBase64Der výš — z holého base64 DER (jak je uložen v
