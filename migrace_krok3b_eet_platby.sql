@@ -21,6 +21,38 @@ select
   (select count(*) from poukazy) as pred_poukazy,
   (select count(*) from nastaveni) as pred_nastaveni;
 
+-- Bezpečnostní pojistka (audit před nasazením, bod 7) — níž použité
+-- "ON CONFLICT DO NOTHING" by při NEČEKANÉ existující hodnotě tiše nic
+-- nezměnilo, což by mohlo vypadat bezpečně, i kdyby EET bylo už omylem
+-- před migrací částečně zapnuté. Migrace se raději ÚPLNĚ ODMÍTNE spustit
+-- (chyba, ON_ERROR_STOP zastaví celý skript), než aby mlčky pokračovala
+-- nad neočekávaným stavem.
+\echo '--- Kontrola očekávaného stavu EET přepínačů PŘED migrací ---'
+do $$
+declare
+  v_aktivovano_od text;
+  v_pozastaveno text;
+  v_evidence text;
+begin
+  select hodnota into v_aktivovano_od from nastaveni where klic = 'eet_aktivovano_od';
+  select hodnota into v_pozastaveno from nastaveni where klic = 'eet_odesilani_pozastaveno';
+  select hodnota into v_evidence from nastaveni where klic = 'eet_evidence_zapnuta';
+
+  if coalesce(v_aktivovano_od, '') <> '' then
+    raise exception 'Migrace odmítnuta: eet_aktivovano_od má nečekanou hodnotu "%" (čekáno prázdné) — EET může být již aktivované, zastavuji se a hlásím problém.', v_aktivovano_od;
+  end if;
+  if coalesce(v_pozastaveno, '') <> 'true' then
+    raise exception 'Migrace odmítnuta: eet_odesilani_pozastaveno má nečekanou hodnotu "%" (čekáno "true") — odesílání EET nemusí být pozastavené, zastavuji se a hlásím problém.', v_pozastaveno;
+  end if;
+  -- v_evidence je NULL při prvním spuštění (klíč ještě neexistuje) — to je v
+  -- pořádku. Pokud klíč UŽ existuje, musí mít hodnotu 'false' (ať jde o
+  -- bezpečné opakované spuštění téže migrace) — JAKÁKOLI jiná hodnota
+  -- (především 'true') znamená nečekaný stav a migrace se zastaví.
+  if v_evidence is not null and v_evidence <> 'false' then
+    raise exception 'Migrace odmítnuta: eet_evidence_zapnuta už existuje s nečekanou hodnotou "%" (čekáno NULL při prvním spuštění, nebo "false" při opakování) — zkontrolujte ruční stav databáze, než budete pokračovat.', v_evidence;
+  end if;
+end $$;
+
 begin;
 
 -- 1) Prodej dárkového poukazu dnes nemá vlastní řádek v deníku "platby" (ten

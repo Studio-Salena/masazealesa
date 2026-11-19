@@ -2416,7 +2416,17 @@ app.get('/api/admin/nastaveni', async (req, res) => {
     res.json(rows);
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
+// Krok 3b, bezpečnostní oprava — klíče "eet_*" (aktivace evidence/odesílání)
+// se NESMÍ dát změnit přes tenhle obecný endpoint, i když ho admin.html dnes
+// na EET nikdy nevolá — chráníme se proti přímému API požadavku, ne proti
+// omylu v UI. Jediný povolený způsob změny EET přepínačů je přímý databázový
+// zásah (migrace nebo ruční SQL), nikdy administrační API.
+function jeEetKlic(klic) {
+  return /^eet_/i.test(klic);
+}
+const CHYBA_EET_KLIC_ZAKAZAN = { chyba: 'Nastavení EET (klíče začínající "eet_") nelze měnit přes administraci.' };
 app.put('/api/admin/nastaveni/:klic', async (req, res) => {
+  if (jeEetKlic(req.params.klic)) return res.status(403).json(CHYBA_EET_KLIC_ZAKAZAN);
   const { hodnota } = req.body || {};
   if (!hodnota) return res.status(400).json({ chyba: 'Chybí hodnota.' });
   try {
@@ -2428,6 +2438,9 @@ app.put('/api/admin/nastaveni/:klic', async (req, res) => {
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 app.delete('/api/admin/nastaveni/:klic', async (req, res) => {
+  // Stejná ochrana i u mazání — smazání např. "eet_odesilani_pozastaveno"
+  // by jeho hodnotu udělalo neznámou/nedefinovanou, ne bezpečně "true".
+  if (jeEetKlic(req.params.klic)) return res.status(403).json(CHYBA_EET_KLIC_ZAKAZAN);
   try {
     await db.query('DELETE FROM nastaveni WHERE klic = $1', [req.params.klic]);
     res.json({ ok: true });
