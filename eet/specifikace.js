@@ -34,6 +34,33 @@ const PODKLADY = {
     datum: '2026-11-11',
     url: 'https://pg.trzbyeet.gov.cz/eet/services/EETServiceSOAP/v4',
     sha256: '2a5deacd6440a6550f0719c595f3638b3a8f7044c741578b84da2e9a42708f3e'
+  },
+  produkce: {
+    soubor: path.join(ADRESAR, 'EET_pristupove_provozni_informace_produkce_v1_2.pdf'),
+    verze: '1.2',
+    datum: '2026-11-11',
+    url: 'https://trzbyeet.gov.cz/eet/services/EETServiceSOAP/v4',
+    sha256: '41c0b5e27770acdc355d5454d6ba9348cc4a3e32646f689d94d57d7a6e1aae99'
+  },
+  playgroundCaRoot: {
+    soubor: path.join(ADRESAR, 'ca_eet-root_cert-playground.crt'),
+    sha256: 'c0257db7f2d9dde3f9413e904814a330cbd2efa41f2ab4ecd8f91f7c5f73f3b6'
+  },
+  playgroundCaSub: {
+    soubor: path.join(ADRESAR, 'ca_eet-sub_cert-playground.crt'),
+    sha256: '28182077cb77338070e209fe9e950481d01ecbc181dfc76ecd7985bd2e0f9046'
+  },
+  vzorovaZpravaCZ00000019: {
+    soubor: path.join(ADRESAR, 'CZ00000019.eet.v4.req.xml'),
+    sha256: '4392b4ca0e6eb586c10b6f80d8946f5269f500a5b2b0d94fa7a092ace867ade5'
+  },
+  vzorovaZpravaCZ683555118: {
+    soubor: path.join(ADRESAR, 'CZ683555118.eet.v4.req.xml'),
+    sha256: 'a77d28641603ffd85a3bd9eff580f554e5e822741cd0594d84b48b52e7874b75'
+  },
+  vzorovaZpravaCZ8551015704: {
+    soubor: path.join(ADRESAR, 'CZ8551015704.eet.v4.req.xml'),
+    sha256: 'a61b6ac6cc50b908d68550aa4981b91df0f5d3cbfe564b5d60b545ef70a06bd6'
   }
 };
 

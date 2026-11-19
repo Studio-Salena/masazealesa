@@ -14,11 +14,27 @@ přímo z `EETXMLSchema.xsd`, nebo z textu `EET_popis_rozhrani_v1.2.pdf` /
 | `EET_popis_rozhrani_v1.2.pdf` | v1.2 | 25.08.2026 | https://eet.gov.cz/assets/cs/cmsmedia/pro-vyvojare/EET_popis_rozhrani_v1.2.pdf | `c986e85686927e1e153aee0f33090fd6fda80d09b44e564d8b344dde729b1a1e` |
 | `EET_popis_polozek_datove_zpravy.pdf` | v1.0 | 05.10.2026 | https://eet.gov.cz/assets/cs/cmsmedia/pro-vyvojare/EET_popis_polozek_datove_zpravy.pdf | `de09d084688e871c639b2813ed30ba77e838667f16ec94604b6a3f4df2c3576f` |
 | `EET_pristupove_provozni_informace_playground_1_2.pdf` | v1.2 | 11.11.2026 | https://eet.gov.cz/assets/cs/cmsmedia/pro-vyvojare/EET_pristupove_provozni_informace_playgr-4.pdf | `2a5deacd6440a6550f0719c595f3638b3a8f7044c741578b84da2e9a42708f3e` |
+| `EET_pristupove_provozni_informace_produkce_v1_2.pdf` | v1.2 | 11.11.2026 | https://eet.gov.cz/assets/cs/cmsmedia/pro-vyvojare/EET_pristupove_provozni_informace_Produk-4.pdf | `41c0b5e27770acdc355d5454d6ba9348cc4a3e32646f689d94d57d7a6e1aae99` |
+| `ca_eet-root_cert-playground.crt` | — | — (kořenový certifikát CA EET 2 Playground, veřejný) | https://eet.gov.cz/assets/cs/cmsmedia/pro-vyvojare/ca_eet-root_cert-playground.crt | `c0257db7f2d9dde3f9413e904814a330cbd2efa41f2ab4ecd8f91f7c5f73f3b6` |
+| `ca_eet-sub_cert-playground.crt` | — | — (certifikát vydavatele pokladních certifikátů Playground, veřejný) | https://eet.gov.cz/assets/cs/cmsmedia/pro-vyvojare/ca_eet-sub_cert-playground.crt | `28182077cb77338070e209fe9e950481d01ecbc181dfc76ecd7985bd2e0f9046` |
+| `CZ00000019.eet.v4.req.xml` | — | — (oficiální vzorová PODEPSANÁ zpráva, veřejný sdílený testovací certifikát) | https://eet.gov.cz/assets/cs/cmsmedia/pro-vyvojare/CZ00000019.eet.v4.req.xml | `4392b4ca0e6eb586c10b6f80d8946f5269f500a5b2b0d94fa7a092ace867ade5` |
+| `CZ683555118.eet.v4.req.xml` | — | — (totéž, EIČ CZ683555118) | https://eet.gov.cz/assets/cs/cmsmedia/pro-vyvojare/CZ683555118.eet.v4.req.xml | `a77d28641603ffd85a3bd9eff580f554e5e822741cd0594d84b48b52e7874b75` |
+| `CZ8551015704.eet.v4.req.xml` | — | — (totéž, EIČ CZ8551015704) | https://eet.gov.cz/assets/cs/cmsmedia/pro-vyvojare/CZ8551015704.eet.v4.req.xml | `a61b6ac6cc50b908d68550aa4981b91df0f5d3cbfe564b5d60b545ef70a06bd6` |
 
-Ověření integrity: `sha256sum *.xsd *.wsdl *.pdf` v tomto adresáři musí dát
-přesně hodnoty výše. Při jakékoli budoucí aktualizaci těchto souborů (nová
-verze rozhraní) je nutné tuto tabulku i `eet/specifikace.js` (strojově čitelná
-kopie týchž údajů) aktualizovat společně.
+Ověření integrity: `sha256sum *.xsd *.wsdl *.pdf *.crt *.xml` v tomto
+adresáři musí dát přesně hodnoty výše. Při jakékoli budoucí aktualizaci
+těchto souborů (nová verze rozhraní) je nutné tuto tabulku i
+`eet/specifikace.js` (strojově čitelná kopie týchž údajů) aktualizovat společně.
 
 Tyto soubory se NIKDY neodesílají nikam po síti — používá se z nich jen
-textový/XSD obsah pro lokální generování a ofline validaci.
+textový/XSD obsah pro lokální generování a ofline validaci, resp. (u
+`CZ*.eet.v4.req.xml` a `ca_eet-*.crt`) pro ofline interoperabilní ověření
+proti SKUTEČNÉ zprávě a certifikační autoritě Finanční správy (viz
+`tests/eet-krok3c-interoperabilita-fs.test.js`).
+
+**Záměrně NEstaženo do tohoto adresáře:** `CAEET_Playground_2026_v1.zip`
+(obsahuje sdílené testovací PKCS#12 soubory SE SOUKROMÝMI KLÍČI a heslo k
+nim). I když jde o veřejně sdílené, nijak citlivé testovací materiály (ne o
+skutečné tajemství), bylo ověřeno zvlášť v dočasném adresáři mimo
+repozitář a do Gitu se záměrně neukládá — `.gitignore` v kořeni projektu
+navíc i tak blokuje `*.p12`/`*.pfx`/`*.pem`/`*.key`.

@@ -11,3 +11,8 @@ node_modules/
 *.key
 *.crt
 eet_produkcni_certifikat*
+# Výjimka: tohle jsou VEŘEJNÉ certifikáty certifikační autority Playgroundu
+# (žádný soukromý klíč), stažené přímo z eet.gov.cz pro interoperabilní
+# testy (tests/eet-krok3c-interoperabilita-fs.test.js) — záměrně se commitují.
+!eet_specifikace/ca_eet-root_cert-playground.crt
+!eet_specifikace/ca_eet-sub_cert-playground.crt
