@@ -72,4 +72,37 @@ function rozebratOdpoved(xmlText) {
   };
 }
 
-module.exports = { EetOdpovedChyba, rozebratOdpoved };
+// Nezávislá validace OČEKÁVANÉ odpovědi na ověřovací (overeni=false,
+// playground) zprávu — Krok 3d. Používá se PŘED skutečným odesláním (aby šlo
+// připravit a jednotkově otestovat, co se bude kontrolovat) i PO něm (na
+// skutečnou odpověď). Kontroluje přesně to, co po úspěchu vyžaduje
+// specifikace (kap. 2.2.1/2.2.2) a popis položek (POK na playgroundu končí
+// "-ff"): typ odpovědi, test=true, správné přiřazení k odeslané zprávě
+// (shoda uuid_zpravy) a tvar POK.
+function overitOverovaciOdpoved(odpoved, { uuidZpravyOdeslane } = {}) {
+  const duvody = [];
+  if (!odpoved || typeof odpoved !== 'object') {
+    return { ok: false, duvody: ['Odpověď chybí nebo nemá očekávaný tvar.'] };
+  }
+  if (odpoved.typ !== 'potvrzeni') {
+    duvody.push(`Očekávána potvrzovací zpráva (POK), dostali jsme typ "${odpoved.typ}"${odpoved.text ? ` (${odpoved.text})` : ''}.`);
+  }
+  if (odpoved.test !== true) {
+    duvody.push('Odpověď nemá test=true — to je u Playgroundu VŽDY povinné; bez toho nejde výsledku věřit jako testovacímu.');
+  }
+  if (!uuidZpravyOdeslane) {
+    duvody.push('Chybí uuid_zpravy odeslané zprávy — nelze ověřit přiřazení odpovědi.');
+  } else if (odpoved.uuidZpravy !== uuidZpravyOdeslane) {
+    duvody.push(`uuid_zpravy odpovědi ("${odpoved.uuidZpravy}") neodpovídá odeslané zprávě ("${uuidZpravyOdeslane}") — odpověď nelze bezpečně přiřadit.`);
+  }
+  if (odpoved.typ === 'potvrzeni') {
+    if (!odpoved.pok || typeof odpoved.pok !== 'string') {
+      duvody.push('Potvrzovací zpráva neobsahuje POK.');
+    } else if (!odpoved.pok.endsWith('-ff')) {
+      duvody.push(`POK z neprodukčního prostředí musí končit "-ff" (EET_popis_polozek_datove_zpravy.pdf), dostali jsme: "${odpoved.pok}".`);
+    }
+  }
+  return { ok: duvody.length === 0, duvody };
+}
+
+module.exports = { EetOdpovedChyba, rozebratOdpoved, overitOverovaciOdpoved };
