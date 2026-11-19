@@ -52,20 +52,41 @@ function formatovatDatumCas(datum) {
 
 // Formát částky dle CastkaType: dvě desetinná místa, "0.00" (nikdy "-0.00"),
 // rozsah striktně (-100000000, 100000000). "numeric" sloupce PostgreSQL
-// chodí přes "pg" jako string — parseFloat je tu bezpečný, protože částky v
-// této appce jsou vždy haléřové hodnoty se max. 2 des. místy, ne libovolně
-// přesná čísla, kde by hrozila ztráta přesnosti.
+// chodí přes "pg" jako string.
+//
+// ÚMYSLNĚ NEPOUŽÍVÁME holý parseFloat() na vstupní string — ten čte jen
+// "nejdelší platný číselný prefix" a cokoli za ním TIŠE ZAHODÍ (např.
+// parseFloat("82,50") vrátí 82, ne chybu; stejně tak "82abc" by dalo 82).
+// U peněžní částky by tohle znamenalo riziko zaevidování jiné (zkrácené)
+// hodnoty, než byla ve skutečnosti zamýšlená — proto string napřed ověříme
+// striktní maskou a až pak převedeme na číslo.
 function formatovatCastku(hodnota) {
-  const n = typeof hodnota === 'string' ? parseFloat(hodnota) : hodnota;
+  let n;
+  if (typeof hodnota === 'string') {
+    if (!/^-?\d+(\.\d+)?$/.test(hodnota.trim())) {
+      throw new EetFormatovaciChyba(`Částka není ve striktním číselném tvaru (tečka jako oddělovač, žádné další znaky): ${hodnota}`);
+    }
+    n = Number(hodnota.trim());
+  } else {
+    n = hodnota;
+  }
   if (typeof n !== 'number' || !Number.isFinite(n)) {
     throw new EetFormatovaciChyba(`Částka není platné číslo: ${hodnota}`);
   }
   if (Math.abs(n) >= 100000000) {
     throw new EetFormatovaciChyba(`Částka mimo povolený rozsah CastkaType (|x| < 100 000 000): ${hodnota}`);
   }
+  // Peněžní částky v této appce vždy už JSOU na haléře přesné (numeric(10,2)
+  // v PostgreSQL) — pokud by sem přišla hodnota s netriviální přesností nad
+  // haléře (např. chyba výpočtu výš v kódu), NESMÍME ji tiše zaokrouhlit a
+  // tím nenápadně změnit evidovanou částku. Zaokrouhlení povolujeme jen na
+  // úrovni plovoucí čárky (< 1 haléř), ne jako skutečnou korekci hodnoty.
+  const zaokrouhleno = Math.round(n * 100) / 100;
+  if (Math.abs(n - zaokrouhleno) > 1e-9) {
+    throw new EetFormatovaciChyba(`Částka má větší přesnost než haléře, odmítám tiše zaokrouhlit: ${hodnota}`);
+  }
   // Zabránit "-0.00" u hodnot, které po zaokrouhlení na 2 des. místa vyjdou
   // nulové (např. -0.001) — spec nulovou částku se znaménkem nepovoluje.
-  const zaokrouhleno = Math.round(n * 100) / 100;
   const text = (zaokrouhleno === 0 ? 0 : zaokrouhleno).toFixed(2);
   const castkaMaska = /^((0|-?[1-9]\d{0,7})\.\d\d|-0\.(0[1-9]|[1-9]\d))$/;
   if (!castkaMaska.test(text)) {
@@ -115,9 +136,19 @@ function vygenerovatHlavicku({ prvniZaslani, overeni = false, datOdeslani = new 
 // povereni_vice_popl) se do výstupu vůbec nezahrnou, pokud nejsou relevantní
 // — spec výslovně zakazuje jejich uvedení s prázdnou/nulovou hodnotou, když
 // nejsou relevantní (kap. 3.3.2, poznámka **).
+// Povinné položky datové oblasti <Data> (XSD: use="required") — chybějící
+// hodnota se nesmí propadnout dál jako řetězec "undefined"/"null", který by
+// mohl (ne)shodou okolností vypadat jako platný text a projít dál až k XSD
+// chybě s nejasnou diagnózou. Kontrolujeme explicitně a jmenovitě.
+const POVINNA_POLE_TRZBY = ['id_jednotky', 'id_pokl', 'porad_cis', 'dat_trzby', 'celk_trzba'];
+
 function vygenerovatData(trzba, cfg) {
   if (!cfg || !cfg.eicPopl) {
     throw new EetFormatovaciChyba('Chybí povinná konfigurace eicPopl (EIČ poplatníka).');
+  }
+  const chybejici = POVINNA_POLE_TRZBY.filter((pole) => trzba[pole] === null || trzba[pole] === undefined || trzba[pole] === '');
+  if (chybejici.length > 0) {
+    throw new EetFormatovaciChyba(`Chybí povinné položky evidované tržby: ${chybejici.join(', ')}.`);
   }
   const data = {
     eic_popl: cfg.eicPopl,
@@ -130,7 +161,7 @@ function vygenerovatData(trzba, cfg) {
   if (cfg.eicPoverujiciho) {
     data.eic_poverujiciho = cfg.eicPoverujiciho;
   }
-  if (cfg.povereniViceAPopl) {
+  if (cfg.povereniVicePopl) {
     data.povereni_vice_popl = true;
   }
   if (trzba.urceno_cerp_zuct !== null && trzba.urceno_cerp_zuct !== undefined) {
@@ -184,6 +215,7 @@ function sestavitXmlTrzby(trzba, cfg, { prvniZaslani, overeni = false, datOdesla
 
 module.exports = {
   EetFormatovaciChyba,
+  POVINNA_POLE_TRZBY,
   MASKY,
   formatovatDatumCas,
   formatovatCastku,

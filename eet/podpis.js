@@ -38,15 +38,57 @@ function sestavitKeyInfoContent(bstId) {
   );
 }
 
+// Ověří, že privateKeyPem skutečně patří k certificatePem — bez tohohle by
+// šlo nechtěně podepsat obálku JINÝM klíčem, než jaký je uveden v jejím
+// BinarySecurityToken, a výsledná zpráva by při doručení finanční správě
+// (nebo v našem vlastním overitPodpisObalky) vždy spadla na neplatném
+// podpisu — chceme tuhle chybu konfigurace odhalit HNED, ne až při pokusu
+// o odeslání. Čistě matematická kontrola (podpis/ověření nad náhodnými
+// daty), nemá nic společného s XML ani se sítí.
+function overitShoduKlicACertifikatu(privateKeyPem, certificatePem) {
+  const testovaciData = crypto.randomBytes(32);
+  let podpis;
+  try {
+    podpis = crypto.sign('sha256', testovaciData, privateKeyPem);
+  } catch (e) {
+    throw new Error(`privateKeyPem se nepodařilo použít k podpisu (neplatný formát klíče?): ${e.message}`);
+  }
+  let verejnyKlic;
+  try {
+    verejnyKlic = new crypto.X509Certificate(certificatePem).publicKey;
+  } catch (e) {
+    throw new Error(`certificatePem se nepodařilo zpracovat jako X.509 certifikát: ${e.message}`);
+  }
+  const shoda = crypto.verify('sha256', testovaciData, verejnyKlic, podpis);
+  if (!shoda) {
+    throw new Error('privateKeyPem neodpovídá veřejnému klíči v certificatePem — podepsání by vytvořilo trvale neplatnou zprávu.');
+  }
+}
+
 // Podepíše NEPODEPSANOU SOAP obálku (ze soap-obalka.js) — podepisuje se jen
 // <soap:Body> (element s wsu:Id=bodyId), podpis se vloží do <wsse:Security>.
 // "privateKeyPem"/"certificatePem" dostává volající zvenčí (env proměnná,
 // soubor mimo repo, HSM...) — tento modul si je nikdy nenačítá sám z pevné
 // cesty v projektu, aby nehrozilo omylem je zapsat/commitnout.
-function podepsatObalku(nepodepsanaObalkaXml, { privateKeyPem, bstId = 'X509Token', bodyId = 'Body' }) {
+//
+// "certificatePem" MUSÍ být tentýž certifikát, který je už v obálce uložen
+// jako BinarySecurityToken (soap-obalka.js) — ověřujeme to na dvou úrovních:
+// (1) že BST s daným bstId v obálce vůbec existuje, (2) že privateKeyPem k
+// němu matematicky patří (overitShoduKlicACertifikatu výš). Bez téhle
+// kontroly by šlo omylem podepsat obálku klíčem, který nepatří k
+// certifikátu, jenž je v ní vložený — výsledek by vypadal jako platně
+// podepsaná zpráva, ale ověření (u finanční správy i u nás) by vždy selhalo.
+function podepsatObalku(nepodepsanaObalkaXml, { privateKeyPem, certificatePem, bstId = 'X509Token', bodyId = 'Body' }) {
   if (!privateKeyPem) {
     throw new Error('Chybí privateKeyPem — bez něj se nedá nic podepsat (a to je záměrně vyžadováno explicitně, ne implicitně z disku).');
   }
+  if (!certificatePem) {
+    throw new Error('Chybí certificatePem — bez něj nelze ověřit, že podepisujeme klíčem patřícím k certifikátu v obálce.');
+  }
+  if (!nepodepsanaObalkaXml.includes(`wsu:Id="${bstId}"`)) {
+    throw new Error(`Obálka neobsahuje BinarySecurityToken s wsu:Id="${bstId}" — podepsat bez něj by vytvořilo odkaz na neexistující element.`);
+  }
+  overitShoduKlicACertifikatu(privateKeyPem, certificatePem);
   const sig = new SignedXml({
     privateKey: privateKeyPem,
     signatureAlgorithm: ALG.podpis,
@@ -120,4 +162,4 @@ function vytvoritTestovaciKlic({ eic = 'CZ00000019' } = {}) {
   };
 }
 
-module.exports = { ALG, podepsatObalku, overitPodpisObalky, vytvoritTestovaciKlic };
+module.exports = { ALG, podepsatObalku, overitPodpisObalky, overitShoduKlicACertifikatu, vytvoritTestovaciKlic };

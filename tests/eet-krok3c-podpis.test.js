@@ -42,7 +42,7 @@ async function main() {
     assert.ok(certificatePem.includes('BEGIN CERTIFICATE'));
 
     const nepodepsana = sestavitNepodepsanouObalku(vzorovaTrzbaXml(), { certificatePem });
-    const podepsana = podepsatObalku(nepodepsana, { privateKeyPem });
+    const podepsana = podepsatObalku(nepodepsana, { privateKeyPem, certificatePem });
     assert.ok(podepsana.includes('<ds:Signature') || podepsana.includes('<Signature'), 'podepsaná obálka musí obsahovat element Signature');
     assert.ok(podepsana.includes('BinarySecurityToken'), 'podepsaná obálka musí obsahovat BinarySecurityToken s certifikátem');
 
@@ -68,7 +68,7 @@ async function main() {
   //    MUSÍ zneplatnit podpis — jinak by byl podpis k ničemu.
   {
     const nepodepsana = sestavitNepodepsanouObalku(vzorovaTrzbaXml(), { certificatePem });
-    const podepsana = podepsatObalku(nepodepsana, { privateKeyPem });
+    const podepsana = podepsatObalku(nepodepsana, { privateKeyPem, certificatePem });
     const pozmenena = podepsana.replace('celk_trzba="350.00"', 'celk_trzba="999999.00"');
     assert.notEqual(pozmenena, podepsana, 'test si musí být jistý, že řetězec skutečně změnil');
     const overeni = overitPodpisObalky(pozmenena, { certificatePem });
@@ -81,7 +81,7 @@ async function main() {
   {
     const jinyKlic = vytvoritTestovaciKlic({ eic: TESTOVACI_EIC.fyzickaOsoba });
     const nepodepsana = sestavitNepodepsanouObalku(vzorovaTrzbaXml(), { certificatePem });
-    const podepsana = podepsatObalku(nepodepsana, { privateKeyPem });
+    const podepsana = podepsatObalku(nepodepsana, { privateKeyPem, certificatePem });
     const overeni = overitPodpisObalky(podepsana, { certificatePem: jinyKlic.certificatePem });
     assert.equal(overeni.valid, false, 'ověření proti cizímu certifikátu musí selhat');
     console.log('OK — 4) ověření proti nesprávnému certifikátu selže');

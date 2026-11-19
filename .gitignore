@@ -1,3 +1,13 @@
 node_modules/
 .env
 .env.*
+
+# EET 2.0 (Krok 3d) - produkční certifikát/klíč sem NIKDY nepatří. Testovací
+# klíče se generují čerstvě do OS temp (eet/podpis.js: vytvoritTestovaciKlic)
+# a nikdy se nezapisují do projektu - tyto vzory jsou jen preventivní pojistka.
+*.p12
+*.pfx
+*.pem
+*.key
+*.crt
+eet_produkcni_certifikat*
