@@ -62,6 +62,40 @@ function overitPlatnostKotvy(kotvaPem) {
   return { ok: true, kotva };
 }
 
+// Rozebere crypto.X509Certificate .subject ("C=CZ\nCN=foo\nO=bar...") na
+// mapu polí — pro PŘESNÉ porovnání konkrétního pole (ne jen "obsahuje
+// podřetězec", co by šlo obelstít např. jménem organizace schovaným v
+// jiném poli nebo v CN jako součásti delšího textu).
+function rozebratSubjekt(subjekt) {
+  const mapa = {};
+  for (const radek of String(subjekt).split('\n')) {
+    const i = radek.indexOf('=');
+    if (i === -1) continue;
+    mapa[radek.slice(0, i).trim()] = radek.slice(i + 1).trim();
+  }
+  return mapa;
+}
+
+// Certifikát "vydaný důvěryhodnou CA" NESTAČÍ — I.CA Public CA je obecná
+// komerční autorita, vydává certifikáty mnoha různým zákazníkům, ne jen FS
+// (zadání, bod 6: "zabraň, aby systém automaticky důvěřoval LIBOVOLNÉMU
+// certifikátu vydanému stejnou CA"). Proto se navíc vyžaduje přesná shoda
+// konkrétních polí SUBJEKTU listu certifikátu s tím, co o skutečném
+// podpisovém certifikátu FS říká oficiální dokumentace (viz
+// eet_specifikace/MANIFEST.md, "EET_pristupove_provozni_informace_
+// produkce_v1_2.pdf", kap. 3.3).
+function certifikatOdpovidaOcekavanemuSubjektu(leafCert, ocekavanySubjekt) {
+  if (!ocekavanySubjekt) return { ano: true }; // volající si pinning nevyžádal (např. test s vlastní CA)
+  const skutecny = rozebratSubjekt(leafCert.subject);
+  const chybejici = [];
+  for (const [pole, hodnota] of Object.entries(ocekavanySubjekt)) {
+    if (skutecny[pole] !== hodnota) {
+      chybejici.push(`${pole}: čekáno "${hodnota}", dostal jsem "${skutecny[pole] ?? '(chybí)'}"`);
+    }
+  }
+  return chybejici.length === 0 ? { ano: true } : { ano: false, duvod: chybejici.join('; ') };
+}
+
 function vydanoDuveryhodnouKotvou(leafCert, kotvyPem) {
   for (const kotvaPem of kotvyPem) {
     const kontrola = overitPlatnostKotvy(kotvaPem);
@@ -78,10 +112,24 @@ function vydanoDuveryhodnouKotvou(leafCert, kotvyPem) {
   return { ano: false, kotvaSubjekt: null };
 }
 
+// Oficiálně zdokumentovaný subjekt podpisového certifikátu FS (zdroj:
+// EET_pristupove_provozni_informace_produkce_v1_2.pdf, kap. 3.3 "Podpisový
+// certifikát") — konkrétní pole, ne celý řetězec (pořadí/formát DN se může
+// mezi vydáními lišit, přesná pole ne). Volající (eet/odesilaci-sluzba.js)
+// ho musí výslovně předat jako "ocekavanySubjekt" — tahle konstanta tu je
+// jen jako zdokumentovaná, ověřitelná hodnota, ne jako tichý výchozí stav.
+const OCEKAVANY_SUBJEKT_FS_PRODUKCE = Object.freeze({
+  O: 'Generální finanční ředitelství',
+  CN: 'Společné technické zařízení správce daně EET'
+});
+
 // Vrací { duveryhodny: boolean, poznamka: string, certifikatSubjekt: string|null }.
 // "duveryhodny: false" NENÍ totéž jako "síťová chyba" — je to jasný,
 // zaznamenatelný závěr "tuhle odpověď nelze ověřit jako skutečně od FS".
-function overitPodpisAKotvuOdpovedi(soapXmlOdpovedi, { duveryhodneKotvyPem } = {}) {
+// "ocekavanySubjekt" (nepovinné, { pole: hodnota }) — pokud dodáno, kotva
+// SAMA O SOBĚ nestačí (viz certifikatOdpovidaOcekavanemuSubjektu výš);
+// certifikát musí NAVÍC patřit přesně očekávanému subjektu.
+function overitPodpisAKotvuOdpovedi(soapXmlOdpovedi, { duveryhodneKotvyPem, ocekavanySubjekt } = {}) {
   if (!Array.isArray(duveryhodneKotvyPem) || duveryhodneKotvyPem.length === 0) {
     return { duveryhodny: false, poznamka: 'Nebyla dodána žádná důvěryhodná kotva (duveryhodneKotvyPem) — bez ní nelze podpis odpovědi ověřit.', certifikatSubjekt: null };
   }
@@ -117,7 +165,16 @@ function overitPodpisAKotvuOdpovedi(soapXmlOdpovedi, { duveryhodneKotvyPem } = {
     return { duveryhodny: false, poznamka: `Podpis je matematicky platný, ale certifikát ("${leaf.subject}") nevede k žádné důvěryhodné kotvě.`, certifikatSubjekt: leaf.subject };
   }
 
-  return { duveryhodny: true, poznamka: `Podpis platný, certifikát vydán důvěryhodnou kotvou "${kotva.kotvaSubjekt}".`, certifikatSubjekt: leaf.subject };
+  const subjektOk = certifikatOdpovidaOcekavanemuSubjektu(leaf, ocekavanySubjekt);
+  if (!subjektOk.ano) {
+    // Přesně situace ze zadání, bod 6: certifikát JE vydaný správnou (a
+    // důvěryhodnou) CA, ale NENÍ to ten konkrétní certifikát FS — např.
+    // jiný zákazník téže komerční CA. Musí se odmítnout stejně jako
+    // nedůvěryhodný podpis.
+    return { duveryhodny: false, poznamka: `Certifikát je vydán důvěryhodnou kotvou, ale NEPATŘÍ očekávanému subjektu (Finanční správě): ${subjektOk.duvod}`, certifikatSubjekt: leaf.subject };
+  }
+
+  return { duveryhodny: true, poznamka: `Podpis platný, certifikát vydán důvěryhodnou kotvou "${kotva.kotvaSubjekt}"${ocekavanySubjekt ? ' a odpovídá očekávanému subjektu FS' : ''}.`, certifikatSubjekt: leaf.subject };
 }
 
-module.exports = { overitPodpisAKotvuOdpovedi, overitPlatnostKotvy };
+module.exports = { overitPodpisAKotvuOdpovedi, overitPlatnostKotvy, OCEKAVANY_SUBJEKT_FS_PRODUKCE };

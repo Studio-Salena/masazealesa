@@ -87,7 +87,7 @@ async function sestavitZpravu(db, trzbaRow, { eicPopl, certificatePem, privateKe
 // "potvrzeno" (viz eet/overeni-odpovedi-fs.js) — bez platného podpisu proti
 // důvěryhodné kotvě se odpověď vždy považuje za nejistou, bez ohledu na to,
 // co sama tvrdí.
-function klasifikovatOdpoved({ telo, duveryhodneKotvyPem }) {
+function klasifikovatOdpoved({ telo, duveryhodneKotvyPem, ocekavanySubjekt }) {
   let odpovedParsovana;
   try {
     odpovedParsovana = rozebratOdpoved(telo);
@@ -98,7 +98,7 @@ function klasifikovatOdpoved({ telo, duveryhodneKotvyPem }) {
     throw e;
   }
 
-  const overeniPodpisu = overitPodpisAKotvuOdpovedi(telo, { duveryhodneKotvyPem });
+  const overeniPodpisu = overitPodpisAKotvuOdpovedi(telo, { duveryhodneKotvyPem, ocekavanySubjekt });
 
   if (!overeniPodpisu.duveryhodny) {
     // Bez důvěryhodného podpisu NEVÍME, co se skutečně stalo — ani kladná,
@@ -134,7 +134,7 @@ function klasifikovatOdpoved({ telo, duveryhodneKotvyPem }) {
 // jednoho volání — přesně JEDEN HTTP pokus, výsledek se vždy zapíše (i
 // timeout/síťová chyba — jako "nejisté", NIKDY tiše zahozeno).
 async function zpracovatZamcenouTrzbu(db, trzbaRow, opts) {
-  const { rezim, mockUrl, timeoutMs = 15000, certificatePem, privateKeyPem, eicPopl, duveryhodneKotvyPem = [], maxPokusu = 10 } = opts;
+  const { rezim, mockUrl, timeoutMs = 15000, certificatePem, privateKeyPem, eicPopl, duveryhodneKotvyPem = [], ocekavanySubjekt, maxPokusu = 10 } = opts;
   if (rezim !== REZIM.LOCAL_MOCK) {
     // Krok 3d je výslovně omezen na lokální TEST/mock (zadání, bod 10) —
     // tahle funkce REZIM.OFFICIAL_PLAYGROUND vůbec nepřijme, aby ji nešlo
@@ -194,7 +194,7 @@ async function zpracovatZamcenouTrzbu(db, trzbaRow, opts) {
   try {
     const odpoved = await odeslatZpravu(podepsana, { rezim, mockUrl, timeoutMs });
     httpStatus = odpoved.httpStatus;
-    klasifikace = klasifikovatOdpoved({ telo: odpoved.telo, duveryhodneKotvyPem });
+    klasifikace = klasifikovatOdpoved({ telo: odpoved.telo, duveryhodneKotvyPem, ocekavanySubjekt });
   } catch (e) {
     if (e instanceof EetTimeout || e instanceof EetSitovaChyba) {
       // Timeout/síťová chyba = VÝSLOVNĚ nejistý výsledek (mohlo se doručit,

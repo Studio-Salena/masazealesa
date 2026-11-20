@@ -19,7 +19,10 @@ function opensslCas(d) {
   return d.toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z').replace('T', '');
 }
 
-function vytvoritTestovaciCaARetezec({ cnRoot = 'TEST Root CA (NEdůvěryhodná)', cnLeaf = 'TEST FS Response Signer', leafNotAfter = null, leafNotBefore = null } = {}) {
+// "leafOrganizace" (nepovinné) — nastaví i pole O= na leaf certifikátu, pro
+// testování pinningu na konkrétní subjekt (eet/overeni-odpovedi-fs.js:
+// certifikatOdpovidaOcekavanemuSubjektu), ne jen "vydáno důvěryhodnou CA".
+function vytvoritTestovaciCaARetezec({ cnRoot = 'TEST Root CA (NEdůvěryhodná)', cnLeaf = 'TEST FS Response Signer', leafOrganizace = null, leafNotAfter = null, leafNotBefore = null } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'eet-test-ca-'));
   const rootKey = path.join(dir, 'root-key.pem');
   const rootCert = path.join(dir, 'root-cert.pem');
@@ -31,9 +34,10 @@ function vytvoritTestovaciCaARetezec({ cnRoot = 'TEST Root CA (NEdůvěryhodná)
       'req', '-x509', '-newkey', 'rsa:2048', '-keyout', rootKey, '-out', rootCert,
       '-days', '1', '-nodes', '-subj', `/CN=${cnRoot}`
     ], { stdio: 'pipe' });
+    const leafSubj = leafOrganizace ? `/O=${leafOrganizace}/CN=${cnLeaf}` : `/CN=${cnLeaf}`;
     execFileSync('openssl', [
       'req', '-newkey', 'rsa:2048', '-keyout', leafKey, '-out', leafCsr,
-      '-nodes', '-subj', `/CN=${cnLeaf}`
+      '-nodes', '-subj', leafSubj
     ], { stdio: 'pipe' });
     const leafArgs = ['x509', '-req', '-in', leafCsr, '-CA', rootCert, '-CAkey', rootKey, '-CAcreateserial', '-out', leafCert, '-sha256'];
     if (leafNotAfter) {

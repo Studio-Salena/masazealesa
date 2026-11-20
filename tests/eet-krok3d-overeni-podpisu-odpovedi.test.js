@@ -134,6 +134,60 @@ async function main() {
     }
   }
 
+  // 9) Zadání (přípravy nasazení), bod 6: certifikát vydaný SPRÁVNOU
+  //    (důvěryhodnou) CA, ale NÁLEŽÍCÍ JINÉMU SUBJEKTU (jako by šlo o
+  //    "libovolný jiný zákazník téže komerční CA") — NESMÍ projít, pokud
+  //    volající vyžaduje konkrétní subjekt (ocekavanySubjekt). Systém se
+  //    nesmí spoléhat jen na "vydáno důvěryhodnou CA". (Záměrně jen ASCII
+  //    v -subj — OpenSSL CLI na Windows/Git-Bash neumí spolehlivě předat
+  //    českou diakritiku v argumentu; skutečný text FS subjektu se ověřuje
+  //    samostatně v testu 11 níž, čistě v JS, bez OpenSSL CLI.)
+  {
+    const spravnySubjekt = { O: 'Spravna Firma s.r.o.', CN: 'Spravny Certifikat' };
+    const caJinySubjekt = vytvoritTestovaciCaARetezec({ cnRoot: 'TEST Root CA — jiny subjekt', cnLeaf: 'Jina Firma s.r.o.', leafOrganizace: 'Jina Firma s.r.o.' });
+    const mock = await spustitMockEetServer({ podepisovatOdpovedi: { certificatePem: caJinySubjekt.leafCertificatePem, privateKeyPem: caJinySubjekt.leafPrivateKeyPem } });
+    try {
+      const odpovedXml = await odeslatAZiskatOdpoved(mock);
+      const vysledek = overitPodpisAKotvuOdpovedi(odpovedXml, { duveryhodneKotvyPem: [caJinySubjekt.kotvaPem], ocekavanySubjekt: spravnySubjekt });
+      assert.equal(vysledek.duveryhodny, false, 'certifikát jiného subjektu téže (jinak důvěryhodné) CA nesmí projít, pokud je vyžadován konkrétní subjekt');
+      assert.ok(vysledek.poznamka.includes('subjekt'), vysledek.poznamka);
+      console.log('OK 9 — certifikát vydaný správnou CA, ale patřící JINÉMU subjektu, je odmítnut (žádná "slepá důvěra celé CA")');
+    } finally {
+      await mock.zastavit();
+    }
+  }
+
+  // 10) Stejný scénář, ale certifikát SPRÁVNÉHO subjektu → musí projít.
+  {
+    const spravnySubjekt = { O: 'Spravna Firma s.r.o.', CN: 'Spravny Certifikat' };
+    const caSpravnySubjekt = vytvoritTestovaciCaARetezec({
+      cnRoot: 'TEST Root CA — spravny subjekt', cnLeaf: 'Spravny Certifikat', leafOrganizace: 'Spravna Firma s.r.o.'
+    });
+    const mock = await spustitMockEetServer({ podepisovatOdpovedi: { certificatePem: caSpravnySubjekt.leafCertificatePem, privateKeyPem: caSpravnySubjekt.leafPrivateKeyPem } });
+    try {
+      const odpovedXml = await odeslatAZiskatOdpoved(mock);
+      const vysledek = overitPodpisAKotvuOdpovedi(odpovedXml, { duveryhodneKotvyPem: [caSpravnySubjekt.kotvaPem], ocekavanySubjekt: spravnySubjekt });
+      assert.equal(vysledek.duveryhodny, true, `certifikát se správným subjektem měl projít: ${vysledek.poznamka}`);
+      console.log('OK 10 — certifikát se správným (očekávaným) subjektem je přijat');
+    } finally {
+      await mock.zastavit();
+    }
+  }
+
+  // 11) Skutečný text očekávaného subjektu FS (s českou diakritikou), přesně
+  //     jak ho uvádí oficiální PDF (EET_pristupove_provozni_informace_
+  //     produkce_v1_2.pdf, kap. 3.3) — ověřeno čistě v JS porovnáním řetězců
+  //     (žádné OpenSSL CLI argv, které diakritiku na tomto Windows/Git-Bash
+  //     prostředí spolehlivě nepřenese, viz testy 9-10 s ASCII náhražkami).
+  {
+    const { OCEKAVANY_SUBJEKT_FS_PRODUKCE } = require('../eet/overeni-odpovedi-fs');
+    assert.deepEqual(OCEKAVANY_SUBJEKT_FS_PRODUKCE, {
+      O: 'Generální finanční ředitelství',
+      CN: 'Společné technické zařízení správce daně EET'
+    });
+    console.log('OK 11 — OCEKAVANY_SUBJEKT_FS_PRODUKCE obsahuje přesný text z oficiální dokumentace');
+  }
+
   console.log('\n✅ VŠECHNY TESTY OVĚŘENÍ PODPISU ODPOVĚDI PROŠLY');
 }
 
