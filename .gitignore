@@ -16,3 +16,14 @@ eet_produkcni_certifikat*
 # testy (tests/eet-krok3c-interoperabilita-fs.test.js) — záměrně se commitují.
 !eet_specifikace/ca_eet-root_cert-playground.crt
 !eet_specifikace/ca_eet-sub_cert-playground.crt
+# Totéž pro produkční prostředí (Krok 3d, příprava nasazení) — opět jen
+# VEŘEJNÉ certifikáty, stažené z eet.gov.cz a ica.cz, žádný soukromý klíč.
+# Dvě ROZDÍLNÉ, NEZAMĚNITELNÉ hierarchie (viz eet_specifikace/MANIFEST.md):
+#   ca_eet-root/sub_prod.pem      — CA, která vydává NÁŠ pokladní certifikát
+#                                   (čím podepisujeme VLASTNÍ odchozí zprávy)
+#   ca_ica-*.pem                  — CA, kterou FS podepisuje SVOJI odpověď
+#                                   (čím ověřujeme PŘÍCHOZÍ potvrzení/chybu)
+!eet_specifikace/ca_eet-root_prod.pem
+!eet_specifikace/ca_eet-sub_prod.pem
+!eet_specifikace/ca_ica-root-ca-rsa-05-2022.pem
+!eet_specifikace/ca_ica-public-ca-rsa-06-2022.pem

@@ -61,6 +61,31 @@ const PODKLADY = {
   vzorovaZpravaCZ8551015704: {
     soubor: path.join(ADRESAR, 'CZ8551015704.eet.v4.req.xml'),
     sha256: 'a61b6ac6cc50b908d68550aa4981b91df0f5d3cbfe564b5d60b545ef70a06bd6'
+  },
+  // Krok 3d, příprava nasazení — CA, která vydává NÁŠ produkční pokladní
+  // certifikát (čím bychom podepisovali VLASTNÍ odchozí zprávy). NENÍ totéž
+  // jako "icaRoot"/"icaPublicCa" níž — viz MANIFEST.md.
+  eetCaRootProd: {
+    soubor: path.join(ADRESAR, 'ca_eet-root_prod.pem'),
+    sha256: '462afa5e88c894ec414690baef1440419478b31c8524d5de5237a20ce305ec8b'
+  },
+  eetCaSubProd: {
+    soubor: path.join(ADRESAR, 'ca_eet-sub_prod.pem'),
+    sha256: 'fd0ae27da503f70c99b85affe3c85640cfbc8569b39aef15252c415c30215800'
+  },
+  // CA, kterou Finanční správa podepisuje SVOJI odpověď (potvrzení/chybu) —
+  // čím ověřujeme PŘÍCHOZÍ zprávu (eet/overeni-odpovedi-fs.js). Zdroj:
+  // EET_pristupove_provozni_informace_Produk-4.pdf, kap. 3.3 "Podpisový
+  // certifikát" + https://www.ica.cz/korenove-certifikaty (ne eet.gov.cz —
+  // jiná, samostatná certifikační autorita, NIKDY nezaměnit s eetCaRootProd/
+  // eetCaSubProd výš).
+  icaRootCa: {
+    soubor: path.join(ADRESAR, 'ca_ica-root-ca-rsa-05-2022.pem'),
+    sha256: 'f72dc3232df2c9598f60c1bbc82f4bcc5acc80af73a60ed6eb3f6bd67ab473e2'
+  },
+  icaPublicCa: {
+    soubor: path.join(ADRESAR, 'ca_ica-public-ca-rsa-06-2022.pem'),
+    sha256: 'db03fb10906d8cc357ef2d68f2f130d6a5381de3ca9a8cbf45216350ca695116'
   }
 };
 

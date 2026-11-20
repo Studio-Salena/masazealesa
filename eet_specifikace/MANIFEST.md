@@ -21,6 +21,39 @@ přímo z `EETXMLSchema.xsd`, nebo z textu `EET_popis_rozhrani_v1.2.pdf` /
 | `CZ683555118.eet.v4.req.xml` | — | — (totéž, EIČ CZ683555118) | https://eet.gov.cz/assets/cs/cmsmedia/pro-vyvojare/CZ683555118.eet.v4.req.xml | `a77d28641603ffd85a3bd9eff580f554e5e822741cd0594d84b48b52e7874b75` |
 | `CZ8551015704.eet.v4.req.xml` | — | — (totéž, EIČ CZ8551015704) | https://eet.gov.cz/assets/cs/cmsmedia/pro-vyvojare/CZ8551015704.eet.v4.req.xml | `a61b6ac6cc50b908d68550aa4981b91df0f5d3cbfe564b5d60b545ef70a06bd6` |
 
+**Krok 3d, příprava nasazení (doplněno 20.11.2026)** — DVĚ ROZDÍLNÉ, NIKDY
+NEZAMĚŇOVANÉ certifikační hierarchie pro produkční prostředí:
+
+1) CA, která vydává **NÁŠ** produkční pokladní certifikát (čím bychom
+   podepisovali VLASTNÍ odchozí zprávy) — produkční protějšek
+   `ca_eet-root/sub_cert-playground.crt` výše:
+
+| Soubor | Subjekt (CN) | Zdroj (URL) | SHA-256 |
+|---|---|---|---|
+| `ca_eet-root_prod.pem` | EETv2 NCA Root CA RSA 09/2026 | https://eet.gov.cz/assets/cs/cmsmedia/pro-vyvojare/ca_eet-root_prod.pem | `462afa5e88c894ec414690baef1440419478b31c8524d5de5237a20ce305ec8b` |
+| `ca_eet-sub_prod.pem` | EETv2 NCA SubCA RSA 10/2026 | https://eet.gov.cz/assets/cs/cmsmedia/pro-vyvojare/ca_eet-sub_prod.pem | `fd0ae27da503f70c99b85affe3c85640cfbc8569b39aef15252c415c30215800` |
+
+2) CA, kterou **Finanční správa** podepisuje SVOJI odpověď (potvrzení/chybu)
+   — čím ověřujeme PŘÍCHOZÍ zprávu (`eet/overeni-odpovedi-fs.js`). Zdroj:
+   `EET_pristupove_provozni_informace_produkce_v1_2.pdf`, kap. 3.3 "Podpisový
+   certifikát" — ten PDF výslovně uvádí, že potvrzovací datové zprávy podepisuje
+   certifikát vydaný `CN=I.CA Public CA/RSA 06/2022` (vydavatel: Generální
+   finanční ředitelství / "Společné technické zařízení správce daně EET"), a
+   odkazuje na **https://www.ica.cz/korenove-certifikaty** — JINOU, samostatnou
+   certifikační autoritu (První certifikační autorita, a.s.), ne eet.gov.cz:
+
+| Soubor | Subjekt (CN) | Zdroj (URL) | SHA-256 |
+|---|---|---|---|
+| `ca_ica-root-ca-rsa-05-2022.pem` | I.CA Root CA/RSA 05/2022 (sebepodepsaný, platnost do 2047) | https://www.ica.cz/sites/default/files/download/2025/rca22_rsa.pem | `f72dc3232df2c9598f60c1bbc82f4bcc5acc80af73a60ed6eb3f6bd67ab473e2` |
+| `ca_ica-public-ca-rsa-06-2022.pem` | I.CA Public CA/RSA 06/2022 (vydán rootem výš, platnost do 2032) | https://www.ica.cz/sites/default/files/download/2025/pca22_rsa.pem | `db03fb10906d8cc357ef2d68f2f130d6a5381de3ca9a8cbf45216350ca695116` |
+
+Celý řetězec `ca_ica-root-ca-rsa-05-2022.pem → ca_ica-public-ca-rsa-06-2022.pem`
+kryptograficky ověřen (`openssl verify -CAfile root sub` → `OK`) 20.11.2026.
+Pro ověřování odpovědí FS se jako `duveryhodneKotvyPem` (viz
+`eet/overeni-odpovedi-fs.js`) používá `ca_ica-public-ca-rsa-06-2022.pem` (přímý
+vydavatel podpisového certifikátu FS) — root slouží jen k jednorázovému
+ověření důvěryhodnosti TÉTO sub CA, ne k běžnému ověřování za provozu.
+
 Ověření integrity: `sha256sum *.xsd *.wsdl *.pdf *.crt *.xml` v tomto
 adresáři musí dát přesně hodnoty výše. Při jakékoli budoucí aktualizaci
 těchto souborů (nová verze rozhraní) je nutné tuto tabulku i
