@@ -7,6 +7,9 @@
 const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+const PDFDocument = require('pdfkit');
 const { Pool, types } = require('pg');
 
 const API_URL = process.env.API_URL || 'https://masazealesa.onrender.com';
@@ -885,14 +888,21 @@ function casNaMinuty(cas) { const [h, m] = cas.split(':').map(Number); return h 
 function minutyNaCas(min) { const h = Math.floor(min / 60), m = min % 60; return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0'); }
 
 // Pošle e-mail přes Resend (RESEND_API_KEY v env). Nikdy nevyhazuje výjimku, jen vrátí true/false.
-async function odeslatEmail(to, subject, html) {
+// "prilohy" (nepovinné) — pole { filename, content: Buffer } pro PDF apod.
+// (viz vygenerovatAOdeslatDokladUhrady) — Resend čeká base64 string v poli
+// "content", převod je tu, ne u volajícího.
+async function odeslatEmail(to, subject, html, prilohy = null) {
   if (!process.env.RESEND_API_KEY || !to) return false;
   const from = process.env.RESEND_FROM || 'Masáže Alesa <onboarding@resend.dev>';
   try {
+    const telo = { from, to, subject, html };
+    if (prilohy && prilohy.length) {
+      telo.attachments = prilohy.map(p => ({ filename: p.filename, content: p.content.toString('base64') }));
+    }
     const resp = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from, to, subject, html })
+      body: JSON.stringify(telo)
     });
     return resp.ok;
   } catch {
@@ -1745,7 +1755,21 @@ app.get('/api/admin/prehled', async (req, res) => {
 // -- Rezervace --
 app.get('/api/admin/rezervace', async (req, res) => {
   try {
-    const { rows } = await db.query('SELECT * FROM rezervace ORDER BY datum DESC, cas_od DESC');
+    // LEFT JOIN cenik jen kvůli obecny_nazev_masaze (Doklad o úhradě, viz
+    // obecnyNazevSluzby výš) — admin.html tím může rovnou předvyplnit návrh
+    // názvu služby na dokladu bez dalšího volání. Žádný stávající sloupec se
+    // tím nemění, jen přibývá nový na konci; cenik_skupina/cenik_varianta se
+    // po výpočtu zahazují, ať se odpověď zbytečně nenafukuje.
+    const { rows } = await db.query(
+      `SELECT rezervace.*, cenik.skupina AS cenik_skupina, cenik.varianta AS cenik_varianta
+       FROM rezervace LEFT JOIN cenik ON cenik.id = rezervace.cenik_id
+       ORDER BY rezervace.datum DESC, rezervace.cas_od DESC`
+    );
+    rows.forEach(r => {
+      r.obecny_nazev_masaze = obecnyNazevSluzby(r.cenik_skupina, r.cenik_varianta) || r.masaz;
+      delete r.cenik_skupina;
+      delete r.cenik_varianta;
+    });
     res.json(rows);
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
@@ -2314,6 +2338,207 @@ app.patch('/api/admin/rezervace/:id/platba', async (req, res) => {
         castka: castkaNum, zpusobPlatby: zpusob_platby
       });
     }
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch {}
+    res.status(500).json({ chyba: e.message });
+  } finally {
+    client.release();
+  }
+});
+
+// ── Doklad o úhradě masáže (pro proplacení zaměstnavatelem/pojišťovnou) —
+// vzniká k JEDNÉ konkrétní platbě (ne k celé rezervaci, stejný princip jako
+// e-mailová účtenka — viz odeslatUctenkuEmailem), číslovaný řadou podle roku
+// (2026001, 2026002...). Opakované vystavení KE STEJNÉ platbě (platba_id je
+// unique, viz migrace_doklady_uhrady.sql) nepřiděluje nové číslo — jen
+// přepíše email_adresat/nazev_sluzby a pošle znovu stejný doklad.
+const FIRMA_UDAJE = {
+  jmeno: 'Alena Hasalová - masáže Alesa',
+  sidlo: 'Včelín 1211, Hulín 768 24',
+  ico: '03237885',
+  evidence: 'Živnostenský rejstřík, Městský úřad Kroměříž',
+  web: 'www.masazealesa.cz'
+};
+const ZPUSOB_PLATBY_LABEL_DOKLAD = { hotove: 'hotově', kartou: 'kartou', online: 'online', qr: 'QR kódem', prevodem: 'převodem', poukaz: 'poukazem' };
+
+// Marketingové názvy variant v ceníku (např. "Medové snění", "Chvilka pro
+// mě") NESMÍ být na dokladu pro zaměstnavatele/pojišťovnu — potřebují obecný
+// typ masáže (rozhodnuto s uživatelkou 2026-11-23). Admin může návrh před
+// odesláním ručně přepsat (viz nazev_sluzby v těle požadavku níž), tahle
+// funkce je jen výchozí odhad podle skupiny/varianty v ceníku.
+function obecnyNazevSluzby(skupina, varianta) {
+  if (!skupina) return null;
+  if (skupina.startsWith('Hřejivé pohlazení')) return 'Masáž lávovými kameny';
+  if (skupina.startsWith('Rekondiční')) return 'Rekondiční masáž';
+  if (skupina.startsWith('Láskyplná péče')) return 'Masáž pro těhotné';
+  if (skupina === 'Speciální rituály') {
+    if (varianta && varianta.includes('Medov')) return 'Medová masáž';
+    if (varianta && varianta.includes('Konopn')) return 'Konopná masáž';
+    return varianta || skupina;
+  }
+  if (skupina === 'Doplňková péče') return varianta || 'Kineziotaping';
+  return skupina;
+}
+
+// Vykreslí jeden řádek tabulky (službu, nebo "Celkem uhrazeno") na dvou
+// sloupcích se společným spodním orámováním — ručně počítané souřadnice,
+// aby sloupce nezávisely na automatickém "cursoru" pdfkitu (ten by druhý
+// sloupec jinak posouval podle výšky prvního).
+function radekTabulky(doc, y, leva, prava, { tucne = false, vyska = 22 } = {}) {
+  doc.font(tucne ? 'TextTucne' : 'Text').fontSize(10);
+  doc.text(leva, 55, y + 6, { width: 350 });
+  doc.text(prava, 410, y + 6, { width: 135, align: 'right' });
+  doc.moveTo(50, y + vyska).lineTo(545, y + vyska).strokeColor('#ddd').lineWidth(1).stroke();
+  doc.strokeColor('#000');
+}
+
+function vygenerovatDokladPdfBuffer(d) {
+  return new Promise((resolve, reject) => {
+    try {
+      const doc = new PDFDocument({ size: 'A4', margin: 50 });
+      const casti = [];
+      doc.on('data', c => casti.push(c));
+      doc.on('end', () => resolve(Buffer.concat(casti)));
+      doc.on('error', reject);
+
+      doc.registerFont('Text', path.join(__dirname, 'assets/fonts/DejaVuSans.ttf'));
+      doc.registerFont('TextTucne', path.join(__dirname, 'assets/fonts/DejaVuSans-Bold.ttf'));
+
+      doc.font('TextTucne').fontSize(20).text('Doklad o úhradě masáže');
+      doc.font('Text').fontSize(10).fillColor('#666').text(`Číslo dokladu ${d.cislo}`);
+      doc.fillColor('#000').moveDown(1.2);
+
+      doc.font('TextTucne').fontSize(11).text('Dodavatel');
+      doc.font('Text').fontSize(10)
+        .text(FIRMA_UDAJE.jmeno)
+        .text(FIRMA_UDAJE.sidlo)
+        .text(`IČO ${FIRMA_UDAJE.ico}`)
+        .text(FIRMA_UDAJE.evidence)
+        .text(FIRMA_UDAJE.web);
+      doc.moveDown(0.8);
+
+      doc.font('TextTucne').fontSize(11).text('Zákaznice');
+      doc.font('Text').fontSize(10).text(d.jmenoZakaznice);
+      doc.moveDown(0.8);
+
+      doc.font('Text').fontSize(10)
+        .text(`Datum vystavení ${formatDatumCz(d.datumVystaveni)}`)
+        .text(`Datum poskytnutí masáže ${d.datumPoskytnuti ? formatDatumCz(d.datumPoskytnuti) : '—'}`)
+        .text(`Datum úhrady ${formatDatumCz(d.datumUhrady)}`);
+      doc.moveDown(1);
+
+      const popisSluzby = d.nazevSluzby + (d.delkaMin ? `, ${d.delkaMin} min` : '');
+      const castkaText = d.castka.toLocaleString('cs-CZ') + ' Kč';
+      let y = doc.y;
+      doc.rect(50, y, 495, 22).fill('#f0e6d6');
+      doc.fillColor('#000');
+      radekTabulky(doc, y, 'Poskytnutá služba', 'Částka', { tucne: true });
+      y += 22;
+      radekTabulky(doc, y, popisSluzby, castkaText);
+      y += 22;
+      doc.rect(50, y, 495, 22).fill('#f0e6d6');
+      doc.fillColor('#000');
+      radekTabulky(doc, y, 'Celkem uhrazeno', castkaText, { tucne: true });
+      y += 22;
+      doc.y = y + 16;
+
+      doc.font('Text').fontSize(10).text(`Způsob úhrady ${ZPUSOB_PLATBY_LABEL_DOKLAD[d.zpusobPlatby] || d.zpusobPlatby}`);
+      doc.moveDown(0.8);
+      doc.text('Potvrzuji přijetí úhrady za výše uvedenou službu.');
+      doc.moveDown(1.5);
+
+      const ySignatury = doc.y;
+      doc.text(`Vystavila ${FIRMA_UDAJE.jmeno.split(' - ')[0]}`, 50, ySignatury);
+      const cestaPodpis = path.join(__dirname, 'assets/podpis.png');
+      doc.text('Podpis', 400, ySignatury);
+      if (fs.existsSync(cestaPodpis)) {
+        doc.image(cestaPodpis, 400, ySignatury + 14, { height: 36 });
+      } else {
+        doc.moveTo(400, ySignatury + 36).lineTo(545, ySignatury + 36).strokeColor('#999').stroke();
+      }
+
+      doc.end();
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
+// Vystaví (nebo znovu odešle) doklad o úhradě k dané platbě a pošle ho
+// e-mailem jako PDF přílohu. Číslo dokladu se SKUTEČNĚ přiděluje až tady
+// (ne při náhledu) — viz unique(platba_id) v migraci, co zaručuje jedno
+// číslo na platbu navždy.
+app.post('/api/admin/platby/:platbaId/doklad', async (req, res) => {
+  const emailCisty = String((req.body && req.body.email) || '').trim();
+  if (!emailCisty || !emailCisty.includes('@')) {
+    return res.status(400).json({ chyba: 'Zadejte prosím platný e-mail.' });
+  }
+  const nazevSluzbyVstup = req.body && req.body.nazev_sluzby ? String(req.body.nazev_sluzby).trim() : '';
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: [platba] } = await client.query('SELECT * FROM platby WHERE id = $1 FOR UPDATE', [req.params.platbaId]);
+    if (!platba) { await client.query('ROLLBACK'); return res.status(404).json({ chyba: 'Platba nebyla nalezena.' }); }
+    if (platba.typ !== 'platba' || Number(platba.castka) <= 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ chyba: 'Doklad o úhradě lze vystavit jen k přijaté platbě, ne k vratce.' });
+    }
+    const { rows: [r] } = await client.query(
+      `SELECT rezervace.*, cenik.skupina AS cenik_skupina, cenik.varianta AS cenik_varianta, cenik.delka_min AS cenik_delka_min
+       FROM rezervace LEFT JOIN cenik ON cenik.id = rezervace.cenik_id
+       WHERE rezervace.id = $1`,
+      [platba.rezervace_id]
+    );
+    if (!r) { await client.query('ROLLBACK'); return res.status(404).json({ chyba: 'Rezervace k této platbě nebyla nalezena.' }); }
+
+    const nazevSluzbyFinal = nazevSluzbyVstup || obecnyNazevSluzby(r.cenik_skupina, r.cenik_varianta) || r.masaz;
+    const castkaAbs = Math.abs(Number(platba.castka));
+    const datumUhrady = new Date(platba.vytvoreno).toISOString().slice(0, 10);
+
+    const { rows: [existujici] } = await client.query('SELECT * FROM doklady_uhrady WHERE platba_id = $1', [platba.id]);
+    let cislo;
+    if (existujici) {
+      cislo = existujici.cislo;
+      await client.query(
+        `UPDATE doklady_uhrady SET email_adresat=$1, nazev_sluzby=$2, aktualizovano=now() WHERE id=$3`,
+        [emailCisty, nazevSluzbyFinal, existujici.id]
+      );
+    } else {
+      const rok = new Date().getFullYear();
+      const { rows: [poradiRadek] } = await client.query(
+        'SELECT COALESCE(MAX(poradi), 0) + 1 AS dalsi FROM doklady_uhrady WHERE rok = $1', [rok]
+      );
+      const poradi = poradiRadek.dalsi;
+      cislo = `${rok}${String(poradi).padStart(3, '0')}`;
+      await client.query(
+        `INSERT INTO doklady_uhrady
+          (cislo, rok, poradi, platba_id, rezervace_id, klientka_id, jmeno_zakaznice, nazev_sluzby, delka_min, castka, zpusob_platby, datum_poskytnuti, datum_uhrady, email_adresat)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+        [cislo, rok, poradi, platba.id, r.id, r.klientka_id, r.jmeno, nazevSluzbyFinal, r.cenik_delka_min || null, castkaAbs, platba.zpusob_platby, r.datum || null, datumUhrady, emailCisty]
+      );
+    }
+    await client.query('COMMIT');
+
+    const pdfBuffer = await vygenerovatDokladPdfBuffer({
+      cislo,
+      jmenoZakaznice: r.jmeno,
+      nazevSluzby: nazevSluzbyFinal,
+      delkaMin: r.cenik_delka_min,
+      castka: castkaAbs,
+      zpusobPlatby: platba.zpusob_platby,
+      datumVystaveni: new Date().toISOString().slice(0, 10),
+      datumPoskytnuti: r.datum,
+      datumUhrady
+    });
+
+    const odeslano = await odeslatEmail(
+      emailCisty,
+      `Doklad o úhradě č. ${cislo} — Masáže Alesa`,
+      `<p>Dobrý den,</p><p>v příloze zasílám doklad o úhradě za masáž, pro případné proplacení zaměstnavatelem nebo pojišťovnou.</p><p>Děkuji,<br>Alena Hasalová — Masáže Alesa</p>`,
+      [{ filename: `Doklad-o-uhrade-${cislo}.pdf`, content: pdfBuffer }]
+    );
+
+    res.json({ ok: true, cislo, poslanoNa: emailCisty, emailOdeslan: odeslano });
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch {}
     res.status(500).json({ chyba: e.message });

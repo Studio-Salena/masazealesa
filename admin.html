@@ -1266,6 +1266,26 @@ tr:hover td{background:var(--cream)}
   </div>
 </div>
 
+<!-- MODAL: Odeslat doklad o úhradě (pro zaměstnavatele/pojišťovnu) -->
+<div class="modal-overlay" id="modalDoklad">
+  <div class="modal">
+    <h3>📨 Doklad o úhradě</h3>
+    <p style="font-size:0.82rem;color:var(--text-light);margin:-6px 0 12px">Pošle klientce PDF doklad o přijaté platbě — pro proplacení zaměstnavatelem nebo pojišťovnou. Obecný název služby (ne marketingový název z ceníku) jde před odesláním upravit.</p>
+    <div id="dokladInfo" style="font-size:0.85rem;color:var(--text-light);margin-bottom:10px"></div>
+    <div id="dokladMsg"></div>
+    <div class="form-group"><label>E-mail příjemce</label>
+      <input type="email" id="dokladEmail" placeholder="klientka@…, nebo e-mail pojišťovny/zaměstnavatele">
+    </div>
+    <div class="form-group"><label>Název služby na dokladu</label>
+      <input type="text" id="dokladNazevSluzby">
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modalDoklad')">Zrušit</button>
+      <button class="btn btn-primary" id="dokladOdeslatBtn" onclick="odeslatDokladUhradyOdeslat()">📨 Odeslat</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL: Nová varianta poukazu -->
 <div class="modal-overlay" id="modalNovyTypPoukazu">
   <div class="modal">
@@ -2727,9 +2747,11 @@ function vykreslitDetailRezervace(r) {
     <button class="btn btn-red btn-sm" onclick="smazatRezervaci(${r.id},'${r.stav}',${Number(r.uhrazeno) || 0});closeModal('modalDetailRezervace')">🗑️ Smazat</button>
   `;
 }
+let posledniHistoriePlateb = [];
 async function nacistHistoriiPlateb(id) {
   try {
     const historie = await adminFetch(API + '/admin/rezervace/' + id + '/platby').then(r => r.json());
+    posledniHistoriePlateb = historie;
     const el = document.getElementById('detailPlatebniHistorie');
     if (!el) return; // modal mezitím zavřený/přerenderovaný
     if (!historie.length) { el.innerHTML = '<span style="color:var(--text-light);font-size:0.85rem">Zatím žádná platba.</span>'; return; }
@@ -2740,11 +2762,59 @@ async function nacistHistoriiPlateb(id) {
       const znamenko = castka > 0 ? '+' : '';
       const zpusob = platbaZpusobLabel[p.zpusob_platby] || p.zpusob_platby;
       const popis = p.typ === 'vratka' ? `vratka (${zpusob})` : zpusob;
-      return `<div style="font-size:0.85rem;padding:3px 0;color:${barva}">${datum} — ${escapeHtml(popis)} — ${znamenko}${castka.toLocaleString('cs-CZ')} Kč</div>`;
+      // Doklad o úhradě (pro zaměstnavatele/pojišťovnu) jde vystavit jen ke
+      // skutečně přijaté platbě, ne k vratce — viz POST /api/admin/platby/:id/doklad.
+      const dokladBtn = p.typ !== 'vratka'
+        ? ` <button class="btn btn-outline btn-sm" style="padding:1px 8px;font-size:0.72rem" onclick="otevritDokladModal(${id},${p.id})">📨 Doklad</button>`
+        : '';
+      return `<div style="font-size:0.85rem;padding:3px 0;color:${barva};display:flex;align-items:center;gap:6px;flex-wrap:wrap">${datum} — ${escapeHtml(popis)} — ${znamenko}${castka.toLocaleString('cs-CZ')} Kč${dokladBtn}</div>`;
     }).join('');
   } catch (e) {
     const el = document.getElementById('detailPlatebniHistorie');
     if (el) el.innerHTML = '<span class="error-msg">Historii se nepodařilo načíst.</span>';
+  }
+}
+// Doklad o úhradě masáže — e-mailem jako PDF, pro proplacení zaměstnavatelem
+// nebo pojišťovnou (ne účtenka — ta se posílá automaticky při platbě, viz
+// odeslatUctenkuEmailem v serveru). Obecný název služby (ne marketingový
+// název z ceníku, viz r.obecny_nazev_masaze v GET /api/admin/rezervace) jde
+// v modálu ručně přepsat, stejně jako e-mail příjemce (často jiný než
+// klientčin — třeba rovnou e-mail pojišťovny).
+let dokladAktivniPlatbaId = null;
+function otevritDokladModal(rezervaceId, platbaId) {
+  const r = vsechnyRezervace.find(x => x.id === rezervaceId);
+  const p = posledniHistoriePlateb.find(x => x.id === platbaId);
+  if (!r || !p) { alert('Platbu se nepodařilo najít — zavřete prosím detail rezervace a otevřete ho znovu.'); return; }
+  dokladAktivniPlatbaId = platbaId;
+  const castka = Math.abs(Number(p.castka));
+  document.getElementById('dokladInfo').innerHTML = `Klientka <strong>${escapeHtml(r.jmeno)}</strong> · ${escapeHtml(r.masaz)} · ${castka.toLocaleString('cs-CZ')} Kč · ${escapeHtml(platbaZpusobLabel[p.zpusob_platby] || p.zpusob_platby)}`;
+  document.getElementById('dokladEmail').value = r.email || '';
+  document.getElementById('dokladNazevSluzby').value = r.obecny_nazev_masaze || r.masaz || '';
+  document.getElementById('dokladMsg').innerHTML = '';
+  openModal('modalDoklad');
+}
+async function odeslatDokladUhradyOdeslat() {
+  const email = document.getElementById('dokladEmail').value.trim();
+  const nazev_sluzby = document.getElementById('dokladNazevSluzby').value.trim();
+  const msg = document.getElementById('dokladMsg');
+  if (!email || !email.includes('@')) { msg.innerHTML = '<div class="error-msg">Zadejte prosím platný e-mail.</div>'; return; }
+  const btn = document.getElementById('dokladOdeslatBtn');
+  if (btn.disabled) return;
+  btn.disabled = true;
+  try {
+    const res = await adminFetch(API + '/admin/platby/' + dokladAktivniPlatbaId + '/doklad', { method: 'POST', body: JSON.stringify({ email, nazev_sluzby }) });
+    const data = await res.json();
+    if (!res.ok) { msg.innerHTML = '<div class="error-msg">' + escapeHtml(data.chyba || 'Odeslání se nepodařilo.') + '</div>'; return; }
+    if (!data.emailOdeslan) {
+      msg.innerHTML = '<div class="error-msg">Doklad č. ' + escapeHtml(data.cislo) + ' byl vystaven, ale e-mail se nepodařilo odeslat (zkontrolujte nastavení e-mailu na serveru).</div>';
+      return;
+    }
+    closeModal('modalDoklad');
+    alert('Doklad č. ' + data.cislo + ' byl odeslán na ' + data.poslanoNa + '.');
+  } catch (e) {
+    msg.innerHTML = '<div class="error-msg">Nejde se připojit k serveru.</div>';
+  } finally {
+    btn.disabled = false;
   }
 }
 // Idempotentní klíč pro samostatné tlačítko "Zaznamenat platbu" (mimo dialog
