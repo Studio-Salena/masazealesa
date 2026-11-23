@@ -2384,18 +2384,30 @@ function obecnyNazevSluzby(skupina, varianta) {
 // sloupcích se společným spodním orámováním — ručně počítané souřadnice,
 // aby sloupce nezávisely na automatickém "cursoru" pdfkitu (ten by druhý
 // sloupec jinak posouval podle výšky prvního).
+// Stejná barevná paleta jako v emailSablona výš (e-mailové potvrzení) — ať
+// doklad vizuálně navazuje na e-maily, co klientka od salonu dostává.
+const BARVY_DOKLAD = {
+  hlavickaPozadi: '#f7f1e5',
+  zlata: '#bfa14f',
+  nadpis: '#332e2a',
+  text: '#4a4541',
+  pruhTabulky: '#f7f5f0',
+  ohraniceni: '#e8e2d8',
+  paticka: '#8c837b'
+};
+
 function radekTabulky(doc, y, leva, prava, { tucne = false, vyska = 22 } = {}) {
-  doc.font(tucne ? 'TextTucne' : 'Text').fontSize(10);
-  doc.text(leva, 55, y + 6, { width: 350 });
-  doc.text(prava, 410, y + 6, { width: 135, align: 'right' });
-  doc.moveTo(50, y + vyska).lineTo(545, y + vyska).strokeColor('#ddd').lineWidth(1).stroke();
-  doc.strokeColor('#000');
+  doc.font(tucne ? 'TextTucne' : 'Text').fontSize(10).fillColor(BARVY_DOKLAD.text);
+  doc.text(leva, 55, y + 6, { width: 345 });
+  doc.text(prava, 410, y + 6, { width: 130, align: 'right' });
+  doc.moveTo(50, y + vyska).lineTo(545, y + vyska).strokeColor(BARVY_DOKLAD.ohraniceni).lineWidth(1).stroke();
 }
 
 function vygenerovatDokladPdfBuffer(d) {
   return new Promise((resolve, reject) => {
     try {
       const doc = new PDFDocument({ size: 'A4', margin: 50 });
+      const sirkaStranky = doc.page.width;
       const casti = [];
       doc.on('data', c => casti.push(c));
       doc.on('end', () => resolve(Buffer.concat(casti)));
@@ -2404,47 +2416,54 @@ function vygenerovatDokladPdfBuffer(d) {
       doc.registerFont('Text', path.join(__dirname, 'assets/fonts/DejaVuSans.ttf'));
       doc.registerFont('TextTucne', path.join(__dirname, 'assets/fonts/DejaVuSans-Bold.ttf'));
 
-      doc.font('TextTucne').fontSize(20).text('Doklad o úhradě masáže');
-      doc.font('Text').fontSize(10).fillColor('#666').text(`Číslo dokladu ${d.cislo}`);
-      doc.fillColor('#000').moveDown(1.2);
+      // Hlavička — stejný krémový podklad a logo jako v e-mailové šabloně.
+      doc.rect(0, 0, sirkaStranky, 110).fill(BARVY_DOKLAD.hlavickaPozadi);
+      const cestaLogo = path.join(__dirname, 'assets/logo.png');
+      if (fs.existsSync(cestaLogo)) {
+        doc.image(cestaLogo, sirkaStranky / 2 - 28, 14, { width: 56, height: 56 });
+      }
+      doc.font('TextTucne').fontSize(18).fillColor(BARVY_DOKLAD.zlata)
+        .text('Doklad o úhradě masáže', 0, 74, { align: 'center' });
+      doc.font('Text').fontSize(9).fillColor(BARVY_DOKLAD.paticka)
+        .text(`Číslo dokladu ${d.cislo}`, 0, 94, { align: 'center' });
 
-      doc.font('TextTucne').fontSize(11).text('Dodavatel');
-      doc.font('Text').fontSize(10)
-        .text(FIRMA_UDAJE.jmeno)
-        .text(FIRMA_UDAJE.sidlo)
-        .text(`IČO ${FIRMA_UDAJE.ico}`)
-        .text(FIRMA_UDAJE.evidence)
-        .text(FIRMA_UDAJE.web);
+      doc.y = 130;
+      doc.font('TextTucne').fontSize(11).fillColor(BARVY_DOKLAD.nadpis).text('Dodavatel', 50);
+      doc.font('Text').fontSize(10).fillColor(BARVY_DOKLAD.text)
+        .text(FIRMA_UDAJE.jmeno, 50)
+        .text(FIRMA_UDAJE.sidlo, 50)
+        .text(`IČO ${FIRMA_UDAJE.ico}`, 50)
+        .text(FIRMA_UDAJE.evidence, 50)
+        .text(FIRMA_UDAJE.web, 50);
       doc.moveDown(0.8);
 
-      doc.font('TextTucne').fontSize(11).text('Zákaznice');
-      doc.font('Text').fontSize(10).text(d.jmenoZakaznice);
+      doc.font('TextTucne').fontSize(11).fillColor(BARVY_DOKLAD.nadpis).text('Zákaznice', 50);
+      doc.font('Text').fontSize(10).fillColor(BARVY_DOKLAD.text).text(d.jmenoZakaznice, 50);
       doc.moveDown(0.8);
 
-      doc.font('Text').fontSize(10)
-        .text(`Datum vystavení ${formatDatumCz(d.datumVystaveni)}`)
-        .text(`Datum poskytnutí masáže ${d.datumPoskytnuti ? formatDatumCz(d.datumPoskytnuti) : '—'}`)
-        .text(`Datum úhrady ${formatDatumCz(d.datumUhrady)}`);
+      doc.font('Text').fontSize(10).fillColor(BARVY_DOKLAD.text)
+        .text(`Datum vystavení ${formatDatumCz(d.datumVystaveni)}`, 50)
+        .text(`Datum poskytnutí masáže ${d.datumPoskytnuti ? formatDatumCz(d.datumPoskytnuti) : '—'}`, 50)
+        .text(`Datum úhrady ${formatDatumCz(d.datumUhrady)}`, 50);
       doc.moveDown(1);
 
       const popisSluzby = d.nazevSluzby;
       const castkaText = d.castka.toLocaleString('cs-CZ') + ' Kč';
       let y = doc.y;
-      doc.rect(50, y, 495, 22).fill('#f0e6d6');
-      doc.fillColor('#000');
+      doc.rect(50, y, 495, 22).fill(BARVY_DOKLAD.pruhTabulky);
       radekTabulky(doc, y, 'Poskytnutá služba', 'Částka', { tucne: true });
       y += 22;
       radekTabulky(doc, y, popisSluzby, castkaText);
       y += 22;
-      doc.rect(50, y, 495, 22).fill('#f0e6d6');
-      doc.fillColor('#000');
+      doc.rect(50, y, 495, 22).fill(BARVY_DOKLAD.pruhTabulky);
       radekTabulky(doc, y, 'Celkem uhrazeno', castkaText, { tucne: true });
       y += 22;
       doc.y = y + 16;
 
-      doc.font('Text').fontSize(10).text(`Způsob úhrady ${ZPUSOB_PLATBY_LABEL_DOKLAD[d.zpusobPlatby] || d.zpusobPlatby}`);
+      doc.font('Text').fontSize(10).fillColor(BARVY_DOKLAD.text)
+        .text(`Způsob úhrady ${ZPUSOB_PLATBY_LABEL_DOKLAD[d.zpusobPlatby] || d.zpusobPlatby}`, 50);
       doc.moveDown(0.8);
-      doc.text('Potvrzuji přijetí úhrady za výše uvedenou službu.');
+      doc.text('Potvrzuji přijetí úhrady za výše uvedenou službu.', 50);
       doc.moveDown(1.5);
 
       const ySignatury = doc.y;
@@ -2456,6 +2475,18 @@ function vygenerovatDokladPdfBuffer(d) {
       } else {
         doc.moveTo(400, ySignatury + 36).lineTo(545, ySignatury + 36).strokeColor('#999').stroke();
       }
+
+      // Patička — stejný tón jako v e-mailové šabloně. "margins.bottom = 0"
+      // těsně před psaním textu u úplného spodku stránky — jinak by pdfkit
+      // vyhodnotil text jako přetékající pod spodní okraj a tiše přidal
+      // další (prázdnou) stránku navíc.
+      const vyskaStranky = doc.page.height;
+      doc.moveTo(0, vyskaStranky - 60).lineTo(sirkaStranky, vyskaStranky - 60).strokeColor(BARVY_DOKLAD.ohraniceni).lineWidth(1).stroke();
+      doc.rect(0, vyskaStranky - 60, sirkaStranky, 60).fill(BARVY_DOKLAD.pruhTabulky);
+      doc.page.margins.bottom = 0;
+      doc.font('Text').fontSize(9).fillColor(BARVY_DOKLAD.paticka)
+        .text('Masáže Alesa | Hulín', 0, vyskaStranky - 44, { align: 'center' })
+        .text('www.masazealesa.cz', 0, vyskaStranky - 30, { align: 'center' });
 
       doc.end();
     } catch (e) {
