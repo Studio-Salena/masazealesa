@@ -1107,11 +1107,25 @@ async function vykreslitEmail(klic, promenne) {
 // PO úspěšném uložení platby a nikdy nesmí ovlivnit odpověď endpointu ani
 // zablokovat/zrušit už uloženou platbu, i kdyby odeslání e-mailu selhalo
 // (stejný princip jako ostatní notifikační e-maily v appce).
+// Z celého jména (pole "Jméno a příjmení" z rezervačního formuláře) vytáhne
+// jen příjmení (poslední slovo) — pro oslovení "Dobrý den, paní {příjmení},".
+// Tenhle tvar se v češtině NESKLOŇUJE (na rozdíl od křestního jména v
+// oslovení, např. "Jano" místo "Jana" — to bychom spolehlivě automatizovat
+// nedokázaly, česká jména se skloňují nepravidelně), takže je bezpečný i
+// bez znalosti konkrétního jména. Jednoslovné/chybějící jméno → bez
+// příjmení (oslovení bez jména, ne nesmyslné "paní" s prázdným zbytkem).
+function ziskatPrijmeni(celeJmeno) {
+  const casti = String(celeJmeno || '').trim().split(/\s+/).filter(Boolean);
+  return casti.length > 1 ? casti[casti.length - 1] : null;
+}
+
 function odeslatUctenkuEmailem({ email, jmeno, polozky, castka, zpusobPlatby }) {
   if (!email) return;
   const zpusobLabel = { hotove: 'Hotově', kartou: 'Kartou', online: 'Online', qr: 'QR kódem', prevodem: 'Převodem', poukaz: 'Poukazem' }[zpusobPlatby] || zpusobPlatby;
+  const prijmeni = ziskatPrijmeni(jmeno);
+  const oslovovaciDoplnek = prijmeni ? `, paní ${prijmeni}` : '';
   const radky = polozky.map(p => `<tr><td style="padding:4px 0;color:#555">${p.label}</td><td style="padding:4px 0;text-align:right;white-space:nowrap">${p.hodnota}</td></tr>`).join('');
-  const telo = `<h2>Dobrý den${jmeno ? ', ' + jmeno : ''},</h2>
+  const telo = `<h2>Dobrý den${oslovovaciDoplnek},</h2>
     <p>děkuji za platbu. Tady je vaše účtenka:</p>
     <table width="100%" cellpadding="0" cellspacing="0" style="margin:12px 0">
       ${radky}
