@@ -1,0 +1,6 @@
+# Oficiální, kontrolním součtem ověřené podklady EET (eet/specifikace.js,
+# eet_specifikace/MANIFEST.md) — MUSÍ zůstat bajtově přesně tak, jak byly
+# stažené z eet.gov.cz/ica.cz. Bez tohoto souboru Windows (core.autocrlf)
+# při checkoutu tiše převede LF na CRLF, čímž se změní SHA-256 a spadne
+# kontrola v eet/xsd-validace.js (zjištěno 2026-11-24 při revizi Kroku 3d).
+eet_specifikace/* -text
