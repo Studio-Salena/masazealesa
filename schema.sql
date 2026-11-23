@@ -442,7 +442,7 @@ insert into cenik (skupina, emoji, varianta, delka_min, cena, rezervovatelna, po
   ('Konopná úleva', '🌿', 'Záda + šíje', 45, 765, true, 4, 1),
   ('Konopná úleva', '🌿', 'Částečná (nohy zezadu, záda, šíje)', 60, 960, true, 4, 2),
 
-  ('Medové snění', '🍯', 'Celková procedura (2× nanesení medu)', 45, 960, true, 5, 1),
+  ('Medové snění', '🍯', 'Celková procedura (2× nanesení medu)', 60, 960, true, 5, 1),
 
   ('Kineziotaping', '🩹', 'Při masáži – aplikace ZDARMA (materiál 5 Kč/cm)', 0, 0, false, 6, 1),
   ('Kineziotaping', '🩹', 'Samostatně (do 30 min, + 150 Kč/dalších 30 min + materiál)', 30, 150, false, 6, 2)
