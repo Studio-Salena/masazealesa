@@ -2471,7 +2471,7 @@ function vygenerovatDokladPdfBuffer(d) {
         .text(FIRMA_UDAJE.web, 50);
       doc.moveDown(0.8);
 
-      doc.font('TextTucne').fontSize(11).fillColor(BARVY_DOKLAD.nadpis).text('Zákaznice', 50);
+      doc.font('TextTucne').fontSize(11).fillColor(BARVY_DOKLAD.nadpis).text('Zákazník', 50);
       doc.font('Text').fontSize(10).fillColor(BARVY_DOKLAD.text).text(d.jmenoZakaznice, 50);
       doc.moveDown(0.8);
 
