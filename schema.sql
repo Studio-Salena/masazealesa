@@ -1119,3 +1119,53 @@ where not exists (select 1 from recenze where jmeno = 'Helena' and text = 'Výbo
 insert into recenze (jmeno, text, hvezdicky, stav, poradi, zverejneno_kdy)
 select 'Adéla', 'Skvělý přístup, milá paní masérka. Absolvovala jsem těhotenskou masáž, která byla velice příjemná — odcházela jsem moc spokojená. Doporučuji!', 5, 'zverejneno', 4, now()
 where not exists (select 1 from recenze where jmeno = 'Adéla' and text like 'Skvělý přístup, milá paní masérka%');
+
+-- ══════════════════════════════════════════════════════════
+-- Doklad o úhradě masáže (pro proplacení zaměstnavatelem/pojišťovnou) —
+-- nová tabulka pro evidenci vystavených dokladů a jejich číselné řady
+-- (viz "Jednotné číslování paragonů a faktur" níž). Spravováno přes
+-- POST /api/admin/platby/:platbaId/doklad, posíláno e-mailem jako PDF
+-- příloha. "on delete set null" (ne "cascade") — doklad je VYSTAVENÝ
+-- dokument s vlastním přiděleným číslem, nesmí zmizet smazáním
+-- testovací/chybné rezervace/platby.
+create table if not exists doklady_uhrady (
+  id serial primary key,
+  cislo text not null,
+  rok integer not null,
+  poradi integer not null,
+  platba_id integer references platby(id) on delete set null,
+  rezervace_id integer references rezervace(id) on delete set null,
+  klientka_id integer references klientky(id) on delete set null,
+  jmeno_zakaznice text not null,
+  nazev_sluzby text not null,
+  delka_min integer,
+  castka numeric not null,
+  zpusob_platby text not null,
+  datum_poskytnuti date,
+  datum_uhrady date not null,
+  email_adresat text not null,
+  vytvoreno timestamptz not null default now(),
+  aktualizovano timestamptz not null default now(),
+  unique (rok, poradi),
+  unique (cislo),
+  unique (platba_id)
+);
+create index if not exists doklady_uhrady_rezervace_idx on doklady_uhrady (rezervace_id);
+
+-- ══════════════════════════════════════════════════════════
+-- Jednotné číslování paragonů a faktur — jedna sdílená řada RRRRNNN napříč
+-- platbami za rezervace, poukazy, prodejnou a prodejem produktů (včetně
+-- vratek). Doklad o úhradě (výš) k dané platbě přebírá STEJNÉ číslo jako
+-- paragon vystavený k téže platbě, místo vlastní nezávislé řady. Živé
+-- přidělování viz pridelitCisloParagonu v server.js — zpětné přečíslování
+-- historických záznamů (migrace_cislovani_paragonu.sql) se na čerstvou,
+-- prázdnou databázi nevztahuje.
+alter table platby add column if not exists cislo_paragonu text;
+alter table poukazy add column if not exists cislo_paragonu text;
+alter table prodeje add column if not exists cislo_paragonu text;
+alter table prodeje_produktu add column if not exists cislo_paragonu text;
+
+create table if not exists cislovani_paragonu (
+  rok integer primary key,
+  posledni_poradi integer not null default 0
+);
