@@ -2479,6 +2479,47 @@ function vygenerovatDokladPdfBuffer(d) {
   });
 }
 
+// Náhled dokladu PŘED odesláním — stejná data jako skutečné vystavení níž,
+// ale NIC nezapisuje do databáze (žádné přidělení čísla, žádný doklady_uhrady
+// řádek, žádný e-mail). Pokud platba ještě nemá cislo_paragonu (vzácná
+// výjimka, viz pridelitCisloParagonu), v náhledu se ukáže zástupný text
+// místo skutečného čísla — to se přidělí až při doopravdovém odeslání, ne
+// tady (jinak by náhled zbytečně spotřebovával čísla z řady).
+app.post('/api/admin/platby/:platbaId/doklad/nahled', async (req, res) => {
+  const nazevSluzbyVstup = req.body && req.body.nazev_sluzby ? String(req.body.nazev_sluzby).trim() : '';
+  try {
+    const { rows: [platba] } = await db.query('SELECT * FROM platby WHERE id = $1', [req.params.platbaId]);
+    if (!platba) return res.status(404).json({ chyba: 'Platba nebyla nalezena.' });
+    if (platba.typ !== 'platba' || Number(platba.castka) <= 0) {
+      return res.status(400).json({ chyba: 'Doklad o úhradě lze vystavit jen k přijaté platbě, ne k vratce.' });
+    }
+    const { rows: [r] } = await db.query(
+      `SELECT rezervace.*, cenik.skupina AS cenik_skupina, cenik.varianta AS cenik_varianta, cenik.delka_min AS cenik_delka_min
+       FROM rezervace LEFT JOIN cenik ON cenik.id = rezervace.cenik_id
+       WHERE rezervace.id = $1`,
+      [platba.rezervace_id]
+    );
+    if (!r) return res.status(404).json({ chyba: 'Rezervace k této platbě nebyla nalezena.' });
+
+    const { rows: [existujici] } = await db.query('SELECT cislo FROM doklady_uhrady WHERE platba_id = $1', [platba.id]);
+    const pdfBuffer = await vygenerovatDokladPdfBuffer({
+      cislo: existujici ? existujici.cislo : (platba.cislo_paragonu || '(přidělí se při odeslání)'),
+      jmenoZakaznice: r.jmeno,
+      nazevSluzby: nazevSluzbyVstup || obecnyNazevSluzby(r.cenik_skupina, r.cenik_varianta) || r.masaz,
+      delkaMin: r.cenik_delka_min,
+      castka: Math.abs(Number(platba.castka)),
+      zpusobPlatby: platba.zpusob_platby,
+      datumVystaveni: new Date().toISOString().slice(0, 10),
+      datumPoskytnuti: r.datum,
+      datumUhrady: new Date(platba.vytvoreno).toISOString().slice(0, 10)
+    });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.send(pdfBuffer);
+  } catch (e) {
+    res.status(500).json({ chyba: e.message });
+  }
+});
+
 // Vystaví (nebo znovu odešle) doklad o úhradě k dané platbě a pošle ho
 // e-mailem jako PDF přílohu. Číslo dokladu se SKUTEČNĚ přiděluje až tady
 // (ne při náhledu) — viz unique(platba_id) v migraci, co zaručuje jedno

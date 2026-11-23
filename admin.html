@@ -1281,6 +1281,7 @@ tr:hover td{background:var(--cream)}
     </div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal('modalDoklad')">Zrušit</button>
+      <button class="btn btn-outline" id="dokladNahledBtn" onclick="nahledDokladUhrady()">👁️ Náhled</button>
       <button class="btn btn-primary" id="dokladOdeslatBtn" onclick="odeslatDokladUhradyOdeslat()">📨 Odeslat</button>
     </div>
   </div>
@@ -1846,8 +1847,16 @@ function showPage(name, el) {
 // nad ním). openModal/closeModal dál jen přidávají/odebírají třídu 'open',
 // přesně jako dřív — nic na stávajícím zavírání se neměnilo.
 var otevreneModaly = [];
+// Modály nad modály (např. "Doklad o úhradě" otevřený z detailu rezervace)
+// by se jinak řadily podle pořadí v HTML, ne podle toho, který se OTEVŘEL
+// naposledy — všechny mají stejný základní z-index (500). Rostoucí čítač
+// zajistí, že nejnověji otevřený modál je vždy nahoře, bez ohledu na pořadí
+// v DOM.
+var modalZIndexCitac = 500;
 function openModal(id) {
-  document.getElementById(id).classList.add('open');
+  const el = document.getElementById(id);
+  el.classList.add('open');
+  el.style.zIndex = ++modalZIndexCitac;
   const i = otevreneModaly.indexOf(id);
   if (i >= 0) otevreneModaly.splice(i, 1);
   otevreneModaly.push(id);
@@ -2792,6 +2801,29 @@ function otevritDokladModal(rezervaceId, platbaId) {
   document.getElementById('dokladNazevSluzby').value = r.obecny_nazev_masaze || r.masaz || '';
   document.getElementById('dokladMsg').innerHTML = '';
   openModal('modalDoklad');
+}
+// Náhled PDF dokladu PŘED odesláním — otevře ho v nové záložce, nic
+// nezapisuje ani neposílá (viz POST .../doklad/nahled v serveru).
+async function nahledDokladUhrady() {
+  const nazev_sluzby = document.getElementById('dokladNazevSluzby').value.trim();
+  const msg = document.getElementById('dokladMsg');
+  const btn = document.getElementById('dokladNahledBtn');
+  if (btn.disabled) return;
+  btn.disabled = true;
+  try {
+    const res = await adminFetch(API + '/admin/platby/' + dokladAktivniPlatbaId + '/doklad/nahled', { method: 'POST', body: JSON.stringify({ nazev_sluzby }) });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      msg.innerHTML = '<div class="error-msg">' + escapeHtml(data.chyba || 'Náhled se nepodařilo vygenerovat.') + '</div>';
+      return;
+    }
+    const blob = await res.blob();
+    window.open(URL.createObjectURL(blob), '_blank');
+  } catch (e) {
+    msg.innerHTML = '<div class="error-msg">Nejde se připojit k serveru.</div>';
+  } finally {
+    btn.disabled = false;
+  }
 }
 async function odeslatDokladUhradyOdeslat() {
   const email = document.getElementById('dokladEmail').value.trim();
