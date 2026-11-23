@@ -811,10 +811,18 @@ async function vytvoritPoukaz(client, {
 }) {
   const platnostDo = new Date();
   platnostDo.setMonth(platnostDo.getMonth() + platnostMesicu);
+  // Číslo paragonu (jednotná řada, viz pridelitCisloParagonu) jen pro
+  // skutečně PRÁVĚ TEĎ zaplacený prodej — ne pro nezaplacený/čekající
+  // poukaz (žádné peníze zatím nepřišly) a NIKDY pro refundační poukaz
+  // (ucel='vratka' — to číslo nese vratka platby samotné, viz
+  // PATCH /rezervace/:id/platba, ať nevznikne jedné události dvojí číslo).
+  const cisloParagonu = (stavUhrady === 'zaplaceno' && ucel !== 'vratka')
+    ? await pridelitCisloParagonu(client, zaplacenoKdy || new Date())
+    : null;
   const { rows: [poukaz] } = await client.query(
-    `INSERT INTO poukazy (kod, hodnota, zustatek, platnost_do, zakoupeno_kde, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, konkretni_masaz, zpusob_platby, stav, klientka_id, ucel, sleva_kc, stav_uhrady, zaplaceno_kdy, zaplaceno_zpetne, kontaktni_platba, idempotency_klic)
-     VALUES ($1,$2,$2,$3,$4,$5,$6,$7,$8,$9,$10,'aktivni',$11,$12,$13,$14,$15,false,$16,$17) RETURNING *`,
-    [vygenerovatKod(ucel), hodnota, platnostDo.toISOString().slice(0, 10), zakoupenoKde, kupujiciJmeno || null, kupujiciEmail || null, kupujiciTelefon || null, proKoho, konkretniMasaz, zpusobPlatby, klientkaId, ucel, Number(slevaKc) || 0, stavUhrady, zaplacenoKdy, kontaktniPlatba, idempotencyKlic]
+    `INSERT INTO poukazy (kod, hodnota, zustatek, platnost_do, zakoupeno_kde, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, konkretni_masaz, zpusob_platby, stav, klientka_id, ucel, sleva_kc, stav_uhrady, zaplaceno_kdy, zaplaceno_zpetne, kontaktni_platba, idempotency_klic, cislo_paragonu)
+     VALUES ($1,$2,$2,$3,$4,$5,$6,$7,$8,$9,$10,'aktivni',$11,$12,$13,$14,$15,false,$16,$17,$18) RETURNING *`,
+    [vygenerovatKod(ucel), hodnota, platnostDo.toISOString().slice(0, 10), zakoupenoKde, kupujiciJmeno || null, kupujiciEmail || null, kupujiciTelefon || null, proKoho, konkretniMasaz, zpusobPlatby, klientkaId, ucel, Number(slevaKc) || 0, stavUhrady, zaplacenoKdy, kontaktniPlatba, idempotencyKlic, cisloParagonu]
   );
   return poukaz;
 }
@@ -1129,13 +1137,33 @@ function ziskatPrijmeni(celeJmeno) {
   return casti.length > 1 ? casti[casti.length - 1] : null;
 }
 
-function odeslatUctenkuEmailem({ email, jmeno, polozky, castka, zpusobPlatby }) {
+// Jedna sdílená číselná řada RRRRNNN (např. "2026001") napříč VŠEMI typy
+// příjmů (platby za rezervace, poukazy, prodejna, prodej produktů) i jejich
+// vratkami — viz migrace_cislovani_paragonu.sql. MUSÍ se volat uvnitř stejné
+// transakce (stejné "client") jako zápis samotné platby/prodeje: atomický
+// UPSERT drží řádkový zámek na "cislovani_paragonu" po dobu transakce, takže
+// souběžné přidělování se bezpečně sérializuje (bez potřeby retry) a
+// případný rollback platby vrátí zpět i přidělené číslo (žádná trvalá
+// mezera v řadě po neúspěšném pokusu).
+async function pridelitCisloParagonu(client, datum) {
+  const rok = new Date(datum || Date.now()).getFullYear();
+  const { rows: [r] } = await client.query(
+    `INSERT INTO cislovani_paragonu (rok, posledni_poradi) VALUES ($1, 1)
+     ON CONFLICT (rok) DO UPDATE SET posledni_poradi = cislovani_paragonu.posledni_poradi + 1
+     RETURNING posledni_poradi`,
+    [rok]
+  );
+  return `${rok}${String(r.posledni_poradi).padStart(3, '0')}`;
+}
+
+function odeslatUctenkuEmailem({ email, jmeno, polozky, castka, zpusobPlatby, cislo }) {
   if (!email) return;
   const zpusobLabel = { hotove: 'Hotově', kartou: 'Kartou', online: 'Online', qr: 'QR kódem', prevodem: 'Převodem', poukaz: 'Poukazem' }[zpusobPlatby] || zpusobPlatby;
   const prijmeni = ziskatPrijmeni(jmeno);
   const oslovovaciDoplnek = prijmeni ? `, paní ${prijmeni}` : '';
   const radky = polozky.map(p => `<tr><td style="padding:4px 0;color:#555">${p.label}</td><td style="padding:4px 0;text-align:right;white-space:nowrap">${p.hodnota}</td></tr>`).join('');
   const telo = `<h2>Dobrý den${oslovovaciDoplnek},</h2>
+    ${cislo ? `<p style="font-size:0.85rem;color:#999;margin:-10px 0 14px">Paragon č. ${cislo}</p>` : ''}
     <p>děkuji za platbu. Tady je vaše účtenka:</p>
     <table width="100%" cellpadding="0" cellspacing="0" style="margin:12px 0">
       ${radky}
@@ -2226,14 +2254,20 @@ app.patch('/api/admin/rezervace/:id/platba', async (req, res) => {
       });
     }
 
+    // Číslo paragonu (jednotná řada, viz pridelitCisloParagonu výš) — stejná
+    // podmínka jako u EET evidence o pár řádků níž: čerpání poukazu
+    // (zpusob_platby==='poukaz') číslo nedostává, protože peníze už byly
+    // přijaté (a očíslované) při PRODEJI poukazu, ne teď.
+    const cisloParagonu = zpusob_platby !== 'poukaz' ? await pridelitCisloParagonu(client, new Date()) : null;
+
     let platbaRadek;
     try {
       // poukaz_id se vyplňuje jen u vratky-jako-poukazu (novyPoukaz výš) —
       // ať zkontrolovatIdempotentniPlatbu umí při opakování stejného
       // požadavku dohledat KTERÝ poukaz tahle vratka vytvořila.
       ({ rows: [platbaRadek] } = await client.query(
-        `INSERT INTO platby (rezervace_id, castka, typ, zpusob_platby, idempotency_klic, poukaz_id, kontaktni_platba) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, vytvoreno`,
-        [req.params.id, druh === 'vratka' ? -castkaNum : castkaNum, druh, zpusob_platby, klic, novyPoukaz ? novyPoukaz.id : null, kontaktniPlatbaKUlozeni]
+        `INSERT INTO platby (rezervace_id, castka, typ, zpusob_platby, idempotency_klic, poukaz_id, kontaktni_platba, cislo_paragonu) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id, vytvoreno`,
+        [req.params.id, druh === 'vratka' ? -castkaNum : castkaNum, druh, zpusob_platby, klic, novyPoukaz ? novyPoukaz.id : null, kontaktniPlatbaKUlozeni, cisloParagonu]
       ));
     } catch (e) {
       // Souběh dvou požadavků se STEJNÝM klíčem: mezi kontrolou výš a tímhle
@@ -2285,7 +2319,7 @@ app.patch('/api/admin/rezervace/:id/platba', async (req, res) => {
       odeslatUctenkuEmailem({
         email: r.email, jmeno: r.jmeno,
         polozky: [{ label: r.masaz, hodnota: '' }],
-        castka: castkaNum, zpusobPlatby: zpusob_platby
+        castka: castkaNum, zpusobPlatby: zpusob_platby, cislo: cisloParagonu
       });
     }
   } catch (e) {
@@ -2485,12 +2519,20 @@ app.post('/api/admin/platby/:platbaId/doklad', async (req, res) => {
         [emailCisty, nazevSluzbyFinal, existujici.id]
       );
     } else {
-      const rok = new Date().getFullYear();
-      const { rows: [poradiRadek] } = await client.query(
-        'SELECT COALESCE(MAX(poradi), 0) + 1 AS dalsi FROM doklady_uhrady WHERE rok = $1', [rok]
-      );
-      const poradi = poradiRadek.dalsi;
-      cislo = `${rok}${String(poradi).padStart(3, '0')}`;
+      // Faktura přebírá STEJNÉ číslo jako paragon vystavený k téže platbě
+      // (jednotná řada, viz pridelitCisloParagonu/migrace_cislovani_paragonu.sql)
+      // — žádné nové přidělování. "platba.cislo_paragonu" chybí jen u plateb
+      // čerpajících poukaz (ty paragon nedostávají, peníze byly očíslované
+      // už při prodeji poukazu) — defenzivní pojistka níž pro tenhle a
+      // jakýkoli jiný neočekávaný případ: přidělí nové číslo a zapíše ho
+      // zpětně i na platbu, ať zůstanou napořád v souladu.
+      cislo = platba.cislo_paragonu;
+      if (!cislo) {
+        cislo = await pridelitCisloParagonu(client, platba.vytvoreno);
+        await client.query('UPDATE platby SET cislo_paragonu = $1 WHERE id = $2', [cislo, platba.id]);
+      }
+      const rok = Number(cislo.slice(0, 4));
+      const poradi = Number(cislo.slice(4));
       await client.query(
         `INSERT INTO doklady_uhrady
           (cislo, rok, poradi, platba_id, rezervace_id, klientka_id, jmeno_zakaznice, nazev_sluzby, delka_min, castka, zpusob_platby, datum_poskytnuti, datum_uhrady, email_adresat)
@@ -2980,7 +3022,7 @@ app.post('/api/admin/poukazy', async (req, res) => {
       odeslatUctenkuEmailem({
         email: poukaz.kupujici_email, jmeno: poukaz.kupujici_jmeno,
         polozky: [{ label: 'Dárkový poukaz' + (poukaz.konkretni_masaz ? ' – ' + poukaz.konkretni_masaz : '') + ' (kód ' + poukaz.kod + ')', hodnota: '' }],
-        castka: Number(poukaz.hodnota) - Number(poukaz.sleva_kc || 0), zpusobPlatby: zpusobPlatbyFinal
+        castka: Number(poukaz.hodnota) - Number(poukaz.sleva_kc || 0), zpusobPlatby: zpusobPlatbyFinal, cislo: poukaz.cislo_paragonu
       });
     }
   } catch (e) {
@@ -3044,9 +3086,10 @@ app.patch('/api/admin/poukazy/:id/potvrdit-platbu', async (req, res) => {
     if (!poukaz) { await client.query('ROLLBACK'); return res.status(404).json({ chyba: 'Poukaz nebyl nalezen.' }); }
     if (poukaz.ucel !== 'prodej') { await client.query('ROLLBACK'); return res.status(400).json({ chyba: 'Platbu lze potvrdit jen u prodaného poukazu.' }); }
     if (poukaz.stav_uhrady === 'zaplaceno') { await client.query('ROLLBACK'); return res.status(400).json({ chyba: 'Tento poukaz je už zaznamenaný jako zaplacený.' }); }
+    const cisloParagonu = await pridelitCisloParagonu(client, new Date());
     const { rows: [aktualizovany] } = await client.query(
-      `UPDATE poukazy SET stav_uhrady = 'zaplaceno', zpusob_platby = $1, zaplaceno_kdy = now(), zaplaceno_zpetne = false, kontaktni_platba = $3 WHERE id = $2 RETURNING *`,
-      [zpusob_platby, req.params.id, kontaktniPlatbaKUlozeni]
+      `UPDATE poukazy SET stav_uhrady = 'zaplaceno', zpusob_platby = $1, zaplaceno_kdy = now(), zaplaceno_zpetne = false, kontaktni_platba = $3, cislo_paragonu = $4 WHERE id = $2 RETURNING *`,
+      [zpusob_platby, req.params.id, kontaktniPlatbaKUlozeni, cisloParagonu]
     );
     // Krok 3b — EET evidence (bezpečné i bez idempotency_klic: souběžné
     // potvrzení stejného poukazu chrání "FOR UPDATE" zámek výš + kontrola
@@ -3065,7 +3108,7 @@ app.patch('/api/admin/poukazy/:id/potvrdit-platbu', async (req, res) => {
     odeslatUctenkuEmailem({
       email: aktualizovany.kupujici_email, jmeno: aktualizovany.kupujici_jmeno,
       polozky: [{ label: 'Dárkový poukaz' + (aktualizovany.konkretni_masaz ? ' – ' + aktualizovany.konkretni_masaz : '') + ' (kód ' + aktualizovany.kod + ')', hodnota: '' }],
-      castka: Number(aktualizovany.hodnota) - Number(aktualizovany.sleva_kc || 0), zpusobPlatby: zpusob_platby
+      castka: Number(aktualizovany.hodnota) - Number(aktualizovany.sleva_kc || 0), zpusobPlatby: zpusob_platby, cislo: cisloParagonu
     });
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch {}
@@ -4116,12 +4159,13 @@ app.post('/api/admin/prodejna', async (req, res) => {
       return res.status(400).json({ chyba: 'Vyberte prosím způsob platby pro zbytek ceny.' });
     }
     const zpusobPlatbyFinal = zbytek <= 0 ? 'poukaz' : zpusob_platby;
+    const cisloParagonu = await pridelitCisloParagonu(client, new Date());
 
     let prodej;
     try {
       ({ rows: [prodej] } = await client.query(
-        'INSERT INTO prodeje (masaz, cena, zpusob_platby, poznamka, poukaz_id, poukaz_castka, idempotency_klic, kontaktni_platba) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
-        [masaz, cenaNum, zpusobPlatbyFinal, poznamka || null, poukazId, poukazCastka, klic, kontaktniPlatbaKUlozeni]
+        'INSERT INTO prodeje (masaz, cena, zpusob_platby, poznamka, poukaz_id, poukaz_castka, idempotency_klic, kontaktni_platba, cislo_paragonu) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
+        [masaz, cenaNum, zpusobPlatbyFinal, poznamka || null, poukazId, poukazCastka, klic, kontaktniPlatbaKUlozeni, cisloParagonu]
       ));
     } catch (e) {
       // Souběh dvou požadavků se STEJNÝM klíčem — unikátní index na
@@ -4409,12 +4453,13 @@ app.post('/api/admin/produkty/:id/prodat', async (req, res) => {
     // Krok 3b, bod 4 — prodej produktu je VŽDY osobní prodej v salonu (žádný
     // vzdálený prodej v appce neexistuje) — kontaktni_platba je VŽDY true,
     // jako explicitní sloupec, ne jen předpoklad v kódu.
+    const cisloParagonu = await pridelitCisloParagonu(client, new Date());
     let prodej;
     try {
       ({ rows: [prodej] } = await client.query(
-        `INSERT INTO prodeje_produktu (produkt_id, nazev, mnozstvi, cena_za_kus, cena_celkem, zpusob_platby, idempotency_klic, kontaktni_platba)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,true) RETURNING *`,
-        [produkt.id, produkt.skupina + ' – ' + produkt.varianta, mnozstviNum, produkt.cena, cenaCelkem, zpusob_platby, klic]
+        `INSERT INTO prodeje_produktu (produkt_id, nazev, mnozstvi, cena_za_kus, cena_celkem, zpusob_platby, idempotency_klic, kontaktni_platba, cislo_paragonu)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,true,$8) RETURNING *`,
+        [produkt.id, produkt.skupina + ' – ' + produkt.varianta, mnozstviNum, produkt.cena, cenaCelkem, zpusob_platby, klic, cisloParagonu]
       ));
     } catch (e) {
       // Souběh dvou požadavků se STEJNÝM klíčem — unikátní index je tu
@@ -4635,11 +4680,11 @@ app.get('/api/admin/ucetnictvi', async (req, res) => {
         seznam: [
           ...platbyFiltr.filter(p => p.zpusob_platby !== 'poukaz').map(p => ({
             id: p.id, rezervace_id: p.rezervace_id, castka: Number(p.castka), typ: p.typ,
-            zpusob_platby: p.zpusob_platby, vytvoreno: p.vytvoreno.toISOString()
+            zpusob_platby: p.zpusob_platby, vytvoreno: p.vytvoreno.toISOString(), cislo_paragonu: p.cislo_paragonu
           })),
           ...poukazyNoveZaplacene.map(p => ({
             id: p.id, rezervace_id: null, castka: Number(p.hodnota), typ: 'prodej_poukazu',
-            zpusob_platby: p.zpusob_platby, vytvoreno: p.zaplaceno_kdy.toISOString()
+            zpusob_platby: p.zpusob_platby, vytvoreno: p.zaplaceno_kdy.toISOString(), cislo_paragonu: p.cislo_paragonu
           }))
         ].sort((a, b) => b.vytvoreno.localeCompare(a.vytvoreno))
       },
@@ -4668,7 +4713,7 @@ app.get('/api/admin/ucetnictvi', async (req, res) => {
         pocet: vratkyFiltr.length,
         seznam: vratkyFiltr.map(p => ({
           id: p.id, rezervace_id: p.rezervace_id, castka: Number(p.castka),
-          zpusob_platby: p.zpusob_platby, vytvoreno: p.vytvoreno.toISOString()
+          zpusob_platby: p.zpusob_platby, vytvoreno: p.vytvoreno.toISOString(), cislo_paragonu: p.cislo_paragonu
         }))
       },
       podleZpusobuPlatby: Object.entries(zpusobyMapa).map(([zpusob_platby, castka]) => ({ zpusob_platby, castka }))
