@@ -3842,7 +3842,7 @@ function otevritUctenkuProdeje(prodej) {
     radky.push(uctenkaRadek('Cena', Number(prodej.cena).toLocaleString('cs-CZ') + ' Kč'));
     radky.push(uctenkaRadek('Způsob platby', platbaZpusobLabel[prodej.zpusob_platby] || prodej.zpusob_platby));
   }
-  otevritUctenku(radky, 'P-' + prodej.id);
+  otevritUctenku(radky, prodej.cislo_paragonu || ('P-' + prodej.id));
 }
 function otevritUctenkuPoukazu(poukaz) {
   const zakoupenoLabel = { web: 'Přes web', osobne: 'Osobně v salonu', vratka: 'Vratka' }[poukaz.zakoupeno_kde] || poukaz.zakoupeno_kde;
@@ -3855,7 +3855,17 @@ function otevritUctenkuPoukazu(poukaz) {
   ];
   if (poukaz.zpusob_platby) radky.push(uctenkaRadek('Způsob platby', platbaZpusobLabel[poukaz.zpusob_platby] || poukaz.zpusob_platby));
   if (poukaz.kupujici_jmeno) radky.push(uctenkaRadek('Kupující', poukaz.kupujici_jmeno));
-  otevritUctenku(radky, 'V-' + poukaz.id);
+  otevritUctenku(radky, poukaz.cislo_paragonu || ('V-' + poukaz.id));
+}
+// Nová účtenka za prodej produktu (dřív tu žádná nebyla — prodej se jen
+// zaznamenal beze stopy pro klientku). Stejný vzor jako otevritUctenkuProdeje.
+function otevritUctenkuProduktu(prodej) {
+  const radky = [
+    uctenkaRadek('Datum', new Date(prodej.vytvoreno).toLocaleString('cs-CZ', { dateStyle: 'short', timeStyle: 'short' })),
+    uctenkaRadek(prodej.nazev + (prodej.mnozstvi > 1 ? ' × ' + prodej.mnozstvi : ''), Number(prodej.cena_celkem).toLocaleString('cs-CZ') + ' Kč'),
+    uctenkaRadek('Způsob platby', platbaZpusobLabel[prodej.zpusob_platby] || prodej.zpusob_platby)
+  ];
+  otevritUctenku(radky, prodej.cislo_paragonu || ('PP-' + prodej.id));
 }
 function otevritUctenkuTest() {
   const radky = [
@@ -4852,6 +4862,7 @@ async function potvrditProdejProduktu() {
     if (!res.ok) { msg.innerHTML = '<div class="error-msg">' + (data.chyba || 'Prodej se nepodařil.') + '</div>'; return; }
     closeModal('modalProdatProdukt');
     loadProdukty();
+    otevritUctenkuProduktu(data.prodej);
   } catch (e) { msg.innerHTML = '<div class="error-msg">Nejde se připojit k serveru.</div>'; }
 }
 function otevritNaskladnitProdukt(id) {
@@ -5327,7 +5338,7 @@ async function vytisknoutUctenkuZPlatby(id) {
     uctenkaRadek(jeVratka ? 'Vráceno' : 'Částka', Math.abs(Number(p.castka)).toLocaleString('cs-CZ') + ' Kč'),
     uctenkaRadek('Způsob platby', platbaZpusobLabel[p.zpusob_platby] || p.zpusob_platby)
   ].filter(Boolean);
-  otevritUctenku(radky, (jeVratka ? 'VR-' : 'PL-') + p.id, jeVratka ? 'Vratka' : 'Doklad č.');
+  otevritUctenku(radky, p.cislo_paragonu || ((jeVratka ? 'VR-' : 'PL-') + p.id), jeVratka ? 'Vratka' : 'Doklad č.');
 }
 function exportCsvUcetnictvi() {
   if (!posledniUcetnictvi) return;
