@@ -2377,7 +2377,7 @@ function vygenerovatDokladPdfBuffer(d) {
         .text(`Datum úhrady ${formatDatumCz(d.datumUhrady)}`);
       doc.moveDown(1);
 
-      const popisSluzby = d.nazevSluzby + (d.delkaMin ? `, ${d.delkaMin} min` : '');
+      const popisSluzby = d.nazevSluzby;
       const castkaText = d.castka.toLocaleString('cs-CZ') + ' Kč';
       let y = doc.y;
       doc.rect(50, y, 495, 22).fill('#f0e6d6');
