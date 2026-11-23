@@ -10,6 +10,7 @@
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^4.19.2",
+    "pdfkit": "^0.21.0",
     "pg": "^8.13.0"
   },
   "engines": {
