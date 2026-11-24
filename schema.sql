@@ -1173,3 +1173,21 @@ create table if not exists cislovani_paragonu (
   rok integer primary key,
   posledni_poradi integer not null default 0
 );
+
+-- ══════════════════════════════════════════════════════════
+-- Online formulář pro odstoupení od smlouvy uzavřené na dálku (povinnost od
+-- 1. 1. 2027 u smluv, kde má spotřebitel právo odstoupit — viz
+-- obchodni-podminky.html, čl. 4).
+create table if not exists odstoupeni_zadosti (
+  id serial primary key,
+  popis_sluzby text not null,
+  datum_uzavreni_smlouvy date,
+  jmeno text not null,
+  email text,
+  telefon text,
+  adresa text,
+  poznamka text,
+  rezervace_id integer references rezervace(id) on delete set null,
+  stav text not null default 'nova', -- nova | vyrizena
+  vytvoreno timestamptz not null default now()
+);

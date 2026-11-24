@@ -376,6 +376,7 @@ tr:hover td{background:var(--cream)}
         <button type="button" class="nav-item nav-subitem" onclick="showPage('rezervace',this);prepnoutRezPohled('kalendar')" title="Kalendář"><span class="icon">🗓️</span><span class="nav-text"> Kalendář</span></button>
         <button type="button" class="nav-item nav-subitem" onclick="showPage('rezervace',this);prepnoutRezPohled('seznam')" title="Seznam"><span class="icon">📋</span><span class="nav-text"> Seznam</span></button>
         <button type="button" class="nav-item nav-subitem" onclick="showPage('zakaznici',this)" title="Přehled klientů"><span class="icon">👥</span><span class="nav-text"> Přehled klientů</span></button>
+        <button type="button" class="nav-item nav-subitem" onclick="showPage('odstoupeni',this)" title="Odstoupení od smlouvy"><span class="icon">↩️</span><span class="nav-text"> Odstoupení od smlouvy</span> <span class="nav-badge" id="navBadgeOdstoupeni" style="display:none">0</span></button>
       </div>
     </div>
 
@@ -684,6 +685,20 @@ tr:hover td{background:var(--cream)}
         <div id="zakazniciTable"><div class="loading">Načítám...</div></div>
       </div>
       <p style="padding:0 4px;font-size:0.78rem;color:var(--text-light)">Seznam se sestavuje z rezervací a poukazů (podle telefonu), zákaznice lze i přidat ručně.</p>
+    </div>
+
+    <!-- ODSTOUPENÍ OD SMLOUVY -->
+    <div class="page" id="page-odstoupeni">
+      <div class="page-header">
+        <div class="page-title">↩️ Odstoupení od smlouvy</div>
+        <div class="table-actions">
+          <button class="refresh-btn" onclick="loadOdstoupeni()">↻ Obnovit</button>
+        </div>
+      </div>
+      <p style="padding:0 4px 10px;font-size:0.82rem;color:var(--text-light)">Online oznámení z webového formuláře (čl. 4 obchodních podmínek). Samotné zrušení rezervace nebo vrácení platby prosím vyřiď ručně v Rezervacích / Účetnictví — tady si jen označ, že je oznámení vyřízené.</p>
+      <div class="table-wrap">
+        <div id="odstoupeniTable"><div class="loading">Načítám...</div></div>
+      </div>
     </div>
 
     <!-- NEWSLETTER -->
@@ -1856,6 +1871,7 @@ function showPage(name, el) {
   if (name === 'rezervace') loadRezervace();
   if (name === 'poukazy') loadPoukazy();
   if (name === 'zakaznici') loadZakaznici();
+  if (name === 'odstoupeni') loadOdstoupeni();
   if (name === 'newsletter') loadNewsletter();
   if (name === 'sablony') loadSablony();
   if (name === 'recenze') loadRecenze();
@@ -2043,6 +2059,9 @@ async function loadPrehled() {
     const poukBadge = document.getElementById('navBadgePoukazy');
     if (d.poukazyZadostiNove > 0) { poukBadge.textContent = d.poukazyZadostiNove; poukBadge.style.display = 'inline-block'; }
     else poukBadge.style.display = 'none';
+    const odstoupeniBadge = document.getElementById('navBadgeOdstoupeni');
+    if (d.odstoupeniNova > 0) { odstoupeniBadge.textContent = d.odstoupeniNova; odstoupeniBadge.style.display = 'inline-block'; }
+    else odstoupeniBadge.style.display = 'none';
     const nizkySklad = spocitatNizkySklad(produkty).length;
     const produktyBadge = document.getElementById('navBadgeProdukty');
     if (nizkySklad > 0) { produktyBadge.textContent = nizkySklad; produktyBadge.style.display = 'inline-block'; }
@@ -3443,6 +3462,35 @@ async function loadPoukazyZadosti() {
         </td>
       </tr>`).join('')}</tbody></table>`;
   } catch (e) { document.getElementById('poukazyZadostiTable').innerHTML = '<div class="error-msg">Chyba načítání.</div>'; }
+}
+async function loadOdstoupeni() {
+  try {
+    const seznam = await adminFetch(API + '/admin/odstoupeni').then(r => r.json());
+    if (!seznam.length) { document.getElementById('odstoupeniTable').innerHTML = '<div class="empty">Žádná oznámení o odstoupení od smlouvy</div>'; return; }
+    const stavBadge = { nova: '<span class="badge badge-nova">🆕 Nová</span>', vyrizena: '<span class="badge badge-ok">✅ Vyřízena</span>' };
+    document.getElementById('odstoupeniTable').innerHTML = `
+      <table><thead><tr><th>Datum</th><th>Týká se</th><th>Kdo</th><th>Poznámka</th><th>Stav</th><th>Akce</th></tr></thead>
+      <tbody>${seznam.map(o => `<tr>
+        <td>${new Date(o.vytvoreno).toLocaleDateString('cs-CZ')}</td>
+        <td>${escapeHtml(o.popis_sluzby)}${o.datum_uzavreni_smlouvy ? `<br><small style="color:var(--text-light)">smlouva ze dne ${new Date(o.datum_uzavreni_smlouvy).toLocaleDateString('cs-CZ')}</small>` : ''}${o.rezervace_id ? `<br><small style="color:var(--text-light)">rezervace #${o.rezervace_id}</small>` : ''}</td>
+        <td>${escapeHtml(o.jmeno)}<br><small>${o.email ? escapeHtml(o.email) : ''}${o.email && o.telefon ? ' | ' : ''}${o.telefon ? escapeHtml(o.telefon) : ''}</small>${o.adresa ? `<br><small style="color:var(--text-light)">${escapeHtml(o.adresa)}</small>` : ''}</td>
+        <td>${escapeHtml(o.poznamka) || '—'}</td>
+        <td>${stavBadge[o.stav] || o.stav}</td>
+        <td style="display:flex;gap:4px">
+          ${o.stav === 'nova' ? `<button class="btn btn-green btn-sm" onclick="vyriditOdstoupeni(${o.id})">✅ Vyřízeno</button>` : ''}
+          <button class="btn btn-red btn-sm" onclick="smazatOdstoupeni(${o.id})">🗑️</button>
+        </td>
+      </tr>`).join('')}</tbody></table>`;
+  } catch (e) { document.getElementById('odstoupeniTable').innerHTML = '<div class="error-msg">Chyba načítání.</div>'; }
+}
+async function vyriditOdstoupeni(id) {
+  await adminFetch(API + '/admin/odstoupeni/' + id + '/stav', { method: 'PATCH', body: JSON.stringify({ stav: 'vyrizena' }) });
+  loadOdstoupeni();
+}
+async function smazatOdstoupeni(id) {
+  if (!confirm('Trvale smazat toto oznámení o odstoupení od smlouvy?')) return;
+  await adminFetch(API + '/admin/odstoupeni/' + id, { method: 'DELETE' });
+  loadOdstoupeni();
 }
 async function ulozitZadostPole(id, pole, hodnota) {
   const telo = {};

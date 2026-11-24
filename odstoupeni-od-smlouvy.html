@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Odstoupení od smlouvy – Masáže Alesa</title>
+<meta name="description" content="Online formulář pro odstoupení od smlouvy uzavřené na dálku — Masáže Alesa, Hulín.">
+<meta name="robots" content="noindex, follow">
+<link rel="canonical" href="https://www.masazealesa.cz/odstoupeni-od-smlouvy.html">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant:ital,wght@0,400;0,600;0,700;1,400;1,600&family=Nunito:wght@300;400;600;700&subset=latin,latin-ext&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --cream: #fff5ef;
+    --terracotta: #d4856a;
+    --terracotta-dark: #b8604a;
+    --brown: #5c3a1e;
+    --text: #3a3530;
+    --text-light: #7a6f66;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: 'Nunito', sans-serif; color: var(--text); background: var(--cream); line-height: 1.7; }
+  header { padding: 1.2rem 1.5rem; background: rgba(253, 246, 238, 0.95); border-bottom: 1px solid rgba(196, 122, 74, 0.2); }
+  header a { color: var(--terracotta-dark); text-decoration: none; font-weight: 700; font-size: 0.9rem; }
+  .wrap { max-width: 640px; margin: 0 auto; padding: 2.5rem 1.5rem 5rem; }
+  h1 { font-family: 'Cormorant', Georgia, serif; font-size: 2rem; color: var(--brown); margin-bottom: 0.4rem; }
+  p.uvod { color: var(--text-light); font-size: 0.95rem; margin-bottom: 1.8rem; }
+  a { color: var(--terracotta-dark); }
+  .form-field { margin-bottom: 1.1rem; }
+  label { display: block; font-weight: 700; font-size: 0.88rem; color: var(--brown); margin-bottom: 0.3rem; }
+  input, textarea { width: 100%; padding: 0.7rem 0.9rem; border: 1.5px solid rgba(196,122,74,0.3); border-radius: 10px; font-family: 'Nunito', sans-serif; font-size: 0.95rem; background: #fff; }
+  textarea { min-height: 80px; resize: vertical; }
+  .btn-gold { background: #d4a84a; color: var(--brown); border: none; padding: 0.9rem 2rem; border-radius: 50px; font-weight: 700; font-size: 1rem; cursor: pointer; }
+  .btn-gold:disabled { opacity: 0.6; cursor: default; }
+  .form-msg { margin-top: 1rem; font-size: 0.9rem; font-weight: 700; }
+  .form-msg.err { color: #b8402a; }
+  .form-msg.ok { color: #3a9d5f; }
+  footer { text-align: center; padding: 2rem 1rem; font-size: 0.8rem; color: var(--text-light); }
+</style>
+</head>
+<body>
+
+<header>
+  <a href="index.html">← Zpět na web Masáže Alesa</a>
+</header>
+
+<div class="wrap">
+  <h1>Odstoupení od smlouvy</h1>
+  <p class="uvod">Pokud jste smlouvu (např. rezervaci masáže) uzavřeli na dálku přes web, máte podle zákona právo od ní do 14 dnů odstoupit bez udání důvodu — podrobnosti najdete v <a href="obchodni-podminky.html" target="_blank">obchodních podmínkách</a>. Oznámení můžete poslat i tímto formulářem.</p>
+
+  <form id="odstoupeniForm" onsubmit="return false;">
+    <input type="hidden" id="osRezervaceId">
+    <div class="form-field">
+      <label for="osPopis">Čeho se odstoupení týká*</label>
+      <textarea id="osPopis" placeholder="např. Rezervace masáže dne 5. 12. 2026" maxlength="500"></textarea>
+    </div>
+    <div class="form-field">
+      <label for="osDatum">Datum uzavření smlouvy</label>
+      <input type="date" id="osDatum">
+    </div>
+    <div class="form-field">
+      <label for="osJmeno">Jméno a příjmení*</label>
+      <input type="text" id="osJmeno" maxlength="100">
+    </div>
+    <div class="form-field">
+      <label for="osEmail">E-mail</label>
+      <input type="email" id="osEmail" maxlength="200">
+    </div>
+    <div class="form-field">
+      <label for="osTelefon">Telefon</label>
+      <input type="tel" id="osTelefon" maxlength="30">
+    </div>
+    <p style="font-size:0.8rem;color:var(--text-light);margin:-0.6rem 0 1.1rem">Uveďte prosím alespoň e-mail nebo telefon, ať se vám můžeme ozvat.</p>
+    <div class="form-field">
+      <label for="osAdresa">Adresa (nepovinné, pro případné vrácení platby poštou)</label>
+      <input type="text" id="osAdresa" maxlength="500">
+    </div>
+    <div class="form-field">
+      <label for="osPoznamka">Poznámka</label>
+      <textarea id="osPoznamka" placeholder="Nepovinné" maxlength="1000"></textarea>
+    </div>
+    <button type="button" class="btn-gold" id="osSubmitBtn" onclick="osOdeslat()">Odeslat odstoupení od smlouvy</button>
+    <p id="osZprava" class="form-msg"></p>
+  </form>
+</div>
+
+<footer>
+  Masáže Alesa · Alena Hasalová · Hulín
+</footer>
+
+<script>
+var API = 'https://masazealesa.onrender.com/api';
+
+(function prefillZOdkazu() {
+  var params = new URLSearchParams(location.search);
+  if (params.get('rezervace_id')) document.getElementById('osRezervaceId').value = params.get('rezervace_id');
+  if (params.get('popis')) document.getElementById('osPopis').value = params.get('popis');
+  if (params.get('datum')) document.getElementById('osDatum').value = params.get('datum');
+  if (params.get('jmeno')) document.getElementById('osJmeno').value = params.get('jmeno');
+  if (params.get('email')) document.getElementById('osEmail').value = params.get('email');
+  if (params.get('telefon')) document.getElementById('osTelefon').value = params.get('telefon');
+})();
+
+async function osOdeslat() {
+  var zprava = document.getElementById('osZprava');
+  zprava.className = 'form-msg';
+  var popis = document.getElementById('osPopis').value.trim();
+  var datum = document.getElementById('osDatum').value;
+  var jmeno = document.getElementById('osJmeno').value.trim();
+  var email = document.getElementById('osEmail').value.trim();
+  var telefon = document.getElementById('osTelefon').value.trim();
+  var adresa = document.getElementById('osAdresa').value.trim();
+  var poznamka = document.getElementById('osPoznamka').value.trim();
+  var rezervaceId = document.getElementById('osRezervaceId').value;
+
+  if (!popis || !jmeno) { zprava.textContent = 'Vyplňte prosím, čeho se odstoupení týká, a jméno.'; zprava.className = 'form-msg err'; return; }
+  if (!email && !telefon) { zprava.textContent = 'Uveďte prosím alespoň e-mail nebo telefon.'; zprava.className = 'form-msg err'; return; }
+
+  var btn = document.getElementById('osSubmitBtn');
+  btn.disabled = true; btn.textContent = 'Odesílám…';
+  try {
+    var res = await fetch(API + '/odstoupeni', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        popis_sluzby: popis, datum_uzavreni_smlouvy: datum || null, jmeno: jmeno,
+        email: email, telefon: telefon, adresa: adresa, poznamka: poznamka,
+        rezervace_id: rezervaceId || null
+      })
+    });
+    var data = await res.json();
+    if (!res.ok) { zprava.textContent = data.chyba || 'Odeslání se nezdařilo.'; zprava.className = 'form-msg err'; btn.disabled = false; btn.textContent = 'Odeslat odstoupení od smlouvy'; return; }
+    zprava.textContent = 'Oznámení o odstoupení od smlouvy bylo odesláno. Ozveme se vám.';
+    zprava.className = 'form-msg ok';
+    document.getElementById('odstoupeniForm').style.display = 'none';
+  } catch (e) {
+    zprava.textContent = 'Odeslání se nezdařilo, zkuste to prosím znovu nebo napište na info@masazealesa.cz.';
+    zprava.className = 'form-msg err';
+    btn.disabled = false; btn.textContent = 'Odeslat odstoupení od smlouvy';
+  }
+}
+</script>
+
+</body>
+</html>

@@ -1134,9 +1134,14 @@ async function ziskatSablonu(klic) {
   return VYCHOZI_SABLONY[klic];
 }
 
-async function vykreslitEmail(klic, promenne) {
+// "extraHtml" (nepovinné) se připojí ZA text šablony, ale PŘED obálku
+// emailSablona() — na rozdíl od textu šablony ho admin v adminu nemůže
+// přepsat/smazat (viz "Šablony e-mailů"). Používá se pro právně povinné
+// informace, které musí být v e-mailu vždy (např. odkaz na odstoupení od
+// smlouvy u potvrzení rezervace, viz POST /api/rezervace).
+async function vykreslitEmail(klic, promenne, extraHtml = '') {
   const s = await ziskatSablonu(klic);
-  return { predmet: vyplnitSablonu(s.predmet, promenne), html: emailSablona(vyplnitSablonu(s.telo, promenne)) };
+  return { predmet: vyplnitSablonu(s.predmet, promenne), html: emailSablona(vyplnitSablonu(s.telo, promenne) + extraHtml) };
 }
 
 // Automatická účtenka e-mailem (viz PATCH /rezervace/:id/platba,
@@ -1537,7 +1542,18 @@ app.post('/api/rezervace', async (req, res) => {
 
     if (email) {
       const podminkyPdf = nacistObchodniPodminkyPdf();
-      vykreslitEmail('prijata', { jmeno, masaz: nazevMasaze, datum: formatDatumCz(datum), cas: cas_od + '–' + cas_do })
+      // Čl. 4 obchodních podmínek — odkaz na online odstoupení od smlouvy
+      // musí být v e-mailu vždy, bez ohledu na to, jak si admin v adminu
+      // přizpůsobila text šablony "prijata" (viz vykreslitEmail výš).
+      const odstoupeniUrl = 'https://www.masazealesa.cz/odstoupeni-od-smlouvy.html'
+        + '?rezervace_id=' + encodeURIComponent(rezervace.id)
+        + '&popis=' + encodeURIComponent('Rezervace masáže (' + nazevMasaze + ') dne ' + formatDatumCz(datum) + ' ' + cas_od)
+        + '&datum=' + encodeURIComponent(new Date().toISOString().slice(0, 10))
+        + '&jmeno=' + encodeURIComponent(jmeno)
+        + (telefon ? '&telefon=' + encodeURIComponent(telefon) : '')
+        + '&email=' + encodeURIComponent(email);
+      const odstoupeniHtml = `<p style="font-size:0.85rem;color:#8c837b">Máte podle zákona právo od této rezervace do 14 dnů odstoupit — více v <a href="https://www.masazealesa.cz/obchodni-podminky.html">obchodních podmínkách</a> (viz příloha), odstoupit můžete i přímo online: <a href="${odstoupeniUrl}">Odstoupit od smlouvy</a>.</p>`;
+      vykreslitEmail('prijata', { jmeno, masaz: nazevMasaze, datum: formatDatumCz(datum), cas: cas_od + '–' + cas_do }, odstoupeniHtml)
         .then(({ predmet, html }) => odeslatEmail(email, predmet, html, podminkyPdf ? [{ filename: 'obchodni-podminky.pdf', content: podminkyPdf }] : null))
         .then(uspech => {
           if (!uspech) console.error('Potvrzovací e-mail k rezervaci ' + rezervace.id + ' se nepodařilo odeslat.');
@@ -1690,6 +1706,81 @@ app.post('/api/poukazy/zadost', async (req, res) => {
   }
 });
 
+// Online odstoupení od smlouvy uzavřené na dálku (čl. 4 obchodních podmínek,
+// povinnost zpřístupnit i online kanál od 1. 1. 2027 u smluv, kde má
+// spotřebitel právo odstoupit). Jen zaznamená oznámení a upozorní majitelku
+// e-mailem — samotné zrušení rezervace / případné vrácení platby zůstává
+// ruční krok v administraci (viz GET/PATCH/DELETE .../admin/odstoupeni
+// níže), stejně jako u poukazy_zadosti. Spotřebiteli se navíc potvrdí
+// přijetí oznámení e-mailem, pokud ho uvedl.
+app.post('/api/odstoupeni', async (req, res) => {
+  const { popis_sluzby, datum_uzavreni_smlouvy, jmeno, email, telefon, adresa, poznamka, rezervace_id } = req.body || {};
+  if (!popis_sluzby || !popis_sluzby.trim() || !jmeno || !jmeno.trim()) {
+    return res.status(400).json({ chyba: 'Vyplňte prosím, čeho se odstoupení týká, a jméno.' });
+  }
+  if ((!email || !email.trim()) && (!telefon || !telefon.trim())) {
+    return res.status(400).json({ chyba: 'Uveďte prosím alespoň e-mail nebo telefon, ať se vám můžeme ozvat.' });
+  }
+  if (email && !email.includes('@')) return res.status(400).json({ chyba: 'Zadejte prosím platný e-mail.' });
+  if (
+    popis_sluzby.length > 500 || jmeno.length > 100 || (email && email.length > 200) ||
+    (telefon && telefon.length > 30) || (adresa && adresa.length > 500) || (poznamka && poznamka.length > 1000)
+  ) {
+    return res.status(400).json({ chyba: 'Některé z vyplněných polí je příliš dlouhé.' });
+  }
+  let datumUzavreniKUlozeni = null;
+  if (datum_uzavreni_smlouvy) {
+    const d = new Date(datum_uzavreni_smlouvy);
+    if (Number.isNaN(d.getTime())) return res.status(400).json({ chyba: 'Zadejte prosím platné datum uzavření smlouvy, nebo pole nechte prázdné.' });
+    datumUzavreniKUlozeni = datum_uzavreni_smlouvy;
+  }
+  let rezervaceIdKUlozeni = null;
+  if (rezervace_id !== undefined && rezervace_id !== null && rezervace_id !== '') {
+    const rid = Number(rezervace_id);
+    if (!Number.isInteger(rid)) return res.status(400).json({ chyba: 'Neplatné ID rezervace.' });
+    rezervaceIdKUlozeni = rid;
+  }
+
+  try {
+    const { rows: [zadost] } = await db.query(
+      `INSERT INTO odstoupeni_zadosti (popis_sluzby, datum_uzavreni_smlouvy, jmeno, email, telefon, adresa, poznamka, rezervace_id, stav)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'nova') RETURNING *`,
+      [popis_sluzby.trim(), datumUzavreniKUlozeni, jmeno.trim(), email || null, telefon || null, adresa || null, poznamka || null, rezervaceIdKUlozeni]
+    );
+    res.json({ ok: true, zadost });
+
+    odeslatEmail(EMAIL_MAJITELKY, 'Odstoupení od smlouvy – ' + jmeno, emailSablona(`
+      <h2>Online oznámení o odstoupení od smlouvy</h2>
+      <table class="rez-detail" width="100%" cellpadding="0" cellspacing="0">
+        <tr><td>
+          <strong>Týká se:</strong> ${popis_sluzby}<br>
+          <strong>Datum uzavření smlouvy:</strong> ${datumUzavreniKUlozeni ? formatDatumCz(datumUzavreniKUlozeni) : '—'}<br>
+          <strong>Jméno:</strong> ${jmeno}<br>
+          <strong>E-mail:</strong> ${email || '—'}<br>
+          <strong>Telefon:</strong> ${telefon || '—'}<br>
+          <strong>Adresa:</strong> ${adresa || '—'}<br>
+          <strong>Poznámka:</strong> ${poznamka || '—'}
+        </td></tr>
+      </table>
+      <p>Vyřiď v administraci v záložce Rezervace → Odstoupení od smlouvy.</p>
+    `)).then(uspech => {
+      if (!uspech) console.error('Upozornění majitelce na odstoupení od smlouvy ' + zadost.id + ' se nepodařilo odeslat.');
+    });
+
+    if (email) {
+      odeslatEmail(email, 'Potvrzení přijetí oznámení o odstoupení od smlouvy – Masáže Alesa', emailSablona(`
+        <h2>Dobrý den,</h2>
+        <p>potvrzuji přijetí vašeho oznámení o odstoupení od smlouvy (${popis_sluzby}). Brzy se vám ozvu s dalším postupem, případně vrácením platby.</p>
+        <p style="font-size:0.85rem;color:#777">Alena Hasalová · Masáže Alesa · Včelín 1211, 768 24 Hulín · IČO: 03237885</p>
+        <p>S pozdravem,<br><strong>Alena Hasalová</strong><br>Masáže Alesa</p>
+      `)).catch(() => {});
+    }
+  } catch (e) {
+    console.error('POST /api/odstoupeni selhalo:', e);
+    if (!res.headersSent) res.status(500).json({ chyba: 'Interní chyba serveru.' });
+  }
+});
+
 // Přihlášení k newsletteru z webového formuláře ("Tipy a novinky přímo do e-mailu")
 app.post('/api/newsletter', async (req, res) => {
   const { email, jmeno } = req.body || {};
@@ -1789,11 +1880,12 @@ app.get('/api/admin/prehled', async (req, res) => {
     const dnes = new Date().toISOString().slice(0, 10);
     const zacatekMesice = dnes.slice(0, 8) + '01';
     const zaXDni = new Date(Date.now() + POUKAZ_BRZY_EXPIRUJE_DNI * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-    const [rez, pouk, zad, prod] = await Promise.all([
+    const [rez, pouk, zad, prod, odstoupeni] = await Promise.all([
       db.query('SELECT id, stav, datum, cas_od, cas_do, jmeno, masaz, cena, stav_platby FROM rezervace'),
       db.query('SELECT id, kod, stav, zustatek, platnost_do FROM poukazy'),
       db.query('SELECT id, stav FROM poukazy_zadosti'),
-      db.query('SELECT cena, vytvoreno FROM prodeje')
+      db.query('SELECT cena, vytvoreno FROM prodeje'),
+      db.query('SELECT id, stav FROM odstoupeni_zadosti')
     ]);
 
     // "Dnešní program" — dnešní rezervace (kromě zrušených), seřazené podle času.
@@ -1837,6 +1929,7 @@ app.get('/api/admin/prehled', async (req, res) => {
       poukazyAktivni: pouk.rows.filter(jePoukazSkutecneAktivni).length,
       poukazyHodnota: pouk.rows.filter(jePoukazSkutecneAktivni).reduce((s, p) => s + Number(p.zustatek), 0),
       poukazyZadostiNove: zad.rows.filter(z => z.stav === 'nova').length,
+      odstoupeniNova: odstoupeni.rows.filter(o => o.stav === 'nova').length,
       poukazyBrzyExpirujiPocet: poukazyBrzyExpirujiSeznam.length,
       poukazyBrzyExpiruji: poukazyBrzyExpirujiSeznam,
       dnesniProgram,
@@ -3687,6 +3780,32 @@ app.delete('/api/admin/poukazy/zadosti/:id', async (req, res) => {
   } finally {
     client.release();
   }
+});
+
+// -- Odstoupení od smlouvy (online formulář, čl. 4 obchodních podmínek) --
+app.get('/api/admin/odstoupeni', async (req, res) => {
+  try {
+    const { rows } = await db.query('SELECT * FROM odstoupeni_zadosti ORDER BY vytvoreno DESC');
+    res.json(rows);
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
+app.patch('/api/admin/odstoupeni/:id/stav', async (req, res) => {
+  const { stav } = req.body || {};
+  if (!['nova', 'vyrizena'].includes(stav)) return res.status(400).json({ chyba: 'Neplatný stav.' });
+  try {
+    const { rowCount } = await db.query('UPDATE odstoupeni_zadosti SET stav = $1 WHERE id = $2', [stav, req.params.id]);
+    if (!rowCount) return res.status(404).json({ chyba: 'Oznámení nebylo nalezeno.' });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
+app.delete('/api/admin/odstoupeni/:id', async (req, res) => {
+  try {
+    const { rowCount } = await db.query('DELETE FROM odstoupeni_zadosti WHERE id = $1', [req.params.id]);
+    if (!rowCount) return res.status(404).json({ chyba: 'Oznámení nebylo nalezeno.' });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
 // -- Klientky (Fáze 6D) — zdroj pravdy pro CRM (starý model "zakaznici" +
