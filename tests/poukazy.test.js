@@ -840,6 +840,48 @@ async function main() {
       console.log('OK — admin může termín vyzvednutí, šablonu i platnost doplnit před schválením, po schválení už úprava žádosti nejde');
     }
 
+    {
+      // Ruční úprava už VYDANÉHO poukazu (ne žádosti) — "pro koho", šablona
+      // a datum platnosti. Typicky když se dárek k obdarované osobě dostane
+      // později, než kdy byl zakoupen, a majitelka chce posunout platnost od
+      // skutečného předání, nebo si rozmyslí vzhled poukazu.
+      const typy = await adminFetch('/admin/poukazy/typy').then(r => r.json());
+      const typPlatnost = typy[0];
+      const novy = await adminFetch('/admin/poukazy', {
+        method: 'POST', body: JSON.stringify({ poukaz_typ_id: typPlatnost.id, kupujici_jmeno: 'TEST-PLATNOST (smazat)', pro_koho: 'puvodni' })
+      }).then(r => r.json());
+      uklidPoukazy.push(novy.poukaz.id);
+
+      const novaPlatnost = posunDnu(210); // +7 měsíců
+      const uprava = await adminFetch(`/admin/poukazy/${novy.poukaz.id}`, { method: 'PATCH', body: JSON.stringify({ platnost_do: novaPlatnost, sablona: 'vanocni', pro_koho: 'upravena maminka' }) });
+      const upravaData = await uprava.json();
+      assert.equal(uprava.status, 200, 'Úprava aktivního poukazu selhala: ' + JSON.stringify(upravaData));
+      assert.equal(upravaData.poukaz.platnost_do, novaPlatnost, 'Nová platnost se neuložila');
+      assert.equal(upravaData.poukaz.sablona, 'vanocni', 'Nová šablona se neuložila');
+      assert.equal(upravaData.poukaz.pro_koho, 'upravena maminka', 'Nové "pro koho" se neuložilo');
+
+      const neplatneDatum = await adminFetch(`/admin/poukazy/${novy.poukaz.id}`, { method: 'PATCH', body: JSON.stringify({ platnost_do: 'neplatne' }) });
+      assert.equal(neplatneDatum.status, 400, 'Neplatné datum platnosti měl odmítnout');
+
+      const neplatnaSablonaPoukazu = await adminFetch(`/admin/poukazy/${novy.poukaz.id}`, { method: 'PATCH', body: JSON.stringify({ sablona: 'neexistujici' }) });
+      assert.equal(neplatnaSablonaPoukazu.status, 400, 'Neplatná šablona poukazu měla být odmítnuta');
+
+      const bezZmenyPoukazu = await adminFetch(`/admin/poukazy/${novy.poukaz.id}`, { method: 'PATCH', body: JSON.stringify({}) });
+      assert.equal(bezZmenyPoukazu.status, 400, 'Prázdná úprava (žádné pole) měla být odmítnuta');
+
+      const neexistujici = await adminFetch(`/admin/poukazy/999999999`, { method: 'PATCH', body: JSON.stringify({ platnost_do: novaPlatnost }) });
+      assert.equal(neexistujici.status, 404, 'Neexistující poukaz měl vrátit 404');
+
+      // Na zrušeném poukazu úprava platnosti nedává smysl a musí být odmítnuta,
+      // ale "pro koho" a šablona jsou čistě popisné — jdou upravit i tam.
+      await adminFetch(`/admin/poukazy/${novy.poukaz.id}/stav`, { method: 'PATCH', body: JSON.stringify({ stav: 'zruseny' }) });
+      const platnostNaZrusenem = await adminFetch(`/admin/poukazy/${novy.poukaz.id}`, { method: 'PATCH', body: JSON.stringify({ platnost_do: novaPlatnost }) });
+      assert.equal(platnostNaZrusenem.status, 400, 'Úprava platnosti na zrušeném poukazu měla být odmítnuta');
+      const proKohoNaZrusenem = await adminFetch(`/admin/poukazy/${novy.poukaz.id}`, { method: 'PATCH', body: JSON.stringify({ pro_koho: 'oprava i po zruseni' }) });
+      assert.equal(proKohoNaZrusenem.status, 200, '"Pro koho" na zrušeném poukazu by mělo jít upravit (čistě popisné)');
+      console.log('OK — admin může ručně upravit "pro koho", šablonu a (jen u aktivního/částečně využitého) platnost vydaného poukazu');
+    }
+
     console.log('\n✅ VŠECHNY TESTY POUKAZŮ PROŠLY');
   } finally {
     // Hlavní testovací poukaz má v tuhle chvíli už platební historii (scénáře

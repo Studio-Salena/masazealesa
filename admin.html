@@ -1266,6 +1266,34 @@ tr:hover td{background:var(--cream)}
   </div>
 </div>
 
+<!-- MODAL: Upravit vydaný poukaz (pro koho, šablona, platnost) -->
+<div class="modal-overlay" id="modalUpravitPoukaz">
+  <div class="modal">
+    <h3>Upravit poukaz <code id="upPoukazKod" style="font-size:0.85rem"></code></h3>
+    <div id="upMsg"></div>
+    <div class="form-group">
+      <label>Pro koho</label>
+      <input type="text" id="upProKoho" class="form-input" maxlength="500">
+    </div>
+    <div class="form-group">
+      <label>Vzhled poukazu</label>
+      <select id="upSablona">
+        <option value="klasicky">🌸 Klasický</option>
+        <option value="vanocni">🎄 Vánoční</option>
+      </select>
+    </div>
+    <div class="form-group" id="upPlatnostWrap">
+      <label>Platnost do</label>
+      <input type="date" id="upPlatnost">
+    </div>
+    <p id="upPlatnostInfo" style="display:none;font-size:0.8rem;color:var(--text-light)">Platnost lze upravit jen u aktivního nebo částečně využitého poukazu.</p>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modalUpravitPoukaz')">Zrušit</button>
+      <button class="btn btn-primary" onclick="ulozitUpravuPoukazu()">Uložit</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL: Odeslat doklad o úhradě (pro zaměstnavatele/pojišťovnu) -->
 <div class="modal-overlay" id="modalDoklad">
   <div class="modal">
@@ -3195,6 +3223,42 @@ async function exportStromecek() {
 }
 
 // ── POUKAZY ──
+async function ulozitPlatnostPoukazu(id, hodnota) {
+  if (!hodnota) { alert('Zadejte prosím platné datum.'); loadPoukazy(); return; }
+  const res = await adminFetch(API + '/admin/poukazy/' + id, { method: 'PATCH', body: JSON.stringify({ platnost_do: hodnota }) });
+  if (!res.ok) alert('Platnost se nepodařilo uložit.');
+  loadPoukazy();
+}
+let upravovanyPoukazId = null;
+function otevritUpravitPoukaz(id) {
+  const p = posledniPoukazy.find(x => x.id === id);
+  if (!p) return;
+  upravovanyPoukazId = id;
+  document.getElementById('upPoukazKod').textContent = p.kod;
+  document.getElementById('upProKoho').value = p.pro_koho || '';
+  document.getElementById('upSablona').value = p.sablona === 'vanocni' ? 'vanocni' : 'klasicky';
+  const platnostEditovatelna = ['aktivni', 'castecne_vyuzity'].includes(p.stav);
+  document.getElementById('upPlatnostWrap').style.display = platnostEditovatelna ? '' : 'none';
+  document.getElementById('upPlatnostInfo').style.display = platnostEditovatelna ? 'none' : '';
+  document.getElementById('upPlatnost').value = p.platnost_do;
+  document.getElementById('upMsg').innerHTML = '';
+  openModal('modalUpravitPoukaz');
+}
+async function ulozitUpravuPoukazu() {
+  const msg = document.getElementById('upMsg');
+  const telo = {
+    pro_koho: document.getElementById('upProKoho').value.trim(),
+    sablona: document.getElementById('upSablona').value
+  };
+  if (document.getElementById('upPlatnostWrap').style.display !== 'none') {
+    telo.platnost_do = document.getElementById('upPlatnost').value;
+  }
+  const res = await adminFetch(API + '/admin/poukazy/' + upravovanyPoukazId, { method: 'PATCH', body: JSON.stringify(telo) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { msg.innerHTML = '<div class="error-msg">' + (data.chyba || 'Uložení selhalo.') + '</div>'; return; }
+  closeModal('modalUpravitPoukaz');
+  loadPoukazy();
+}
 let posledniPoukazy = [];
 async function loadPoukazy() {
   await inicializovatVzorek('klasicky');
@@ -3219,11 +3283,14 @@ async function loadPoukazy() {
           <td>${ { dar: '<span class="badge badge-cekajici">🎁 Dar</span>', vratka: '<span class="badge badge-cekajici">↺ Vratka</span>' }[p.ucel] || '<span class="badge badge-ok">🛍️ Prodej</span>' }</td>
           <td><strong>${Number(p.hodnota).toLocaleString('cs-CZ')} Kč</strong>${p.konkretni_masaz ? `<br><small style="color:var(--text-light)">🧖 ${escapeHtml(p.konkretni_masaz)}</small>` : ''}</td>
           <td>${Number(p.zustatek).toLocaleString('cs-CZ')} Kč</td>
-          <td>${new Date(p.platnost_do).toLocaleDateString('cs-CZ')}</td>
+          <td>${['aktivni', 'castecne_vyuzity'].includes(p.stav)
+            ? `<input type="date" class="form-input" style="width:140px;padding:4px 6px;font-size:0.82rem" value="${p.platnost_do}" onchange="ulozitPlatnostPoukazu(${p.id},this.value)">`
+            : new Date(p.platnost_do).toLocaleDateString('cs-CZ')}</td>
           <td>${escapeHtml(p.kupujici_jmeno) || '—'}</td>
           <td><span class="badge ${badgeTrida}">${stav.text}</span></td>
           <td>${vykreslitUhradaPoukazu(p)}</td>
           <td style="display:flex;gap:4px">
+            <button class="btn btn-outline btn-sm" onclick="otevritUpravitPoukaz(${p.id})" title="Upravit (pro koho, šablona, platnost)">✏️</button>
             <button class="btn btn-outline btn-sm" onclick="zobrazitPoukaz(${p.id})" title="Zobrazit / vytisknout">🖨️</button>
             <button class="btn btn-outline btn-sm" onclick="zobrazitHistoriiPoukazu(${p.id})" title="Historie čerpání">📜</button>
             ${p.stav !== 'zruseny' ? `<button class="btn btn-outline btn-sm" onclick="zrusitPoukaz(${p.id})" title="Zrušit">❌</button>` : ''}

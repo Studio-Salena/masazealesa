@@ -3199,6 +3199,53 @@ app.patch('/api/admin/poukazy/:id/stav', async (req, res) => {
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
+// Ruční úprava už VYDANÉHO poukazu — "pro koho", vzhled (šablona) a datum
+// platnosti. Typicky když se obdarovaná osoba k poukazu dostane později, než
+// kdy byl zakoupen (např. vánoční dárek) a majitelka chce posunout platnost
+// od skutečného předání, nebo si zákaznice ještě před vyzvednutím rozmyslí
+// šablonu. Hodnota/zůstatek/kód/stav se tu NEupravují — pro ty existují
+// samostatné (bezpečnější) endpointy výš. Platnost lze upravit jen u
+// aktivního/částečně využitého poukazu — u uzavřeného (použitý/zrušený) by
+// to nic neznamenalo; "pro koho" a šablona jdou upravit vždy (čistě popisné).
+app.patch('/api/admin/poukazy/:id', async (req, res) => {
+  const { pro_koho, sablona, platnost_do } = req.body || {};
+  const sloupce = [];
+  const hodnoty = [];
+  let i = 1;
+
+  if (pro_koho !== undefined) {
+    if (pro_koho && pro_koho.length > 500) return res.status(400).json({ chyba: '"Pro koho" je příliš dlouhé.' });
+    sloupce.push(`pro_koho = $${i++}`); hodnoty.push(pro_koho || null);
+  }
+  if (sablona !== undefined) {
+    if (!['klasicky', 'vanocni'].includes(sablona)) return res.status(400).json({ chyba: 'Neplatná šablona poukazu.' });
+    sloupce.push(`sablona = $${i++}`); hodnoty.push(sablona);
+  }
+  let kontrolaStavuProPlatnost = false;
+  if (platnost_do !== undefined) {
+    if (!platnost_do) return res.status(400).json({ chyba: 'Zadejte prosím nové datum platnosti.' });
+    const datum = new Date(platnost_do);
+    if (Number.isNaN(datum.getTime())) return res.status(400).json({ chyba: 'Zadejte prosím platné datum.' });
+    sloupce.push(`platnost_do = $${i++}`); hodnoty.push(platnost_do);
+    kontrolaStavuProPlatnost = true;
+  }
+  if (!sloupce.length) return res.status(400).json({ chyba: 'Žádná změna k uložení.' });
+
+  try {
+    const { rows: [poukaz] } = await db.query('SELECT stav FROM poukazy WHERE id = $1', [req.params.id]);
+    if (!poukaz) return res.status(404).json({ chyba: 'Poukaz nebyl nalezen.' });
+    if (kontrolaStavuProPlatnost && !['aktivni', 'castecne_vyuzity'].includes(poukaz.stav)) {
+      return res.status(400).json({ chyba: 'Platnost lze upravit jen u aktivního nebo částečně využitého poukazu.' });
+    }
+    hodnoty.push(req.params.id);
+    const { rows: [aktualizovany] } = await db.query(
+      `UPDATE poukazy SET ${sloupce.join(', ')} WHERE id = $${i} RETURNING *`,
+      hodnoty
+    );
+    res.json({ ok: true, poukaz: aktualizovany });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
 // Etapa 2 — skutečně nová platba za poukaz, zaznamenaná PRÁVĚ TEĎ. Platí pro
 // poukaz čekající na platbu (stav_uhrady='nezaplaceno', typicky vyřízená
 // žádost z webu) i pro historický poukaz (stav_uhrady IS NULL), pokud si
