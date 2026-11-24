@@ -203,7 +203,7 @@ async function main() {
     const telefon = novyTelefon();
     const vysledek = await verejnaRezervace({
       datum, cas_od: '10:00', jmeno: 'TEST-8B-REZERVACE (smazat)', telefon, email: 'test-8b-p01@example.invalid',
-      cenik_id: cenik.id, souhlas_gdpr: true,
+      cenik_id: cenik.id, souhlas_gdpr: true, souhlas_podminky: true,
       // podvržené pole, které API nečte — ověřujeme, že se ignorují
       cena: 1, delka_min: 5
     });
@@ -230,8 +230,8 @@ async function main() {
     const datum = dnyDopredu(15);
     await zajistitSirokouDobu(datum);
     const telefonA = novyTelefon(), telefonB = novyTelefon();
-    const teloA = { datum, cas_od: '11:00', jmeno: 'TEST-8B-P02-A (smazat)', telefon: telefonA, email: 'test-8b-p02a@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true };
-    const teloB = { datum, cas_od: '11:00', jmeno: 'TEST-8B-P02-B (smazat)', telefon: telefonB, email: 'test-8b-p02b@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true };
+    const teloA = { datum, cas_od: '11:00', jmeno: 'TEST-8B-P02-A (smazat)', telefon: telefonA, email: 'test-8b-p02a@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true, souhlas_podminky: true };
+    const teloB = { datum, cas_od: '11:00', jmeno: 'TEST-8B-P02-B (smazat)', telefon: telefonB, email: 'test-8b-p02b@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true, souhlas_podminky: true };
 
     const [a, b] = await Promise.all([verejnaRezervace(teloA), verejnaRezervace(teloB)]);
     // Zaznamenat OBA výsledky PŘED assertem — pokud by regrese způsobila
@@ -264,12 +264,12 @@ async function main() {
     const datum = dnyDopredu(16);
     await zajistitSirokouDobu(datum);
     const telefon1 = novyTelefon();
-    const prvni = await verejnaRezervace({ datum, cas_od: '10:00', jmeno: 'TEST-8B-P03-1 (smazat)', telefon: telefon1, email: 'test-8b-p03-1@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true });
+    const prvni = await verejnaRezervace({ datum, cas_od: '10:00', jmeno: 'TEST-8B-P03-1 (smazat)', telefon: telefon1, email: 'test-8b-p03-1@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true, souhlas_podminky: true });
     zaznamenejVysledekRezervace(prvni);
     assert.equal(prvni.status, 200, JSON.stringify(prvni.data));
 
     const telefon2 = novyTelefon();
-    const druha = await verejnaRezervace({ datum, cas_od: '10:50', jmeno: 'TEST-8B-P03-2 (smazat)', telefon: telefon2, email: 'test-8b-p03-2@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true });
+    const druha = await verejnaRezervace({ datum, cas_od: '10:50', jmeno: 'TEST-8B-P03-2 (smazat)', telefon: telefon2, email: 'test-8b-p03-2@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true, souhlas_podminky: true });
     zaznamenejVysledekRezervace(druha);
     assert.equal(druha.status, 409, 'rezervace 10:50 (uvnitř 60min+30min bufferu od 10:00-11:00) musí kolidovat: ' + JSON.stringify(druha.data));
 
@@ -288,12 +288,12 @@ async function main() {
     await nastavitPracovniDobu(dnVTydnu(datum), '09:00', '17:00', null, null, true);
 
     const telefonPred = novyTelefon();
-    const pred = await verejnaRezervace({ datum, cas_od: '08:00', jmeno: 'TEST-8B-P04-A (smazat)', telefon: telefonPred, email: 'test-8b-p04a@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true });
+    const pred = await verejnaRezervace({ datum, cas_od: '08:00', jmeno: 'TEST-8B-P04-A (smazat)', telefon: telefonPred, email: 'test-8b-p04a@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true, souhlas_podminky: true });
     zaznamenejVysledekRezervace(pred);
     assert.equal(pred.status, 400, 'rezervace před otevřením (08:00, otevřeno od 09:00) musí být 400: ' + JSON.stringify(pred.data));
 
     const telefonPo = novyTelefon();
-    const po = await verejnaRezervace({ datum, cas_od: '17:00', jmeno: 'TEST-8B-P04-B (smazat)', telefon: telefonPo, email: 'test-8b-p04b@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true });
+    const po = await verejnaRezervace({ datum, cas_od: '17:00', jmeno: 'TEST-8B-P04-B (smazat)', telefon: telefonPo, email: 'test-8b-p04b@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true, souhlas_podminky: true });
     zaznamenejVysledekRezervace(po);
     assert.equal(po.status, 400, 'rezervace 17:00 (60 min, konec 18:00, zavřeno 17:00) musí být 400: ' + JSON.stringify(po.data));
 
@@ -314,7 +314,7 @@ async function main() {
     await nastavitPracovniDobu(dnVTydnu(datum), '09:00', '18:00', '12:00', '13:00', true);
 
     const telefon = novyTelefon();
-    const vysledek = await verejnaRezervace({ datum, cas_od: '12:15', jmeno: 'TEST-8B-P05 (smazat)', telefon, email: 'test-8b-p05@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true });
+    const vysledek = await verejnaRezervace({ datum, cas_od: '12:15', jmeno: 'TEST-8B-P05 (smazat)', telefon, email: 'test-8b-p05@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true, souhlas_podminky: true });
     zaznamenejVysledekRezervace(vysledek);
     assert.equal(vysledek.status, 400, 'rezervace 12:15 (60 min, zasahuje do pauzy 12:00-13:00) musí být 400: ' + JSON.stringify(vysledek.data));
 
@@ -333,7 +333,7 @@ async function main() {
     await vytvoritVyjimku(datum, datum); // bez otevreno_od/do = celý den zavřeno
 
     const telefon = novyTelefon();
-    const vysledek = await verejnaRezervace({ datum, cas_od: '10:00', jmeno: 'TEST-8B-P06 (smazat)', telefon, email: 'test-8b-p06@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true });
+    const vysledek = await verejnaRezervace({ datum, cas_od: '10:00', jmeno: 'TEST-8B-P06 (smazat)', telefon, email: 'test-8b-p06@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true, souhlas_podminky: true });
     zaznamenejVysledekRezervace(vysledek);
     assert.equal(vysledek.status, 400, 'rezervace v den s celodenní provozní výjimkou musí být 400: ' + JSON.stringify(vysledek.data));
 
@@ -349,7 +349,7 @@ async function main() {
   {
     const datum = dnyDopredu(22);
     const telefon = novyTelefon();
-    const vysledek = await verejnaRezervace({ datum, cas_od: '10:00', jmeno: 'TEST-8B-P07 (smazat)', telefon, email: 'test-8b-p07@example.invalid', cenik_id: 999999, souhlas_gdpr: true });
+    const vysledek = await verejnaRezervace({ datum, cas_od: '10:00', jmeno: 'TEST-8B-P07 (smazat)', telefon, email: 'test-8b-p07@example.invalid', cenik_id: 999999, souhlas_gdpr: true, souhlas_podminky: true });
     zaznamenejVysledekRezervace(vysledek);
     assert.equal(vysledek.status, 404, 'neexistující cenik_id musí vrátit 404: ' + JSON.stringify(vysledek.data));
     const pocet = await pocetRezervaciNaSlot(datum, '10:00');
@@ -365,7 +365,7 @@ async function main() {
     const cenik = await vytvoritTestovaciCenik(60, false);
     const datum = dnyDopredu(23);
     const telefon = novyTelefon();
-    const vysledek = await verejnaRezervace({ datum, cas_od: '10:00', jmeno: 'TEST-8B-P08 (smazat)', telefon, email: 'test-8b-p08@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true });
+    const vysledek = await verejnaRezervace({ datum, cas_od: '10:00', jmeno: 'TEST-8B-P08 (smazat)', telefon, email: 'test-8b-p08@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true, souhlas_podminky: true });
     zaznamenejVysledekRezervace(vysledek);
     assert.equal(vysledek.status, 400, 'položka s rezervovatelna=false musí vrátit 400: ' + JSON.stringify(vysledek.data));
     const pocet = await pocetRezervaciNaSlot(datum, '10:00');
@@ -399,6 +399,20 @@ async function main() {
     const pocetKlB = await pocetKlientekSTelefonem(telefonB);
     assert.equal(pocetKlA + pocetKlB, 0, 'bez GDPR souhlasu nesmí vzniknout žádná klientka — potvrzuje, že validace proběhne PŘED najitNeboVytvoritKlientku');
 
+    // Souhlas s obchodními podmínkami je stejně povinný jako GDPR souhlas.
+    const telefonC = novyTelefon();
+    const c = await verejnaRezervace({ datum, cas_od: '09:00', jmeno: 'TEST-8B-P09-C (smazat)', telefon: telefonC, email: 'test-8b-p09c@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true, souhlas_podminky: false });
+    zaznamenejVysledekRezervace(c);
+    assert.equal(c.status, 400, 'souhlas_podminky: false musí vrátit 400: ' + JSON.stringify(c.data));
+
+    const telefonD = novyTelefon();
+    const d = await verejnaRezervace({ datum, cas_od: '09:00', jmeno: 'TEST-8B-P09-D (smazat)', telefon: telefonD, email: 'test-8b-p09d@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true }); // souhlas_podminky úplně chybí
+    zaznamenejVysledekRezervace(d);
+    assert.equal(d.status, 400, 'chybějící souhlas_podminky musí vrátit 400: ' + JSON.stringify(d.data));
+
+    const pocetRezCD = (await pocetRezervaciNaSlot(datum, '09:00'));
+    assert.equal(pocetRezCD, 0, 'bez souhlasu s obchodními podmínkami nesmí vzniknout žádná rezervace');
+
     const vse = await adminFetch('/admin/newsletter').then(x => x.json());
     assert.equal(vse.some(n => n.email === 'test-8b-p09a@example.invalid' || n.email === 'test-8b-p09b@example.invalid'), false, 'bez úspěšné rezervace nesmí vzniknout ani newsletter záznam');
 
@@ -411,7 +425,7 @@ async function main() {
   // P1.1 — reprezentativní chybějící povinné pole
   {
     const datum = dnyDopredu(27);
-    const vysledek = await verejnaRezervace({ /* cas_od chybí */ datum, jmeno: 'TEST-8B-P1-1 (smazat)', telefon: novyTelefon(), email: 'test-8b-p11@example.invalid', cenik_id: 1, souhlas_gdpr: true });
+    const vysledek = await verejnaRezervace({ /* cas_od chybí */ datum, jmeno: 'TEST-8B-P1-1 (smazat)', telefon: novyTelefon(), email: 'test-8b-p11@example.invalid', cenik_id: 1, souhlas_gdpr: true, souhlas_podminky: true });
     zaznamenejVysledekRezervace(vysledek);
     assert.equal(vysledek.status, 400, JSON.stringify(vysledek.data));
     ok('P1.1) chybějící povinné pole (cas_od) → 400');
@@ -420,7 +434,7 @@ async function main() {
   // P1.2 — reprezentativní prázdné povinné pole
   {
     const datum = dnyDopredu(27);
-    const vysledek = await verejnaRezervace({ datum, cas_od: '10:00', jmeno: '', telefon: novyTelefon(), email: 'test-8b-p12@example.invalid', cenik_id: 1, souhlas_gdpr: true });
+    const vysledek = await verejnaRezervace({ datum, cas_od: '10:00', jmeno: '', telefon: novyTelefon(), email: 'test-8b-p12@example.invalid', cenik_id: 1, souhlas_gdpr: true, souhlas_podminky: true });
     zaznamenejVysledekRezervace(vysledek);
     assert.equal(vysledek.status, 400, JSON.stringify(vysledek.data));
     ok('P1.2) prázdné povinné pole (jmeno:"") → 400 (JS truthy kontrola zachytí i prázdný string)');
@@ -432,7 +446,7 @@ async function main() {
     const datum = dnyDopredu(28);
     await zajistitSirokouDobu(datum);
     const telefon = novyTelefon();
-    const vysledek = await verejnaRezervace({ datum, cas_od: '10:00', jmeno: 'TEST-8B-P13 (smazat)', telefon, email: 'tohle-neni-platny-email', cenik_id: cenik.id, souhlas_gdpr: true });
+    const vysledek = await verejnaRezervace({ datum, cas_od: '10:00', jmeno: 'TEST-8B-P13 (smazat)', telefon, email: 'tohle-neni-platny-email', cenik_id: cenik.id, souhlas_gdpr: true, souhlas_podminky: true });
     zaznamenejVysledekRezervace(vysledek);
     assert.equal(vysledek.status, 400, 'neplatný e-mail (bez "@") musí po opravě 8C.3 vrátit 400: ' + JSON.stringify(vysledek.data));
     const pocet = await pocetRezervaciNaSlot(datum, '10:00');
@@ -449,7 +463,7 @@ async function main() {
     await zajistitSirokouDobu(datum);
     const dlouheJmeno = 'TEST-8B-DLOUHE-' + 'X'.repeat(90) + ' (smazat)'; // > 100 znaků (limit z 8C.2/8C.3)
     const telefon = novyTelefon();
-    const vysledek = await verejnaRezervace({ datum, cas_od: '10:00', jmeno: dlouheJmeno, telefon, email: 'test-8b-p14@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true });
+    const vysledek = await verejnaRezervace({ datum, cas_od: '10:00', jmeno: dlouheJmeno, telefon, email: 'test-8b-p14@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true, souhlas_podminky: true });
     zaznamenejVysledekRezervace(vysledek);
     assert.equal(vysledek.status, 400, 'jméno nad limitem 100 znaků musí po opravě 8C.3 vrátit 400: ' + JSON.stringify(vysledek.data));
     const pocet = await pocetRezervaciNaSlot(datum, '10:00');
@@ -464,7 +478,7 @@ async function main() {
     const cenik = await vytvoritTestovaciCenik(60, true);
     const datum = dnyZpet(1); // včera
     const telefon = novyTelefon();
-    const vysledek = await verejnaRezervace({ datum, cas_od: '10:00', jmeno: 'TEST-8B-P010 (smazat)', telefon, email: 'test-8b-p010@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true });
+    const vysledek = await verejnaRezervace({ datum, cas_od: '10:00', jmeno: 'TEST-8B-P010 (smazat)', telefon, email: 'test-8b-p010@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true, souhlas_podminky: true });
     zaznamenejVysledekRezervace(vysledek);
     assert.equal(vysledek.status, 400, 'rezervace na včerejší datum musí po opravě 8C.3 vrátit 400: ' + JSON.stringify(vysledek.data));
     const pocet = await pocetRezervaciNaSlot(datum, '10:00');
@@ -479,7 +493,7 @@ async function main() {
     const cenik = await vytvoritTestovaciCenik(60, true);
     const datum = dnyDopredu(36);
     await zajistitSirokouDobu(datum);
-    const vysledek = await verejnaRezervace({ datum, cas_od: '10:00', jmeno: 'TEST-8B-C1 (smazat)', telefon: '123', email: 'test-8b-c1@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true });
+    const vysledek = await verejnaRezervace({ datum, cas_od: '10:00', jmeno: 'TEST-8B-C1 (smazat)', telefon: '123', email: 'test-8b-c1@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true, souhlas_podminky: true });
     zaznamenejVysledekRezervace(vysledek);
     assert.equal(vysledek.status, 400, 'telefon "123" (míň než 9 číslic po normalizaci) musí vrátit 400: ' + JSON.stringify(vysledek.data));
     const pocet = await pocetRezervaciNaSlot(datum, '10:00');
@@ -492,7 +506,7 @@ async function main() {
     const cenik = await vytvoritTestovaciCenik(60, true);
     const datum = dnyDopredu(37);
     await zajistitSirokouDobu(datum);
-    const vysledek = await verejnaRezervace({ datum, cas_od: '10:00', jmeno: 'TEST-8B-C2 (smazat)', telefon: '+49 170 1234567', email: 'test-8b-c2@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true });
+    const vysledek = await verejnaRezervace({ datum, cas_od: '10:00', jmeno: 'TEST-8B-C2 (smazat)', telefon: '+49 170 1234567', email: 'test-8b-c2@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true, souhlas_podminky: true });
     zaznamenejVysledekRezervace(vysledek);
     assert.equal(vysledek.status, 200, 'legitimní zahraniční telefon musí projít: ' + JSON.stringify(vysledek.data));
     assert.ok(vysledek.data.rezervace.klientka_id, 'zahraniční telefon musí vytvořit klientku jako jakýkoli jiný validní telefon');
@@ -506,7 +520,7 @@ async function main() {
     const datum = dnyDopredu(30);
     await zajistitSirokouDobu(datum);
     const telefon = novyTelefon();
-    const vysledek = await verejnaRezervace({ datum, cas_od: '10:00', jmeno: 'TEST-8B-P15 (smazat)', telefon, email: 'test-8b-p15@example.invalid', cenik_id: cenik.id, poukaz_kod: poukaz.kod, souhlas_gdpr: true });
+    const vysledek = await verejnaRezervace({ datum, cas_od: '10:00', jmeno: 'TEST-8B-P15 (smazat)', telefon, email: 'test-8b-p15@example.invalid', cenik_id: cenik.id, poukaz_kod: poukaz.kod, souhlas_gdpr: true, souhlas_podminky: true });
     zaznamenejVysledekRezervace(vysledek);
     assert.equal(vysledek.status, 200, JSON.stringify(vysledek.data));
     assert.match(vysledek.data.rezervace.poznamka || '', /ověřen/, 'poznámka musí obsahovat informaci o ověřeném poukazu');
@@ -521,7 +535,7 @@ async function main() {
     const datum = dnyDopredu(31);
     await zajistitSirokouDobu(datum);
     const telefon = novyTelefon();
-    const vysledek = await verejnaRezervace({ datum, cas_od: '10:00', jmeno: 'TEST-8B-P16 (smazat)', telefon, email: 'test-8b-p16@example.invalid', cenik_id: cenik.id, poukaz_kod: 'NEEXISTUJICI-KOD-XYZ', souhlas_gdpr: true });
+    const vysledek = await verejnaRezervace({ datum, cas_od: '10:00', jmeno: 'TEST-8B-P16 (smazat)', telefon, email: 'test-8b-p16@example.invalid', cenik_id: cenik.id, poukaz_kod: 'NEEXISTUJICI-KOD-XYZ', souhlas_gdpr: true, souhlas_podminky: true });
     zaznamenejVysledekRezervace(vysledek);
     assert.equal(vysledek.status, 200, 'neplatný/neexistující poukaz kód NESMÍ zablokovat rezervaci: ' + JSON.stringify(vysledek.data));
     assert.match(vysledek.data.rezervace.poznamka || '', /nebyl nalezen/, 'poznámka musí upozornit, že poukaz nebyl nalezen (ověřit ručně)');
@@ -534,14 +548,14 @@ async function main() {
     const datum1 = dnyDopredu(32), datum2 = dnyDopredu(33);
     await zajistitSirokouDobu(datum1); await zajistitSirokouDobu(datum2);
     const telefon = novyTelefon();
-    const prvni = await verejnaRezervace({ datum: datum1, cas_od: '10:00', jmeno: 'TEST-8B-P17-A (smazat)', telefon, email: 'test-8b-p17a@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true });
+    const prvni = await verejnaRezervace({ datum: datum1, cas_od: '10:00', jmeno: 'TEST-8B-P17-A (smazat)', telefon, email: 'test-8b-p17a@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true, souhlas_podminky: true });
     zaznamenejVysledekRezervace(prvni);
     assert.equal(prvni.status, 200, JSON.stringify(prvni.data));
     const klientkaId1 = prvni.data.rezervace.klientka_id;
 
     // stejný telefon, ale s mezerami — normalizace musí poznat shodu
     const telefonSMezerami = telefon.slice(0, 3) + ' ' + telefon.slice(3, 6) + ' ' + telefon.slice(6);
-    const druha = await verejnaRezervace({ datum: datum2, cas_od: '10:00', jmeno: 'TEST-8B-P17-B (smazat)', telefon: telefonSMezerami, email: 'test-8b-p17b@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true });
+    const druha = await verejnaRezervace({ datum: datum2, cas_od: '10:00', jmeno: 'TEST-8B-P17-B (smazat)', telefon: telefonSMezerami, email: 'test-8b-p17b@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true, souhlas_podminky: true });
     zaznamenejVysledekRezervace(druha);
     assert.equal(druha.status, 200, JSON.stringify(druha.data));
     assert.equal(druha.data.rezervace.klientka_id, klientkaId1, 'druhá rezervace se stejným (jinak formátovaným) telefonem musí napojit na STEJNOU klientku, ne vytvořit druhou');
@@ -554,7 +568,7 @@ async function main() {
     const datum = dnyDopredu(34);
     await zajistitSirokouDobu(datum);
     const telefon = novyTelefon();
-    const vysledek = await verejnaRezervace({ datum, cas_od: '10:00', jmeno: 'TEST-8B-P18 (smazat)', telefon, email: 'test-8b-p18@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true });
+    const vysledek = await verejnaRezervace({ datum, cas_od: '10:00', jmeno: 'TEST-8B-P18 (smazat)', telefon, email: 'test-8b-p18@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true, souhlas_podminky: true });
     zaznamenejVysledekRezervace(vysledek);
     assert.equal(vysledek.status, 200, JSON.stringify(vysledek.data));
     assert.ok(vysledek.data.rezervace.klientka_id, 'nový unikátní telefon musí vytvořit novou klientku');
@@ -567,7 +581,7 @@ async function main() {
     const datum = dnyDopredu(35);
     await zajistitSirokouDobu(datum);
     const email = 'test-8b-p19@example.invalid';
-    const vysledek = await verejnaRezervace({ datum, cas_od: '10:00', jmeno: 'TEST-8B-P19 (smazat)', telefon: novyTelefon(), email, cenik_id: cenik.id, souhlas_gdpr: true, souhlas_newsletter: true });
+    const vysledek = await verejnaRezervace({ datum, cas_od: '10:00', jmeno: 'TEST-8B-P19 (smazat)', telefon: novyTelefon(), email, cenik_id: cenik.id, souhlas_gdpr: true, souhlas_podminky: true, souhlas_newsletter: true });
     zaznamenejVysledekRezervace(vysledek);
     assert.equal(vysledek.status, 200, JSON.stringify(vysledek.data));
     const odberatel = await pockejNaOdberatele(email);
@@ -584,14 +598,14 @@ async function main() {
     const cenik = await vytvoritTestovaciCenik(60, true);
 
     const datumPred = dnyDopredu(10);
-    const pred = await verejnaRezervace({ datum: datumPred, cas_od: '10:00', jmeno: 'TEST-8B-P1-10 (smazat)', telefon: novyTelefon(), email: 'test-8b-p110@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true });
+    const pred = await verejnaRezervace({ datum: datumPred, cas_od: '10:00', jmeno: 'TEST-8B-P1-10 (smazat)', telefon: novyTelefon(), email: 'test-8b-p110@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true, souhlas_podminky: true });
     zaznamenejVysledekRezervace(pred);
     assert.equal(pred.status, 400, 'rezervace před rezervace_od (10 dní dopředu < cutoff 30 dní dopředu) musí být 400: ' + JSON.stringify(pred.data));
     ok('P1.10) rezervace před nastaveným rezervace_od cutoffem → 400');
 
     const datumPo = dnyDopredu(40);
     await zajistitSirokouDobu(datumPo);
-    const po = await verejnaRezervace({ datum: datumPo, cas_od: '10:00', jmeno: 'TEST-8B-P1-11 (smazat)', telefon: novyTelefon(), email: 'test-8b-p111@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true });
+    const po = await verejnaRezervace({ datum: datumPo, cas_od: '10:00', jmeno: 'TEST-8B-P1-11 (smazat)', telefon: novyTelefon(), email: 'test-8b-p111@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true, souhlas_podminky: true });
     zaznamenejVysledekRezervace(po);
     assert.equal(po.status, 200, 'rezervace po rezervace_od cutoffu musí projít: ' + JSON.stringify(po.data));
     ok('P1.11) rezervace po nastaveném rezervace_od cutoffu → 200');
@@ -667,7 +681,7 @@ async function main() {
     const volnyCas = ziskane.data.find(t => t.volno === true);
     assert.ok(volnyCas, 'GET musí pro čistý budoucí den nabídnout aspoň jeden volný termín, aby šel invariant ověřit');
     const telefon = novyTelefon();
-    const vysledek = await verejnaRezervace({ datum, cas_od: volnyCas.cas, jmeno: 'TEST-8B-H (smazat)', telefon, email: 'test-8b-h@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true });
+    const vysledek = await verejnaRezervace({ datum, cas_od: volnyCas.cas, jmeno: 'TEST-8B-H (smazat)', telefon, email: 'test-8b-h@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true, souhlas_podminky: true });
     zaznamenejVysledekRezervace(vysledek);
     assert.equal(vysledek.status, 200, 'termín oznámený GET jako volno:true musí POST přijmout (GET<->POST invariant, bez zásahu třetí strany): ' + JSON.stringify(vysledek.data));
     ok('H) GET↔POST invariant: termín oznámený GET jako volno:true je POSTem skutečně akceptován (200)');
@@ -808,7 +822,7 @@ async function main() {
     await zajistitSirokouDobu(datum);
     const vysledek = await verejnaRezervace({
       datum, cas_od: '10:00', jmeno: 'TEST-8F-AUDIT-A (smazat)', telefon: novyTelefon(),
-      email: 'test-8f-audit-a@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true
+      email: 'test-8f-audit-a@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true, souhlas_podminky: true
     });
     zaznamenejVysledekRezervace(vysledek);
     assert.equal(vysledek.status, 200, JSON.stringify(vysledek.data));
@@ -846,7 +860,7 @@ async function main() {
     await zajistitSirokouDobu(datum);
     const vysledek = await verejnaRezervace({
       datum, cas_od: '10:00', jmeno: 'TEST-8F-AUDIT-B (smazat)', telefon: novyTelefon(),
-      email: 'test-8f-audit-b@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true
+      email: 'test-8f-audit-b@example.invalid', cenik_id: cenik.id, souhlas_gdpr: true, souhlas_podminky: true
     });
     zaznamenejVysledekRezervace(vysledek);
     assert.equal(vysledek.status, 200, JSON.stringify(vysledek.data));

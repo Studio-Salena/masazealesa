@@ -82,7 +82,7 @@ async function rezervovat(cenik, promoKod, extra = {}) {
   await zajistitSirokouDobu(datum);
   const vysledek = await verejne('/rezervace', {
     datum, cas_od: '10:00', jmeno: 'TEST-STROMECEK (smazat)', telefon: novyTelefon(), email: 'test-stromecek@example.invalid',
-    cenik_id: cenik.id, souhlas_gdpr: true, promo_kod: promoKod, ...extra
+    cenik_id: cenik.id, souhlas_gdpr: true, souhlas_podminky: true, promo_kod: promoKod, ...extra
   });
   if (vysledek.status === 200) {
     uklidRezervace.push(vysledek.data.rezervace.id);
@@ -279,7 +279,7 @@ async function main() {
     for (let i = 0; i < 4; i++) { slotCitac++; const d = dnyDopredu(20 + slotCitac); await zajistitSirokouDobu(d); dny.push(d); }
     const vysledkyRez = await Promise.all(dny.map(datum => verejne('/rezervace', {
       datum, cas_od: '09:00', jmeno: 'TEST-STROMECEK (smazat)', telefon: novyTelefon(), email: 'test-stromecek@example.invalid',
-      cenik_id: cenik.id, souhlas_gdpr: true, promo_kod: souhra.kod
+      cenik_id: cenik.id, souhlas_gdpr: true, souhlas_podminky: true, promo_kod: souhra.kod
     })));
     vysledkyRez.filter(v => v.status === 200).forEach(v => { uklidRezervace.push(v.data.rezervace.id); if (v.data.rezervace.klientka_id) uklidKlientky.add(v.data.rezervace.klientka_id); });
     assert.equal(vysledkyRez.filter(v => v.status === 200).length, 1, JSON.stringify(vysledkyRez.map(v => v.status)));

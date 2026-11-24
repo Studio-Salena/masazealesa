@@ -922,6 +922,23 @@ async function odeslatEmail(to, subject, html, prilohy = null) {
     return false;
   }
 }
+// Statický PDF soubor (obchodní podmínky + vzorový formulář pro odstoupení
+// od smlouvy, viz assets/obchodni-podminky.pdf) — přikládá se k potvrzovacímu
+// e-mailu o rezervaci (viz POST /api/rezervace). Čte se ze souboru jen
+// jednou a dál se drží v paměti, ne znovu při každém e-mailu.
+let obchodniPodminkyPdfCache = null;
+function nacistObchodniPodminkyPdf() {
+  if (obchodniPodminkyPdfCache === null) {
+    try {
+      obchodniPodminkyPdfCache = fs.readFileSync(path.join(__dirname, 'assets', 'obchodni-podminky.pdf'));
+    } catch (e) {
+      console.error('Nepodařilo se načíst assets/obchodni-podminky.pdf:', e.message);
+      obchodniPodminkyPdfCache = false;
+    }
+  }
+  return obchodniPodminkyPdfCache || null;
+}
+
 function formatDatumCz(datumIso) {
   const [rok, mesic, den] = datumIso.split('-');
   return `${Number(den)}. ${Number(mesic)}. ${rok}`;
@@ -1370,7 +1387,7 @@ app.get('/api/rezervace/kalendar', async (req, res) => {
 
 // Vytvoření rezervace klientkou
 app.post('/api/rezervace', async (req, res) => {
-  const { datum, cas_od, jmeno, telefon, email, cenik_id, poznamka, poukaz_kod, alergie, preference, souhlas_gdpr, souhlas_newsletter, promo_kod } = req.body || {};
+  const { datum, cas_od, jmeno, telefon, email, cenik_id, poznamka, poukaz_kod, alergie, preference, souhlas_gdpr, souhlas_podminky, souhlas_newsletter, promo_kod } = req.body || {};
   if (!datum || !cas_od || !jmeno || !telefon || !email || !cenik_id) {
     return res.status(400).json({ chyba: 'Vyplňte prosím jméno, telefon, e-mail, masáž, datum a čas.' });
   }
@@ -1391,6 +1408,9 @@ app.post('/api/rezervace', async (req, res) => {
   }
   if (!souhlas_gdpr) {
     return res.status(400).json({ chyba: 'Pro odeslání rezervace je potřeba souhlasit se zpracováním osobních údajů.' });
+  }
+  if (!souhlas_podminky) {
+    return res.status(400).json({ chyba: 'Pro odeslání rezervace je potřeba seznámit se s obchodními podmínkami a souhlasit s nimi.' });
   }
   const promoKod = normalizovatPromoKod(promo_kod);
   if (promoKod && poukaz_kod && poukaz_kod.trim()) {
@@ -1516,8 +1536,9 @@ app.post('/api/rezervace', async (req, res) => {
     }
 
     if (email) {
+      const podminkyPdf = nacistObchodniPodminkyPdf();
       vykreslitEmail('prijata', { jmeno, masaz: nazevMasaze, datum: formatDatumCz(datum), cas: cas_od + '–' + cas_do })
-        .then(({ predmet, html }) => odeslatEmail(email, predmet, html))
+        .then(({ predmet, html }) => odeslatEmail(email, predmet, html, podminkyPdf ? [{ filename: 'obchodni-podminky.pdf', content: podminkyPdf }] : null))
         .then(uspech => {
           if (!uspech) console.error('Potvrzovací e-mail k rezervaci ' + rezervace.id + ' se nepodařilo odeslat.');
         });
@@ -1640,8 +1661,8 @@ app.post('/api/poukazy/zadost', async (req, res) => {
     res.json({ ok: true, zadost });
 
     // Upozornění majitelce na novou žádost o poukaz z webu.
-    odeslatEmail(EMAIL_MAJITELKY, 'Nová žádost o poukaz – ' + kupujici_jmeno, emailSablona(`
-      <h2>Nová žádost o dárkový poukaz z webu</h2>
+    odeslatEmail(EMAIL_MAJITELKY, 'Nová poptávka poukazu – ' + kupujici_jmeno, emailSablona(`
+      <h2>Nová poptávka dárkového poukazu z webu (nezávazná)</h2>
       <table class="rez-detail" width="100%" cellpadding="0" cellspacing="0">
         <tr><td>
           <strong>Jméno:</strong> ${kupujici_jmeno}<br>
