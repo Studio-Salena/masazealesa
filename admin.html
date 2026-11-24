@@ -3352,12 +3352,19 @@ async function loadPoukazyZadosti() {
       <table><thead><tr><th>Datum</th><th>Hodnota</th><th>Kupující</th><th>Pro koho</th><th>Šablona</th><th>Vyzvednutí</th><th>Platba</th><th>Stav</th><th>Akce</th></tr></thead>
       <tbody>${seznam.map(z => `<tr>
         <td>${new Date(z.vytvoreno).toLocaleDateString('cs-CZ')}</td>
-        <td><strong>${Number(z.hodnota).toLocaleString('cs-CZ')} Kč</strong>${Number(z.sleva_kc) > 0 ? `<br><span class="badge badge-ok">🎄 k úhradě ${(Number(z.hodnota) - Number(z.sleva_kc)).toLocaleString('cs-CZ')} Kč</span>` : ''}${z.konkretni_masaz ? `<br><small style="color:var(--text-light)">🧖 ${escapeHtml(z.konkretni_masaz)}</small>` : `<br><small style="color:var(--text-light)">platnost ${z.platnost_mesicu || 12} měsíců</small>`}</td>
+        <td><strong>${Number(z.hodnota).toLocaleString('cs-CZ')} Kč</strong>${Number(z.sleva_kc) > 0 ? `<br><span class="badge badge-ok">🎄 k úhradě ${(Number(z.hodnota) - Number(z.sleva_kc)).toLocaleString('cs-CZ')} Kč</span>` : ''}${z.konkretni_masaz ? `<br><small style="color:var(--text-light)">🧖 ${escapeHtml(z.konkretni_masaz)}</small>` : ''}<br>${z.stav === 'nova'
+          ? `<small style="color:var(--text-light)">platnost <input type="number" min="1" max="120" value="${z.platnost_mesicu || 6}" style="width:46px;padding:2px 4px;font-size:0.8rem" onchange="ulozitZadostPole(${z.id},'platnost_mesicu',this.value)"> měsíců</small>`
+          : `<small style="color:var(--text-light)">platnost ${z.platnost_mesicu || 6} měsíců</small>`}</td>
         <td>${escapeHtml(z.kupujici_jmeno)}<br><small>${escapeHtml(z.kupujici_email)}${z.kupujici_telefon ? ' | ' + escapeHtml(z.kupujici_telefon) : ''}</small></td>
         <td>${escapeHtml(z.pro_koho) || '—'}</td>
-        <td>${z.sablona === 'vanocni' ? '🎄 Vánoční' : '🌸 Klasický'}</td>
         <td>${z.stav === 'nova'
-          ? `<input type="date" class="form-input" style="width:140px;padding:4px 6px;font-size:0.82rem" value="${z.vyzvednuti_termin || ''}" onchange="ulozitTerminVyzvednuti(${z.id},this.value)">`
+          ? `<select class="form-select" style="width:128px;padding:4px 6px;font-size:0.82rem" onchange="ulozitZadostPole(${z.id},'sablona',this.value)">
+              <option value="klasicky"${z.sablona !== 'vanocni' ? ' selected' : ''}>🌸 Klasický</option>
+              <option value="vanocni"${z.sablona === 'vanocni' ? ' selected' : ''}>🎄 Vánoční</option>
+            </select>`
+          : (z.sablona === 'vanocni' ? '🎄 Vánoční' : '🌸 Klasický')}</td>
+        <td>${z.stav === 'nova'
+          ? `<input type="date" class="form-input" style="width:140px;padding:4px 6px;font-size:0.82rem" value="${z.vyzvednuti_termin || ''}" onchange="ulozitZadostPole(${z.id},'vyzvednuti_termin',this.value)">`
           : (z.vyzvednuti_termin ? new Date(z.vyzvednuti_termin).toLocaleDateString('cs-CZ') : '—')}</td>
         <td>${platbaLabel[z.zpusob_platby] || '—'}</td>
         <td>${stavBadge[z.stav] || z.stav}</td>
@@ -3368,11 +3375,12 @@ async function loadPoukazyZadosti() {
       </tr>`).join('')}</tbody></table>`;
   } catch (e) { document.getElementById('poukazyZadostiTable').innerHTML = '<div class="error-msg">Chyba načítání.</div>'; }
 }
-async function ulozitTerminVyzvednuti(id, hodnota) {
-  const res = await adminFetch(API + '/admin/poukazy/zadosti/' + id + '/vyzvednuti', {
-    method: 'PATCH', body: JSON.stringify({ vyzvednuti_termin: hodnota || null })
-  });
-  if (!res.ok) { alert('Termín se nepodařilo uložit.'); loadPoukazyZadosti(); }
+async function ulozitZadostPole(id, pole, hodnota) {
+  const telo = {};
+  telo[pole] = pole === 'vyzvednuti_termin' ? (hodnota || null) : (pole === 'platnost_mesicu' ? Number(hodnota) : hodnota);
+  const res = await adminFetch(API + '/admin/poukazy/zadosti/' + id, { method: 'PATCH', body: JSON.stringify(telo) });
+  if (!res.ok) alert('Změnu se nepodařilo uložit.');
+  loadPoukazyZadosti();
 }
 async function vyriditZadost(id, stav) {
   await adminFetch(API + '/admin/poukazy/zadosti/' + id + '/stav', { method: 'PATCH', body: JSON.stringify({ stav }) });

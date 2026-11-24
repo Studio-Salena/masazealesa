@@ -3487,31 +3487,56 @@ app.get('/api/admin/poukazy/zadosti', async (req, res) => {
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
-// Úprava domluveného termínu vyzvednutí PŘED schválením žádosti — zákaznice
-// na webu termín nemusela vyplnit (nebo se domluvila jinak telefonicky),
-// admin ho tu může doplnit/opravit, než klikne "Schválit". Po schválení se
-// hodnota přenese na skutečný poukaz (viz vytvoritPoukaz výš), takže tenhle
-// endpoint jde použít jen dokud je žádost ve stavu "nova" — jednou vytvořený
-// poukaz se upravuje jinde, ne zpětně přes žádost.
-app.patch('/api/admin/poukazy/zadosti/:id/vyzvednuti', async (req, res) => {
-  const { vyzvednuti_termin } = req.body || {};
-  let vyzvednutiKUlozeni = null;
-  if (vyzvednuti_termin) {
-    const datum = new Date(vyzvednuti_termin);
-    if (Number.isNaN(datum.getTime())) {
-      return res.status(400).json({ chyba: 'Zadejte prosím platné datum, nebo pole vyprázdněte.' });
+// Úprava žádosti PŘED schválením — šablona (zákaznice si to mohla rozmyslet
+// nebo se domluvila jinak telefonicky), platnost v měsících a domluvený
+// termín vyzvednutí. Admin může kterékoli z toho doplnit/opravit, než klikne
+// "Schválit" — všechny tři hodnoty se při schválení přenesou na skutečný
+// poukaz (viz vytvoritPoukaz výš), takže tenhle endpoint jde použít jen
+// dokud je žádost ve stavu "nova"; jednou vytvořený poukaz se upravuje jinde,
+// ne zpětně přes žádost. Každé pole je nepovinné — posílá se jen to, co se
+// právě měnilo (viz admin.html, inline úprava v tabulce žádostí).
+app.patch('/api/admin/poukazy/zadosti/:id', async (req, res) => {
+  const { sablona, vyzvednuti_termin, platnost_mesicu } = req.body || {};
+  const sloupce = [];
+  const hodnoty = [];
+  let i = 1;
+
+  if (sablona !== undefined) {
+    if (!['klasicky', 'vanocni'].includes(sablona)) {
+      return res.status(400).json({ chyba: 'Neplatná šablona poukazu.' });
     }
-    vyzvednutiKUlozeni = vyzvednuti_termin;
+    sloupce.push(`sablona = $${i++}`); hodnoty.push(sablona);
   }
+  if (vyzvednuti_termin !== undefined) {
+    let vyzvednutiKUlozeni = null;
+    if (vyzvednuti_termin) {
+      const datum = new Date(vyzvednuti_termin);
+      if (Number.isNaN(datum.getTime())) {
+        return res.status(400).json({ chyba: 'Zadejte prosím platné datum, nebo pole vyprázdněte.' });
+      }
+      vyzvednutiKUlozeni = vyzvednuti_termin;
+    }
+    sloupce.push(`vyzvednuti_termin = $${i++}`); hodnoty.push(vyzvednutiKUlozeni);
+  }
+  if (platnost_mesicu !== undefined) {
+    const mesicuCislo = Number(platnost_mesicu);
+    if (!Number.isInteger(mesicuCislo) || mesicuCislo <= 0 || mesicuCislo > 120) {
+      return res.status(400).json({ chyba: 'Zadejte prosím platnost v měsících jako kladné celé číslo.' });
+    }
+    sloupce.push(`platnost_mesicu = $${i++}`); hodnoty.push(mesicuCislo);
+  }
+  if (!sloupce.length) return res.status(400).json({ chyba: 'Žádná změna k uložení.' });
+
   try {
     const { rows: [zadost] } = await db.query('SELECT stav FROM poukazy_zadosti WHERE id = $1', [req.params.id]);
     if (!zadost) return res.status(404).json({ chyba: 'Žádost nenalezena.' });
     if (zadost.stav !== 'nova') {
-      return res.status(400).json({ chyba: 'Termín lze upravit jen u nevyřízené žádosti.' });
+      return res.status(400).json({ chyba: 'Žádost lze upravit jen dokud je nevyřízená.' });
     }
+    hodnoty.push(req.params.id);
     const { rows: [aktualizovana] } = await db.query(
-      'UPDATE poukazy_zadosti SET vyzvednuti_termin = $1 WHERE id = $2 RETURNING *',
-      [vyzvednutiKUlozeni, req.params.id]
+      `UPDATE poukazy_zadosti SET ${sloupce.join(', ')} WHERE id = $${i} RETURNING *`,
+      hodnoty
     );
     res.json({ ok: true, zadost: aktualizovana });
   } catch (e) { res.status(500).json({ chyba: e.message }); }

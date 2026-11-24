@@ -791,37 +791,53 @@ async function main() {
     }
 
     {
-      // Admin může domluvený termín vyzvednutí doplnit/opravit PŘED schválením
-      // žádosti (zákaznice ho na webu nemusela vyplnit, nebo se domluvila jinak
-      // telefonicky) — po schválení se upravená hodnota musí přenést na poukaz.
+      // Admin může domluvený termín vyzvednutí, šablonu i platnost doplnit/opravit
+      // PŘED schválením žádosti (zákaznice si to na webu mohla rozmyslet nebo se
+      // domluvila jinak telefonicky) — po schválení se upravené hodnoty musí
+      // přenést na poukaz, a po schválení už úprava žádosti nejde.
       const emailT = 'test-termin-admin-' + Date.now() + '@example.invalid';
       const vT = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-TERMIN-ADMIN (smazat)', kupujici_email: emailT, kupujici_telefon: '602123456', zpusob_platby: 'pri_prevzeti' });
       assert.equal(vT.status, 200, JSON.stringify(vT.data));
       const zadostIdT = vT.data.zadost.id;
       uklidZadosti.push(zadostIdT);
       assert.equal(vT.data.zadost.vyzvednuti_termin, null, 'Žádost měla vzniknout bez termínu');
+      assert.equal(vT.data.zadost.sablona, 'klasicky', 'Žádost měla vzniknout s výchozí šablonou');
 
       const terminT = posunDnu(10);
-      const uprava = await adminFetch(`/admin/poukazy/zadosti/${zadostIdT}/vyzvednuti`, { method: 'PATCH', body: JSON.stringify({ vyzvednuti_termin: terminT }) });
+      const uprava = await adminFetch(`/admin/poukazy/zadosti/${zadostIdT}`, { method: 'PATCH', body: JSON.stringify({ vyzvednuti_termin: terminT, sablona: 'vanocni', platnost_mesicu: 9 }) });
       const upravaData = await uprava.json();
-      assert.equal(uprava.status, 200, 'Doplnění termínu admin selhalo: ' + JSON.stringify(upravaData));
+      assert.equal(uprava.status, 200, 'Úprava admin selhala: ' + JSON.stringify(upravaData));
       assert.equal(upravaData.zadost.vyzvednuti_termin, terminT, 'Doplněný termín se neuložil');
+      assert.equal(upravaData.zadost.sablona, 'vanocni', 'Změna šablony na vánoční se neuložila');
+      assert.equal(upravaData.zadost.platnost_mesicu, 9, 'Změna platnosti na 9 měsíců se neuložila');
 
-      const neplatnyTermin = await adminFetch(`/admin/poukazy/zadosti/${zadostIdT}/vyzvednuti`, { method: 'PATCH', body: JSON.stringify({ vyzvednuti_termin: 'neplatne' }) });
+      const neplatnyTermin = await adminFetch(`/admin/poukazy/zadosti/${zadostIdT}`, { method: 'PATCH', body: JSON.stringify({ vyzvednuti_termin: 'neplatne' }) });
       assert.equal(neplatnyTermin.status, 400, 'Neplatné datum při úpravě admin měl odmítnout');
+
+      const neplatnaSablona = await adminFetch(`/admin/poukazy/zadosti/${zadostIdT}`, { method: 'PATCH', body: JSON.stringify({ sablona: 'neexistujici' }) });
+      assert.equal(neplatnaSablona.status, 400, 'Neplatná šablona měla být odmítnuta');
+
+      const neplatnaPlatnost = await adminFetch(`/admin/poukazy/zadosti/${zadostIdT}`, { method: 'PATCH', body: JSON.stringify({ platnost_mesicu: 0 }) });
+      assert.equal(neplatnaPlatnost.status, 400, 'Nekladná platnost měla být odmítnuta');
+
+      const bezZmeny = await adminFetch(`/admin/poukazy/zadosti/${zadostIdT}`, { method: 'PATCH', body: JSON.stringify({}) });
+      assert.equal(bezZmeny.status, 400, 'Prázdná úprava (žádné pole) měla být odmítnuta');
 
       const schvT = await adminFetch(`/admin/poukazy/zadosti/${zadostIdT}/stav`, { method: 'PATCH', body: JSON.stringify({ stav: 'vyrizena' }) });
       const dT = await schvT.json();
       assert.equal(schvT.status, 200, JSON.stringify(dT));
       assert.equal(dT.poukaz.vyzvednuti_termin, terminT, 'Poukaz měl přenést admin-upravený termín vyzvednutí');
+      assert.equal(dT.poukaz.sablona, 'vanocni', 'Poukaz měl přenést admin-upravenou šablonu');
+      const ocekavanaPlatnostDo = new Date(); ocekavanaPlatnostDo.setMonth(ocekavanaPlatnostDo.getMonth() + 9);
+      assert.equal(dT.poukaz.platnost_do, ocekavanaPlatnostDo.toISOString().slice(0, 10), 'Poukaz měl přenést admin-upravenou platnost (9 měsíců)');
       uklidPoukazy.push(dT.poukaz.id);
       if (dT.poukaz.klientka_id) uklidKlientky.add(dT.poukaz.klientka_id);
 
-      // Po schválení (stav už není "nova") je další úprava termínu přes
-      // žádost odmítnuta — poukaz už existuje, úprava by se nikam nepropsala.
-      const upravaPoSchvaleni = await adminFetch(`/admin/poukazy/zadosti/${zadostIdT}/vyzvednuti`, { method: 'PATCH', body: JSON.stringify({ vyzvednuti_termin: posunDnu(20) }) });
-      assert.equal(upravaPoSchvaleni.status, 400, 'Úprava termínu po schválení žádosti měla být odmítnuta');
-      console.log('OK — admin může domluvený termín vyzvednutí doplnit před schválením, po schválení už úprava žádosti nejde');
+      // Po schválení (stav už není "nova") je další úprava žádosti odmítnuta —
+      // poukaz už existuje, úprava by se nikam nepropsala.
+      const upravaPoSchvaleni = await adminFetch(`/admin/poukazy/zadosti/${zadostIdT}`, { method: 'PATCH', body: JSON.stringify({ vyzvednuti_termin: posunDnu(20) }) });
+      assert.equal(upravaPoSchvaleni.status, 400, 'Úprava žádosti po schválení měla být odmítnuta');
+      console.log('OK — admin může termín vyzvednutí, šablonu i platnost doplnit před schválením, po schválení už úprava žádosti nejde');
     }
 
     console.log('\n✅ VŠECHNY TESTY POUKAZŮ PROŠLY');
