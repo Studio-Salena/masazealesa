@@ -28,7 +28,8 @@ body{font-family:'Nunito',sans-serif;background:var(--cream);color:var(--text);m
 /* LOGIN */
 .login-overlay{position:fixed;inset:0;background:linear-gradient(135deg,var(--cream),#fde8d0);display:flex;align-items:center;justify-content:center;z-index:1000}
 .login-box{background:#fff;border-radius:24px;padding:48px;box-shadow:0 8px 40px rgba(92,58,30,0.15);width:100%;max-width:400px;text-align:center}
-.login-logo{font-family:'Dancing Script',cursive;font-size:2.2rem;color:var(--brown);margin-bottom:4px}
+.login-logo{margin-bottom:4px}
+.login-logo-img{max-width:200px;max-height:90px;display:block;margin:0 auto}
 .login-sub{color:var(--text-light);font-size:0.85rem;margin-bottom:32px}
 .login-box input{width:100%;padding:14px 16px;border:2px solid var(--tan-light);border-radius:12px;font-size:1rem;outline:none;margin-bottom:16px;font-family:'Nunito',sans-serif}
 .login-box input:focus{border-color:var(--sb-bg)}
@@ -41,6 +42,7 @@ body{font-family:'Nunito',sans-serif;background:var(--cream);color:var(--text);m
 .sidebar{width:230px;background:linear-gradient(180deg,var(--sb-bg),var(--sb-bg-2));border-right:none;position:fixed;top:56px;left:0;bottom:0;padding:0;display:flex;flex-direction:column;box-shadow:2px 0 16px rgba(0,0,0,0.15);z-index:50;transition:transform 0.3s,width 0.2s}
 .sidebar-logo{display:flex;align-items:center;justify-content:space-between;padding:20px;border-bottom:1px solid rgba(255,255,255,0.12)}
 .sidebar-logo-text{font-family:'Dancing Script',cursive;font-size:1.4rem;color:var(--sb-text);white-space:nowrap}
+.sidebar-logo-img{display:block;height:36px;max-width:160px;margin-bottom:4px}
 .sidebar-logo-text span{display:block;font-family:'Nunito',sans-serif;font-size:0.65rem;color:var(--sb-muted);font-weight:400;letter-spacing:1px;text-transform:uppercase}
 .sidebar-collapse-btn{background:none;border:1px solid rgba(255,255,255,0.25);border-radius:6px;width:24px;height:24px;flex-shrink:0;cursor:pointer;color:var(--sb-muted);font-size:0.9rem;line-height:1;display:flex;align-items:center;justify-content:center;transition:transform 0.2s}
 .sidebar-collapse-btn:hover{border-color:var(--sb-akcent);color:#fff}
@@ -346,7 +348,7 @@ tr:hover td{background:var(--cream)}
 <!-- LOGIN -->
 <div class="login-overlay" id="loginOverlay">
   <div class="login-box">
-    <div class="login-logo">🌸 Masáže Alesa</div>
+    <div class="login-logo"><img src="assets/logo.png" alt="Masáže Alesa" class="login-logo-img"></div>
     <div class="login-sub">Administrace webu</div>
     <input type="password" id="passwordInput" placeholder="Heslo" onkeydown="if(event.key==='Enter')login()">
     <button class="login-btn" onclick="login()">Přihlásit se</button>
@@ -358,7 +360,7 @@ tr:hover td{background:var(--cream)}
 <div class="admin-wrap" id="adminWrap">
   <div class="sidebar" id="sidebar">
     <div class="sidebar-logo">
-      <span class="sidebar-logo-text">🌸 Masáže Alesa<span>Admin panel</span></span>
+      <span class="sidebar-logo-text"><img src="assets/logo.png" alt="Masáže Alesa" class="sidebar-logo-img"><span>Admin panel</span></span>
       <button class="sidebar-collapse-btn" onclick="prepnoutSbaleniMenu()" id="sidebarCollapseBtn" title="Sbalit/rozbalit menu" aria-label="Sbalit/rozbalit menu">«</button>
     </div>
     <div class="nav-scroll">
