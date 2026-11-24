@@ -92,7 +92,7 @@ async function rezervovat(cenik, promoKod, extra = {}) {
 }
 async function zadostOPoukaz(hodnota, promoKod) {
   const vysledek = await verejne('/poukazy/zadost', {
-    hodnota, kupujici_jmeno: 'TEST-STROMECEK (smazat)', kupujici_email: 'test-stromecek@example.invalid', zpusob_platby: 'pri_prevzeti', promo_kod: promoKod
+    hodnota, kupujici_jmeno: 'TEST-STROMECEK (smazat)', kupujici_email: 'test-stromecek@example.invalid', kupujici_telefon: '602100100', zpusob_platby: 'pri_prevzeti', promo_kod: promoKod
   });
   if (vysledek.status === 200) uklidZadosti.push(vysledek.data.zadost.id);
   return vysledek;

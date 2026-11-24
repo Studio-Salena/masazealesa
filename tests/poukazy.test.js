@@ -269,18 +269,18 @@ async function main() {
     let citacZadost = 0;
     function novyEmailZadost() { citacZadost++; return 'test-8e3-zadost-' + citacZadost + '@example.invalid'; }
 
-    // 1) validní žádost → 200
+    // 1) validní žádost (vč. telefonu) → 200
     {
       const email = novyEmailZadost();
-      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, zpusob_platby: 'pri_prevzeti' });
+      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, kupujici_telefon: '602123456', zpusob_platby: 'pri_prevzeti' });
       if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
       assert.equal(v.status, 200, JSON.stringify(v.data));
-      console.log('OK — 1) validní žádost (telefon nevyplněn) → 200');
+      console.log('OK — 1) validní žádost (vč. telefonu) → 200');
     }
 
     // 2) chybějící email → 400
     {
-      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-8E3 (smazat)', zpusob_platby: 'pri_prevzeti' });
+      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_telefon: '602123456', zpusob_platby: 'pri_prevzeti' });
       if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
       assert.equal(v.status, 400, JSON.stringify(v.data));
       console.log('OK — 2) chybějící email → 400');
@@ -288,19 +288,21 @@ async function main() {
 
     // 3) email bez "@" → 400
     {
-      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: 'neplatny-email', zpusob_platby: 'pri_prevzeti' });
+      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: 'neplatny-email', kupujici_telefon: '602123456', zpusob_platby: 'pri_prevzeti' });
       if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
       assert.equal(v.status, 400, JSON.stringify(v.data));
       console.log('OK — 3) email bez "@" → 400');
     }
 
-    // 4) telefon chybí → 200 (telefon je u žádosti nepovinný, na rozdíl od rezervace)
+    // 4) telefon chybí → 400 (telefon je od teď u žádosti povinný)
     {
       const email = novyEmailZadost();
       const v = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, zpusob_platby: 'pri_prevzeti' });
       if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
-      assert.equal(v.status, 200, 'chybějící telefon musí projít — je nepovinný: ' + JSON.stringify(v.data));
-      console.log('OK — 4) chybějící telefon → 200 (nepovinné pole)');
+      assert.equal(v.status, 400, 'chybějící telefon musí být odmítnut — je povinný: ' + JSON.stringify(v.data));
+      const pocet = await pocetZadostiSEmailem(email);
+      assert.equal(pocet, 0, 'chybějící telefon nesmí vytvořit žádost');
+      console.log('OK — 4) chybějící telefon → 400 (povinné pole)');
     }
 
     // 5) telefon "123" (vyplněný, ale příliš krátký po normalizaci) → 400
@@ -315,7 +317,7 @@ async function main() {
     // 6) jméno > 100 znaků → 400
     {
       const email = novyEmailZadost();
-      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'X'.repeat(101), kupujici_email: email, zpusob_platby: 'pri_prevzeti' });
+      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'X'.repeat(101), kupujici_email: email, kupujici_telefon: '602123456', zpusob_platby: 'pri_prevzeti' });
       if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
       assert.equal(v.status, 400, JSON.stringify(v.data));
       console.log('OK — 6) kupujici_jmeno > 100 znaků → 400');
@@ -324,7 +326,7 @@ async function main() {
     // 7) vzkaz > 500 znaků → 400
     {
       const email = novyEmailZadost();
-      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, vzkaz: 'X'.repeat(501), zpusob_platby: 'pri_prevzeti' });
+      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, kupujici_telefon: '602123456', vzkaz: 'X'.repeat(501), zpusob_platby: 'pri_prevzeti' });
       if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
       assert.equal(v.status, 400, JSON.stringify(v.data));
       console.log('OK — 7) vzkaz > 500 znaků → 400');
@@ -333,7 +335,7 @@ async function main() {
     // 8) pro_koho > 500 znaků → 400
     {
       const email = novyEmailZadost();
-      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, pro_koho: 'X'.repeat(501), zpusob_platby: 'pri_prevzeti' });
+      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, kupujici_telefon: '602123456', pro_koho: 'X'.repeat(501), zpusob_platby: 'pri_prevzeti' });
       if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
       assert.equal(v.status, 400, JSON.stringify(v.data));
       console.log('OK — 8) pro_koho > 500 znaků → 400');
@@ -342,7 +344,7 @@ async function main() {
     // 9) konkretni_masaz > 500 znaků → 400
     {
       const email = novyEmailZadost();
-      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, konkretni_masaz: 'X'.repeat(501), zpusob_platby: 'pri_prevzeti' });
+      const v = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, kupujici_telefon: '602123456', konkretni_masaz: 'X'.repeat(501), zpusob_platby: 'pri_prevzeti' });
       if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
       assert.equal(v.status, 400, JSON.stringify(v.data));
       console.log('OK — 9) konkretni_masaz > 500 znaků → 400');
@@ -351,7 +353,7 @@ async function main() {
     // 10) chybějící hodnota → 400
     {
       const email = novyEmailZadost();
-      const v = await zadost({ kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, zpusob_platby: 'pri_prevzeti' });
+      const v = await zadost({ kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, kupujici_telefon: '602123456', zpusob_platby: 'pri_prevzeti' });
       if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
       assert.equal(v.status, 400, JSON.stringify(v.data));
       console.log('OK — 10) chybějící hodnota → 400');
@@ -360,7 +362,7 @@ async function main() {
     // 11-15) nevalidní hodnota (abc, 0, -500, "NaN", null) → 400
     for (const h of ['abc', 0, -500, 'NaN', null]) {
       const email = novyEmailZadost();
-      const v = await zadost({ hodnota: h, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, zpusob_platby: 'pri_prevzeti' });
+      const v = await zadost({ hodnota: h, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, kupujici_telefon: '602123456', zpusob_platby: 'pri_prevzeti' });
       if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
       assert.equal(v.status, 400, 'hodnota=' + JSON.stringify(h) + ' musí vrátit 400: ' + JSON.stringify(v.data));
       const pocet = await pocetZadostiSEmailem(email);
@@ -371,7 +373,7 @@ async function main() {
     // 16) hodnota přesně na horní hranici (10000) → 200
     {
       const email = novyEmailZadost();
-      const v = await zadost({ hodnota: 10000, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, zpusob_platby: 'pri_prevzeti' });
+      const v = await zadost({ hodnota: 10000, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, kupujici_telefon: '602123456', zpusob_platby: 'pri_prevzeti' });
       if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
       assert.equal(v.status, 200, 'hodnota přesně 10000 (horní hranice, včetně) musí projít: ' + JSON.stringify(v.data));
       console.log('OK — 16) hodnota = 10000 (horní hranice) → 200');
@@ -380,7 +382,7 @@ async function main() {
     // 17) hodnota nad horní hranicí (10000.01) → 400
     {
       const email = novyEmailZadost();
-      const v = await zadost({ hodnota: 10000.01, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, zpusob_platby: 'pri_prevzeti' });
+      const v = await zadost({ hodnota: 10000.01, kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, kupujici_telefon: '602123456', zpusob_platby: 'pri_prevzeti' });
       if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
       assert.equal(v.status, 400, JSON.stringify(v.data));
       const pocet = await pocetZadostiSEmailem(email);
@@ -394,7 +396,7 @@ async function main() {
     // nikdy 500 (žádný pád na pokusu o aritmetiku/DB zápis nekonečné hodnoty).
     {
       const email = novyEmailZadost();
-      const v = await zadost({ hodnota: 'Infinity', kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, zpusob_platby: 'pri_prevzeti' });
+      const v = await zadost({ hodnota: 'Infinity', kupujici_jmeno: 'TEST-8E3 (smazat)', kupujici_email: email, kupujici_telefon: '602123456', zpusob_platby: 'pri_prevzeti' });
       if (v.status === 200) uklidZadosti.push(v.data.zadost.id);
       assert.equal(v.status, 400, '"Infinity" musí být ošetřeno jako 400, ne spadnout na 500: ' + JSON.stringify(v.data));
       const pocet = await pocetZadostiSEmailem(email);
@@ -412,7 +414,7 @@ async function main() {
     // auditem a ověřenou živě na TEST DB před opravou.
     {
       const email19 = 'test-schvaleni-19-' + Date.now() + '@example.invalid';
-      const v19 = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-SCHVALENI (smazat)', kupujici_email: email19, zpusob_platby: 'pri_prevzeti' });
+      const v19 = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-SCHVALENI (smazat)', kupujici_email: email19, kupujici_telefon: '602123456', zpusob_platby: 'pri_prevzeti' });
       assert.equal(v19.status, 200, '19) Vytvoření žádosti selhalo: ' + JSON.stringify(v19.data));
       const schv19 = await adminFetch(`/admin/poukazy/zadosti/${v19.data.zadost.id}/stav`, { method: 'PATCH', body: JSON.stringify({ stav: 'vyrizena' }) });
       const d19 = await schv19.json();
@@ -426,7 +428,7 @@ async function main() {
     }
     {
       const email20 = 'test-schvaleni-20-' + Date.now() + '@example.invalid';
-      const v20 = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-SCHVALENI (smazat)', kupujici_email: email20, zpusob_platby: 'pri_prevzeti' });
+      const v20 = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-SCHVALENI (smazat)', kupujici_email: email20, kupujici_telefon: '602123456', zpusob_platby: 'pri_prevzeti' });
       const zadostId20 = v20.data.zadost.id;
       const prvni20 = await adminFetch(`/admin/poukazy/zadosti/${zadostId20}/stav`, { method: 'PATCH', body: JSON.stringify({ stav: 'vyrizena' }) });
       const prvniData20 = await prvni20.json();
@@ -441,7 +443,7 @@ async function main() {
     }
     {
       const email21 = 'test-schvaleni-21-' + Date.now() + '@example.invalid';
-      const v21 = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-SCHVALENI (smazat)', kupujici_email: email21, zpusob_platby: 'pri_prevzeti' });
+      const v21 = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-SCHVALENI (smazat)', kupujici_email: email21, kupujici_telefon: '602123456', zpusob_platby: 'pri_prevzeti' });
       const zadostId21 = v21.data.zadost.id;
       const [sA, sB] = await Promise.all([
         adminFetch(`/admin/poukazy/zadosti/${zadostId21}/stav`, { method: 'PATCH', body: JSON.stringify({ stav: 'vyrizena' }) })
@@ -747,6 +749,79 @@ async function main() {
         await adminFetch('/admin/nastaveni/' + NASTAVENI_KLIC, { method: 'DELETE' }).catch(() => {});
       }
       console.log('OK — GET /api/poukazy/obrazek/:klic odráží obrázek nahraný v adminu (null bez něj, 404 na neznámý klíč)');
+    }
+
+    {
+      // Výběr vzhledu poukazu (klasický/vánoční) a nepovinný termín vyzvednutí
+      // u žádosti z webu — musí se uložit na žádosti, přenést se na skutečný
+      // poukaz při schválení a neplatné datum musí být odmítnuto.
+      const emailV = 'test-sablona-vanocni-' + Date.now() + '@example.invalid';
+      const terminV = posunDnu(5);
+      const vV = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-SABLONA (smazat)', kupujici_email: emailV, kupujici_telefon: '602123456', zpusob_platby: 'pri_prevzeti', sablona: 'vanocni', vyzvednuti_termin: terminV });
+      assert.equal(vV.status, 200, 'Žádost s vánoční šablonou selhala: ' + JSON.stringify(vV.data));
+      assert.equal(vV.data.zadost.sablona, 'vanocni', 'Žádost měla uložit sablona="vanocni"');
+      assert.equal(vV.data.zadost.vyzvednuti_termin, terminV, 'Žádost měla uložit zadaný termín vyzvednutí');
+      uklidZadosti.push(vV.data.zadost.id);
+
+      const schvV = await adminFetch(`/admin/poukazy/zadosti/${vV.data.zadost.id}/stav`, { method: 'PATCH', body: JSON.stringify({ stav: 'vyrizena' }) });
+      const dV = await schvV.json();
+      assert.equal(schvV.status, 200, 'Schválení žádosti s vánoční šablonou selhalo: ' + JSON.stringify(dV));
+      assert.equal(dV.poukaz.sablona, 'vanocni', 'Schválením vzniklý poukaz měl přenést sablona="vanocni" ze žádosti');
+      assert.equal(dV.poukaz.vyzvednuti_termin, terminV, 'Schválením vzniklý poukaz měl přenést termín vyzvednutí ze žádosti');
+      uklidPoukazy.push(dV.poukaz.id);
+      if (dV.poukaz.klientka_id) uklidKlientky.add(dV.poukaz.klientka_id);
+      console.log('OK — vánoční šablona a termín vyzvednutí se uloží na žádosti a přenesou na schválený poukaz');
+
+      // Bez vyplnění šablony/termínu (výchozí formulář) musí žádost dostat
+      // bezpečný výchozí vzhled 'klasicky' a žádný termín.
+      const emailK = 'test-sablona-vychozi-' + Date.now() + '@example.invalid';
+      const vK = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-SABLONA-VYCHOZI (smazat)', kupujici_email: emailK, kupujici_telefon: '602123456', zpusob_platby: 'pri_prevzeti' });
+      assert.equal(vK.status, 200, 'Žádost bez šablony selhala: ' + JSON.stringify(vK.data));
+      assert.equal(vK.data.zadost.sablona, 'klasicky', 'Žádost bez vyplněné šablony měla dostat výchozí "klasicky"');
+      assert.equal(vK.data.zadost.vyzvednuti_termin, null, 'Žádost bez vyplněného termínu měla zůstat NULL');
+      uklidZadosti.push(vK.data.zadost.id);
+      console.log('OK — chybějící šablona/termín dostane bezpečný výchozí stav (klasicky / bez termínu)');
+
+      // Neplatné datum termínu vyzvednutí musí být odmítnuto s jasnou hláškou,
+      // ne tiše uloženo nebo spadnout na chybu 500.
+      const emailN = 'test-sablona-neplatny-termin-' + Date.now() + '@example.invalid';
+      const vN = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-SABLONA-NEPLATNY (smazat)', kupujici_email: emailN, kupujici_telefon: '602123456', zpusob_platby: 'pri_prevzeti', vyzvednuti_termin: 'neplatne-datum' });
+      assert.equal(vN.status, 400, 'Neplatné datum vyzvednutí mělo být odmítnuto');
+      console.log('OK — neplatné datum termínu vyzvednutí je odmítnuto (400)');
+    }
+
+    {
+      // Admin může domluvený termín vyzvednutí doplnit/opravit PŘED schválením
+      // žádosti (zákaznice ho na webu nemusela vyplnit, nebo se domluvila jinak
+      // telefonicky) — po schválení se upravená hodnota musí přenést na poukaz.
+      const emailT = 'test-termin-admin-' + Date.now() + '@example.invalid';
+      const vT = await zadost({ hodnota: 500, kupujici_jmeno: 'TEST-TERMIN-ADMIN (smazat)', kupujici_email: emailT, kupujici_telefon: '602123456', zpusob_platby: 'pri_prevzeti' });
+      assert.equal(vT.status, 200, JSON.stringify(vT.data));
+      const zadostIdT = vT.data.zadost.id;
+      uklidZadosti.push(zadostIdT);
+      assert.equal(vT.data.zadost.vyzvednuti_termin, null, 'Žádost měla vzniknout bez termínu');
+
+      const terminT = posunDnu(10);
+      const uprava = await adminFetch(`/admin/poukazy/zadosti/${zadostIdT}/vyzvednuti`, { method: 'PATCH', body: JSON.stringify({ vyzvednuti_termin: terminT }) });
+      const upravaData = await uprava.json();
+      assert.equal(uprava.status, 200, 'Doplnění termínu admin selhalo: ' + JSON.stringify(upravaData));
+      assert.equal(upravaData.zadost.vyzvednuti_termin, terminT, 'Doplněný termín se neuložil');
+
+      const neplatnyTermin = await adminFetch(`/admin/poukazy/zadosti/${zadostIdT}/vyzvednuti`, { method: 'PATCH', body: JSON.stringify({ vyzvednuti_termin: 'neplatne' }) });
+      assert.equal(neplatnyTermin.status, 400, 'Neplatné datum při úpravě admin měl odmítnout');
+
+      const schvT = await adminFetch(`/admin/poukazy/zadosti/${zadostIdT}/stav`, { method: 'PATCH', body: JSON.stringify({ stav: 'vyrizena' }) });
+      const dT = await schvT.json();
+      assert.equal(schvT.status, 200, JSON.stringify(dT));
+      assert.equal(dT.poukaz.vyzvednuti_termin, terminT, 'Poukaz měl přenést admin-upravený termín vyzvednutí');
+      uklidPoukazy.push(dT.poukaz.id);
+      if (dT.poukaz.klientka_id) uklidKlientky.add(dT.poukaz.klientka_id);
+
+      // Po schválení (stav už není "nova") je další úprava termínu přes
+      // žádost odmítnuta — poukaz už existuje, úprava by se nikam nepropsala.
+      const upravaPoSchvaleni = await adminFetch(`/admin/poukazy/zadosti/${zadostIdT}/vyzvednuti`, { method: 'PATCH', body: JSON.stringify({ vyzvednuti_termin: posunDnu(20) }) });
+      assert.equal(upravaPoSchvaleni.status, 400, 'Úprava termínu po schválení žádosti měla být odmítnuta');
+      console.log('OK — admin může domluvený termín vyzvednutí doplnit před schválením, po schválení už úprava žádosti nejde');
     }
 
     console.log('\n✅ VŠECHNY TESTY POUKAZŮ PROŠLY');

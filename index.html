@@ -691,6 +691,9 @@
   }
   .pu-sablona-btn:hover { border-color: var(--gold); }
   .pu-sablona-btn.selected { background: var(--gold); color: var(--brown); border-color: var(--gold); }
+  /* Nevybraná záložka musí být čitelná i bez kliknutí — 70% bílá na
+     skleněné kartě (.voucher-card) byla moc slabá (viz zpětná vazba). */
+  .pu-sablona-btn:not(.selected) { background: rgba(255,255,255,0.12); color: #fff; border-color: rgba(255,255,255,0.45); }
 
   .btn-gold {
     background: var(--gold);
@@ -1803,7 +1806,7 @@
         <p class="section-sub">
           Dárkový poukaz na masáž je ten nejhezčí dárek — darujete čas pro sebe. Ideální pro narozeniny, Vánoce nebo jen tak.
         </p>
-        <p class="section-sub" id="pkPopisVarianty" style="margin:0.5rem 0 0;">V hodnotě 500, 1 000 nebo 1 500 Kč, případně na konkrétní masáž. Platnost 12 měsíců od zakoupení. Zaplatíte QR kódem, převodem nebo při osobním převzetí.</p>
+        <p class="section-sub" id="pkPopisVarianty" style="margin:0.5rem 0 0;">Vyberte hodnotu: 500 Kč (platnost 6 měsíců), 1 000 Kč (platnost 6 měsíců), 1 500 Kč (platnost 8 měsíců), případně konkrétní masáž (platnost 6 měsíců). Zaplatíte při osobním převzetí v salonu.</p>
         <br>
         <button type="button" class="btn-gold" onclick="otevritPkForm()">Chci dárkový poukaz</button>
       </div>
@@ -1836,10 +1839,21 @@
       <label for="pkMasazSelect">Vyberte masáž</label>
       <select id="pkMasazSelect" class="form-select" onchange="pkMasazZmenena()"><option value="">Načítám…</option></select>
     </div>
+    <div class="form-field form-field-full" style="margin-bottom:1.1rem">
+      <label>Vzhled poukazu</label>
+      <div class="rez-slots" id="pkSablonaSlots" style="justify-content:flex-start">
+        <button type="button" class="rez-slot-btn selected" onclick="pkVybratSablonu('klasicky',this)">🌸 Klasický</button>
+        <button type="button" class="rez-slot-btn" onclick="pkVybratSablonu('vanocni',this)">🎄 Vánoční</button>
+      </div>
+    </div>
     <div class="form-row">
       <div class="form-field">
         <label for="pkProKoho">Pro koho je poukaz</label>
         <input type="text" id="pkProKoho" class="form-input" placeholder="např. pro maminku" maxlength="500">
+      </div>
+      <div class="form-field">
+        <label for="pkVyzvednuti">Kdy chcete poukaz vyzvednout</label>
+        <input type="date" id="pkVyzvednuti" class="form-input">
       </div>
       <div class="form-field">
         <label for="pkJmeno">Vaše jméno*</label>
@@ -1850,8 +1864,8 @@
         <input type="email" id="pkEmail" class="form-input" placeholder="jana@example.cz" maxlength="200">
       </div>
       <div class="form-field">
-        <label for="pkTelefon">Telefon</label>
-        <input type="tel" id="pkTelefon" class="form-input" placeholder="Nepovinné" maxlength="30">
+        <label for="pkTelefon">Telefon*</label>
+        <input type="tel" id="pkTelefon" class="form-input" placeholder="+420 ..." maxlength="30">
       </div>
       <!-- Vánoční akce „Stromeček“ — zobrazí se jen během akce (viz nacistStavSlevy) -->
       <div class="form-field" id="pkSlevaWrap" style="display:none">
@@ -2411,7 +2425,7 @@ async function nacistTypyPoukazu() {
       var castkyText = typy.map(function(t) {
         return Number(t.hodnota).toLocaleString('cs-CZ') + ' Kč (platnost ' + t.platnost_mesicu + ' měsíců)';
       }).join(', ');
-      popis.textContent = 'Vyberte hodnotu: ' + castkyText + ', případně konkrétní masáž (platnost 12 měsíců). Zaplatíte při osobním převzetí v salonu.';
+      popis.textContent = 'Vyberte hodnotu: ' + castkyText + ', případně konkrétní masáž (platnost 6 měsíců). Zaplatíte při osobním převzetí v salonu.';
     }
   } catch (e) {
     wrap.innerHTML = '<button type="button" class="rez-slot-btn" onclick="pkVybratKonkretni(this)">Konkrétní masáž</button>';
@@ -2722,6 +2736,7 @@ var pkVybranaHodnota = null;
 var pkVybranyTypId = null; // id vybrané varianty poukazy_typy — podle ní se při schválení počítá platnost
 var pkVybranyKonkretniMasaz = null;
 var pkVybranyZpusobPlatby = null;
+var pkVybranaSablona = 'klasicky';
 var PK_UCET_IBAN = 'CZ6708000000003181537133';
 var PK_UCET_ZOBRAZENI = '3181537133/0800';
 
@@ -2772,6 +2787,10 @@ function pkVybratPlatbu(zpusob, btn) {
   pkOznacitTlacitko('pkPlatbaSlots', btn);
   pkRenderPlatbaBox();
 }
+function pkVybratSablonu(klic, btn) {
+  pkVybranaSablona = klic;
+  pkOznacitTlacitko('pkSablonaSlots', btn);
+}
 function pkRenderPlatbaBox() {
   var box = document.getElementById('pkPlatbaBox');
   if (!pkVybranyZpusobPlatby) { box.style.display = 'none'; box.innerHTML = ''; return; }
@@ -2820,16 +2839,17 @@ async function pkOdeslat() {
   var telefon = document.getElementById('pkTelefon').value.trim();
   var vzkaz = document.getElementById('pkVzkaz').value.trim();
   var promoKod = document.getElementById('pkSlevovyKod').value.trim();
+  var vyzvednuti = document.getElementById('pkVyzvednuti').value;
 
   if (!pkVybranaHodnota) { zprava.textContent = 'Vyberte prosím hodnotu poukazu, nebo konkrétní masáž.'; zprava.className = 'form-msg err'; return; }
-  if (!jmeno || !email) { zprava.textContent = 'Vyplňte prosím jméno a e-mail.'; zprava.className = 'form-msg err'; return; }
+  if (!jmeno || !email || !telefon) { zprava.textContent = 'Vyplňte prosím jméno, e-mail a telefon.'; zprava.className = 'form-msg err'; return; }
   if (!pkVybranyZpusobPlatby) { zprava.textContent = 'Vyberte prosím způsob platby.'; zprava.className = 'form-msg err'; return; }
 
   try {
     var res = await fetch(API + '/poukazy/zadost', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ hodnota: pkVybranaHodnota, poukaz_typ_id: pkVybranyTypId, kupujici_jmeno: jmeno, kupujici_email: email, kupujici_telefon: telefon, pro_koho: proKoho, vzkaz: vzkaz, konkretni_masaz: pkVybranyKonkretniMasaz, zpusob_platby: pkVybranyZpusobPlatby, promo_kod: promoKod })
+      body: JSON.stringify({ hodnota: pkVybranaHodnota, poukaz_typ_id: pkVybranyTypId, kupujici_jmeno: jmeno, kupujici_email: email, kupujici_telefon: telefon, pro_koho: proKoho, vzkaz: vzkaz, konkretni_masaz: pkVybranyKonkretniMasaz, zpusob_platby: pkVybranyZpusobPlatby, promo_kod: promoKod, sablona: pkVybranaSablona, vyzvednuti_termin: vyzvednuti || null })
     });
     var vysledek = await res.json();
     if (!res.ok) { zprava.textContent = vysledek.chyba || 'Žádost se nepodařilo odeslat.'; zprava.className = 'form-msg err'; return; }
@@ -2844,9 +2864,11 @@ async function pkOdeslat() {
     document.getElementById('pkVzkaz').value = '';
     document.getElementById('pkSlevovyKod').value = '';
     document.getElementById('pkSlevaInfo').textContent = '';
+    document.getElementById('pkVyzvednuti').value = '';
     document.getElementById('pkMasazWrap').style.display = 'none';
     pkOznacitTlacitko('pkHodnotaSlots', null);
     pkOznacitTlacitko('pkPlatbaSlots', null);
+    pkVybratSablonu('klasicky', document.querySelector('#pkSablonaSlots .rez-slot-btn'));
     pkVybranaHodnota = null;
     pkVybranyTypId = null;
     pkVybranyKonkretniMasaz = null;

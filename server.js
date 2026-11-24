@@ -807,7 +807,12 @@ async function vytvoritPoukaz(client, {
   // Krok 3b — nepovinný idempotenční klíč (ochrana proti dvojkliku/opakování
   // při vydání poukazu); vratka-jako-poukaz ho nepoužívá (chráněná klíčem na
   // "platby", viz PATCH /rezervace/:id/platba výš).
-  idempotencyKlic = null
+  idempotencyKlic = null,
+  // Vzhled poukazu k tisku (klasicky|vanocni) — u poukazů z webu snímek z
+  // žádosti (viz POST /api/poukazy/zadost), u ručního vydání v adminu zůstává
+  // výchozí 'klasicky' (admin si šablonu stejně vybírá znovu až při tisku).
+  sablona = 'klasicky',
+  vyzvednutiTermin = null
 }) {
   const platnostDo = new Date();
   platnostDo.setMonth(platnostDo.getMonth() + platnostMesicu);
@@ -820,9 +825,9 @@ async function vytvoritPoukaz(client, {
     ? await pridelitCisloParagonu(client, zaplacenoKdy || new Date())
     : null;
   const { rows: [poukaz] } = await client.query(
-    `INSERT INTO poukazy (kod, hodnota, zustatek, platnost_do, zakoupeno_kde, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, konkretni_masaz, zpusob_platby, stav, klientka_id, ucel, sleva_kc, stav_uhrady, zaplaceno_kdy, zaplaceno_zpetne, kontaktni_platba, idempotency_klic, cislo_paragonu)
-     VALUES ($1,$2,$2,$3,$4,$5,$6,$7,$8,$9,$10,'aktivni',$11,$12,$13,$14,$15,false,$16,$17,$18) RETURNING *`,
-    [vygenerovatKod(ucel), hodnota, platnostDo.toISOString().slice(0, 10), zakoupenoKde, kupujiciJmeno || null, kupujiciEmail || null, kupujiciTelefon || null, proKoho, konkretniMasaz, zpusobPlatby, klientkaId, ucel, Number(slevaKc) || 0, stavUhrady, zaplacenoKdy, kontaktniPlatba, idempotencyKlic, cisloParagonu]
+    `INSERT INTO poukazy (kod, hodnota, zustatek, platnost_do, zakoupeno_kde, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, konkretni_masaz, zpusob_platby, stav, klientka_id, ucel, sleva_kc, stav_uhrady, zaplaceno_kdy, zaplaceno_zpetne, kontaktni_platba, idempotency_klic, cislo_paragonu, sablona, vyzvednuti_termin)
+     VALUES ($1,$2,$2,$3,$4,$5,$6,$7,$8,$9,$10,'aktivni',$11,$12,$13,$14,$15,false,$16,$17,$18,$19,$20) RETURNING *`,
+    [vygenerovatKod(ucel), hodnota, platnostDo.toISOString().slice(0, 10), zakoupenoKde, kupujiciJmeno || null, kupujiciEmail || null, kupujiciTelefon || null, proKoho, konkretniMasaz, zpusobPlatby, klientkaId, ucel, Number(slevaKc) || 0, stavUhrady, zaplacenoKdy, kontaktniPlatba, idempotencyKlic, cisloParagonu, sablona, vyzvednutiTermin]
   );
   return poukaz;
 }
@@ -1176,6 +1181,30 @@ function odeslatUctenkuEmailem({ email, jmeno, polozky, castka, zpusobPlatby, ci
   odeslatEmail(email, 'Účtenka – Masáže Alesa', emailSablona(telo)).catch(() => {});
 }
 
+// Potvrzení přijaté žádosti o poukaz (PATCH /admin/poukazy/zadosti/:id/stav,
+// stav='vyrizena') — poukaz v tomhle okamžiku ještě NENÍ zaplacený
+// (stav_uhrady='nezaplaceno', platí se až při vyzvednutí), proto jde o
+// samostatný e-mail, ne o odeslatUctenkuEmailem výš (ta je jen pro skutečně
+// právě přijatou platbu). Fire and forget — stejný princip jako výš.
+function odeslatPotvrzeniZadostiEmailem(poukaz) {
+  if (!poukaz.kupujici_email) return;
+  const prijmeni = ziskatPrijmeni(poukaz.kupujici_jmeno);
+  const oslovovaciDoplnek = prijmeni ? `, paní ${prijmeni}` : '';
+  const popisPredmetu = poukaz.konkretni_masaz
+    ? `na masáž <strong>${poukaz.konkretni_masaz}</strong>`
+    : `v hodnotě <strong>${Number(poukaz.hodnota).toLocaleString('cs-CZ')} Kč</strong>`;
+  const vyzvednutiRadek = poukaz.vyzvednuti_termin
+    ? `<p>Napsala jste, že si ho přejete vyzvednout <strong>${new Date(poukaz.vyzvednuti_termin).toLocaleDateString('cs-CZ')}</strong> — pokud by se to změnilo, napište nebo zavolejte.</p>`
+    : '';
+  const telo = `<h2>Dobrý den${oslovovaciDoplnek},</h2>
+    <p>Vaši žádost o dárkový poukaz ${popisPredmetu}${poukaz.pro_koho ? ' pro ' + poukaz.pro_koho : ''} jsem přijala.</p>
+    ${vyzvednutiRadek}
+    <p>Platbu provedete osobně při vyzvednutí v salonu (hotově nebo QR kódem).</p>
+    <p style="font-size:0.85rem;color:#777">Alena Hasalová · Masáže Alesa · Včelín 1211, 768 24 Hulín · IČO: 03237885</p>
+    <p>S pozdravem,<br><strong>Alena Hasalová</strong><br>Masáže Alesa</p>`;
+  odeslatEmail(poukaz.kupujici_email, 'Vaše žádost o dárkový poukaz byla přijata – Masáže Alesa', emailSablona(telo)).catch(() => {});
+}
+
 // ── LOGIN (admin) ──
 app.post('/api/login', (req, res) => {
   const { heslo } = req.body || {};
@@ -1526,9 +1555,22 @@ app.post('/api/rezervace', async (req, res) => {
 
 // Žádost o dárkový poukaz z webového formuláře
 app.post('/api/poukazy/zadost', async (req, res) => {
-  const { hodnota, poukaz_typ_id, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, vzkaz, konkretni_masaz, zpusob_platby, promo_kod } = req.body || {};
-  if (hodnota === undefined || hodnota === null || hodnota === '' || !kupujici_jmeno || !kupujici_email) {
-    return res.status(400).json({ chyba: 'Vyplňte prosím hodnotu poukazu, jméno a e-mail.' });
+  const { hodnota, poukaz_typ_id, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, vzkaz, konkretni_masaz, zpusob_platby, promo_kod, sablona, vyzvednuti_termin } = req.body || {};
+  // Vzhled poukazu — jen tyto dvě hodnoty existují (viz nastaveni.poukaz_obrazek_<klic>
+  // v adminu); cokoli jiné/chybějící tiše spadne na bezpečný výchozí 'klasicky'.
+  const sablonaKUlozeni = ['klasicky', 'vanocni'].includes(sablona) ? sablona : 'klasicky';
+  // Termín vyzvednutí je čistě informativní přání zákaznice (nerezervuje žádný
+  // reálný časový slot) — nepovinné, jen formální kontrola platného data.
+  let vyzvednutiKUlozeni = null;
+  if (vyzvednuti_termin) {
+    const datumVyzvednuti = new Date(vyzvednuti_termin);
+    if (Number.isNaN(datumVyzvednuti.getTime())) {
+      return res.status(400).json({ chyba: 'Zadejte prosím platné datum vyzvednutí, nebo pole nechte prázdné.' });
+    }
+    vyzvednutiKUlozeni = vyzvednuti_termin;
+  }
+  if (hodnota === undefined || hodnota === null || hodnota === '' || !kupujici_jmeno || !kupujici_email || !kupujici_telefon || !kupujici_telefon.trim()) {
+    return res.status(400).json({ chyba: 'Vyplňte prosím hodnotu poukazu, jméno, e-mail a telefon.' });
   }
   // hodnota zadosti se při schválení stává i skutečným zůstatkem reálného
   // poukazu (viz PATCH .../zadosti/:id/stav) — finite/kladné/omezené číslo
@@ -1552,12 +1594,12 @@ app.post('/api/poukazy/zadost', async (req, res) => {
   if (!kupujici_email.includes('@')) {
     return res.status(400).json({ chyba: 'Zadejte prosím platný e-mail.' });
   }
-  // kupujici_telefon je v schema.sql nullable — na rozdíl od POST /api/rezervace
-  // zůstává nepovinný, validace proběhne jen pokud je skutečně vyplněn.
-  if (kupujici_telefon && kupujici_telefon.trim()) {
+  // Telefon je povinný (viz kontrola výš) — stejná normalizace/kontrola formátu
+  // jako u POST /api/rezervace.
+  {
     const telefonNormalizovany = normalizovatTelefon(kupujici_telefon);
     if (!telefonNormalizovany || telefonNormalizovany.length < 9) {
-      return res.status(400).json({ chyba: 'Zadejte prosím platné telefonní číslo, nebo pole nechte prázdné.' });
+      return res.status(400).json({ chyba: 'Zadejte prosím platné telefonní číslo.' });
     }
   }
   if (
@@ -1587,9 +1629,9 @@ app.post('/api/poukazy/zadost', async (req, res) => {
     }
     const slevaKc = promo ? promo.sleva : 0;
     const { rows: [zadost] } = await client.query(
-      `INSERT INTO poukazy_zadosti (hodnota, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, vzkaz, konkretni_masaz, zpusob_platby, platnost_mesicu, stav, sleva_kc, promo_kod)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'nova',$10,$11) RETURNING *`,
-      [hodnotaCislo, kupujici_jmeno, kupujici_email, kupujici_telefon || null, pro_koho || null, vzkaz || null, konkretni_masaz || null, zpusob_platby, platnostMesicu, slevaKc, slevaKc ? promo.kod : null]
+      `INSERT INTO poukazy_zadosti (hodnota, kupujici_jmeno, kupujici_email, kupujici_telefon, pro_koho, vzkaz, konkretni_masaz, zpusob_platby, platnost_mesicu, stav, sleva_kc, promo_kod, sablona, vyzvednuti_termin)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'nova',$10,$11,$12,$13) RETURNING *`,
+      [hodnotaCislo, kupujici_jmeno, kupujici_email, kupujici_telefon || null, pro_koho || null, vzkaz || null, konkretni_masaz || null, zpusob_platby, platnostMesicu, slevaKc, slevaKc ? promo.kod : null, sablonaKUlozeni, vyzvednutiKUlozeni]
     );
     if (promo && promo.vyuzitiId) {
       await client.query('UPDATE promo_poukaz_vyuziti SET objednavka_id = $1 WHERE id = $2', [zadost.id, promo.vyuzitiId]);
@@ -1608,6 +1650,8 @@ app.post('/api/poukazy/zadost', async (req, res) => {
           ${konkretni_masaz ? '<strong>Konkrétní masáž:</strong> ' + konkretni_masaz + '<br>' : '<strong>Hodnota:</strong> ' + hodnotaCislo + ' Kč (platnost ' + (platnostMesicu || 12) + ' měsíců)<br>'}
           <strong>Pro koho:</strong> ${pro_koho || '—'}<br>
           <strong>Vzkaz:</strong> ${vzkaz || '—'}<br>
+          <strong>Vzhled poukazu:</strong> ${sablonaKUlozeni === 'vanocni' ? 'Vánoční' : 'Klasický'}<br>
+          <strong>Termín vyzvednutí:</strong> ${vyzvednutiKUlozeni ? new Date(vyzvednutiKUlozeni).toLocaleDateString('cs-CZ') : '—'}<br>
           <strong>Způsob platby:</strong> ${zpusob_platby}
           ${zadost.sleva_kc > 0 ? '<br><strong>Sleva ' + zadost.promo_kod + ':</strong> −' + zadost.sleva_kc + ' Kč — k úhradě ' + (hodnotaCislo - zadost.sleva_kc) + ' Kč' : ''}
         </td></tr>
@@ -3038,7 +3082,7 @@ app.post('/api/admin/poukazy', async (req, res) => {
       const { rows: [polozka] } = await client.query('SELECT * FROM cenik WHERE id = $1', [cenik_id]);
       if (!polozka) { await client.query('ROLLBACK'); return res.status(404).json({ chyba: 'Tato masáž nebyla v ceníku nalezena.' }); }
       hodnota = polozka.cena;
-      platnostMesicu = 12;
+      platnostMesicu = 6;
       konkretniMasaz = polozka.skupina + ' – ' + polozka.varianta;
     } else {
       const { rows: [typ] } = await client.query('SELECT * FROM poukazy_typy WHERE id = $1', [poukaz_typ_id]);
@@ -3443,6 +3487,36 @@ app.get('/api/admin/poukazy/zadosti', async (req, res) => {
   } catch (e) { res.status(500).json({ chyba: e.message }); }
 });
 
+// Úprava domluveného termínu vyzvednutí PŘED schválením žádosti — zákaznice
+// na webu termín nemusela vyplnit (nebo se domluvila jinak telefonicky),
+// admin ho tu může doplnit/opravit, než klikne "Schválit". Po schválení se
+// hodnota přenese na skutečný poukaz (viz vytvoritPoukaz výš), takže tenhle
+// endpoint jde použít jen dokud je žádost ve stavu "nova" — jednou vytvořený
+// poukaz se upravuje jinde, ne zpětně přes žádost.
+app.patch('/api/admin/poukazy/zadosti/:id/vyzvednuti', async (req, res) => {
+  const { vyzvednuti_termin } = req.body || {};
+  let vyzvednutiKUlozeni = null;
+  if (vyzvednuti_termin) {
+    const datum = new Date(vyzvednuti_termin);
+    if (Number.isNaN(datum.getTime())) {
+      return res.status(400).json({ chyba: 'Zadejte prosím platné datum, nebo pole vyprázdněte.' });
+    }
+    vyzvednutiKUlozeni = vyzvednuti_termin;
+  }
+  try {
+    const { rows: [zadost] } = await db.query('SELECT stav FROM poukazy_zadosti WHERE id = $1', [req.params.id]);
+    if (!zadost) return res.status(404).json({ chyba: 'Žádost nenalezena.' });
+    if (zadost.stav !== 'nova') {
+      return res.status(400).json({ chyba: 'Termín lze upravit jen u nevyřízené žádosti.' });
+    }
+    const { rows: [aktualizovana] } = await db.query(
+      'UPDATE poukazy_zadosti SET vyzvednuti_termin = $1 WHERE id = $2 RETURNING *',
+      [vyzvednutiKUlozeni, req.params.id]
+    );
+    res.json({ ok: true, zadost: aktualizovana });
+  } catch (e) { res.status(500).json({ chyba: e.message }); }
+});
+
 // Schválení žádosti → automaticky vytvoří aktivní poukaz. "FOR UPDATE" +
 // kontrola aktuálního stavu žádosti (musí být "nova") chrání proti
 // duplicitnímu vystavení poukazu při dvojkliku nebo souběžném/opakovaném
@@ -3482,13 +3556,16 @@ app.patch('/api/admin/poukazy/zadosti/:id/stav', async (req, res) => {
       // proto se sem už nepropisuje. Poukaz vzniká jako stav_uhrady='nezaplaceno'
       // a skutečnou platbu až zaznamená samostatná akce "Potvrdit platbu".
       const poukaz = await vytvoritPoukaz(client, {
-        hodnota: zadost.hodnota, platnostMesicu: zadost.platnost_mesicu || 12, zakoupenoKde: 'web',
+        hodnota: zadost.hodnota, platnostMesicu: zadost.platnost_mesicu || 6, zakoupenoKde: 'web',
         kupujiciJmeno: zadost.kupujici_jmeno, kupujiciEmail: zadost.kupujici_email, kupujiciTelefon: zadost.kupujici_telefon,
         proKoho: zadost.pro_koho, konkretniMasaz: zadost.konkretni_masaz,
-        klientkaId, ucel: 'prodej', slevaKc: Number(zadost.sleva_kc) || 0, stavUhrady: 'nezaplaceno'
+        klientkaId, ucel: 'prodej', slevaKc: Number(zadost.sleva_kc) || 0, stavUhrady: 'nezaplaceno',
+        sablona: zadost.sablona || 'klasicky', vyzvednutiTermin: zadost.vyzvednuti_termin
       });
       await client.query('COMMIT');
-      return res.json({ ok: true, poukaz });
+      res.json({ ok: true, poukaz });
+      odeslatPotvrzeniZadostiEmailem(poukaz);
+      return;
     }
     await client.query('COMMIT');
     res.json({ ok: true });

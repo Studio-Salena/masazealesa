@@ -173,6 +173,8 @@ create table if not exists poukazy (
   pro_koho text,
   konkretni_masaz text, -- nepovinné: pokud poukaz platí jen na jednu konkrétní masáž, ne na libovolnou částku
   zpusob_platby text, -- qr | prevodem | pri_prevzeti | hotove (nepovinné, jen u poukazů z webu)
+  sablona text not null default 'klasicky', -- klasicky | vanocni — vzhled poukazu k tisku, snímek z žádosti (viz poukazy_zadosti.sablona)
+  vyzvednuti_termin date, -- nepovinné: kdy si zákaznice přeje poukaz vyzvednout (jen u poukazů z webu)
   stav text not null default 'aktivni', -- aktivni | castecne_vyuzity | pouzity | zruseny
   -- "prošlý" se nikde neukládá jako stav — dopočítává se za běhu z platnost_do,
   -- ať je vždy aktuální bez nutnosti plánované úlohy, která by stav přepínala.
@@ -291,6 +293,8 @@ create table if not exists poukazy_zadosti (
   konkretni_masaz text, -- nepovinné: pokud si nezvolili částku, ale konkrétní masáž
   zpusob_platby text, -- qr | prevodem | pri_prevzeti
   platnost_mesicu integer, -- snímek z poukazy_typy.platnost_mesicu v době žádosti; NULL = konkrétní masáž (při schválení se použije 12)
+  sablona text not null default 'klasicky', -- klasicky | vanocni — vzhled poukazu zvolený na webu, přenáší se do poukazy.sablona při schválení
+  vyzvednuti_termin date, -- nepovinné: kdy si zákaznice přeje poukaz vyzvednout
   stav text not null default 'nova', -- nova | vyrizena | zamitnuta
   vytvoreno timestamptz not null default now()
 );
