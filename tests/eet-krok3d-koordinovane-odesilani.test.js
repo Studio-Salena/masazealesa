@@ -56,6 +56,19 @@ async function zaevidovat(client, { smer = 'prijem', zdrojTyp = 'prodej_produktu
 async function main() {
   const c1 = novyKlient();
   await c1.connect();
+  // eet/odesilaci-sluzba.js od revize 2026-11-24 kontroluje OBA přepínače
+  // (eet_evidence_zapnuta/eet_odesilani_pozastaveno) PŘÍMO uvnitř sebe (ne
+  // jen u volajícího) — tenhle test volá odeslatIhned/zpracovatDavku
+  // napřímo, takže je musí mít po dobu běhu výslovně v odesílatelném stavu,
+  // stejně jako to dřív dělal (jen pro eet_evidence_zapnuta) eet-krok3b-platby.test.js.
+  // Původní hodnoty se vrátí v "finally" níž, ať tenhle test neovlivní ŽÁDNÝ
+  // jiný soubor regresní sady.
+  const { rows: [puvodniEvidence] } = await c1.query(`SELECT hodnota FROM nastaveni WHERE klic = 'eet_evidence_zapnuta'`);
+  const { rows: [puvodniPozastaveno] } = await c1.query(`SELECT hodnota FROM nastaveni WHERE klic = 'eet_odesilani_pozastaveno'`);
+  const puvodniHodnotaEvidence = puvodniEvidence ? puvodniEvidence.hodnota : 'false';
+  const puvodniHodnotaPozastaveno = puvodniPozastaveno ? puvodniPozastaveno.hodnota : 'true';
+  await c1.query(`UPDATE nastaveni SET hodnota = 'true' WHERE klic = 'eet_evidence_zapnuta'`);
+  await c1.query(`UPDATE nastaveni SET hodnota = 'false' WHERE klic = 'eet_odesilani_pozastaveno'`);
   const ca = vytvoritTestovaciCaARetezec({ cnRoot: 'TEST Root CA — Krok 3d koordinace' });
   const klicOdesilatele = vytvoritTestovaciKlic();
   const spolecneOpts = (mock) => ({
@@ -248,6 +261,8 @@ async function main() {
     }
 
   } finally {
+    await c1.query(`UPDATE nastaveni SET hodnota = $1 WHERE klic = 'eet_evidence_zapnuta'`, [puvodniHodnotaEvidence]).catch(() => {});
+    await c1.query(`UPDATE nastaveni SET hodnota = $1 WHERE klic = 'eet_odesilani_pozastaveno'`, [puvodniHodnotaPozastaveno]).catch(() => {});
     await c1.end();
   }
 

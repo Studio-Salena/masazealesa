@@ -35,6 +35,16 @@ async function zaevidovat(client, { castka = 50, pokladniUdalostId = crypto.rand
 async function main() {
   const c1 = novyKlient();
   await c1.connect();
+  // Viz stejná poznámka v eet-krok3d-koordinovane-odesilani.test.js — od
+  // revize 2026-11-24 kontroluje eet/odesilaci-sluzba.js oba přepínače sama,
+  // tenhle test je proto musí mít po dobu běhu výslovně v odesílatelném
+  // stavu (a vrátit zpět v "finally" níž).
+  const { rows: [puvodniEvidence] } = await c1.query(`SELECT hodnota FROM nastaveni WHERE klic = 'eet_evidence_zapnuta'`);
+  const { rows: [puvodniPozastaveno] } = await c1.query(`SELECT hodnota FROM nastaveni WHERE klic = 'eet_odesilani_pozastaveno'`);
+  const puvodniHodnotaEvidence = puvodniEvidence ? puvodniEvidence.hodnota : 'false';
+  const puvodniHodnotaPozastaveno = puvodniPozastaveno ? puvodniPozastaveno.hodnota : 'true';
+  await c1.query(`UPDATE nastaveni SET hodnota = 'true' WHERE klic = 'eet_evidence_zapnuta'`);
+  await c1.query(`UPDATE nastaveni SET hodnota = 'false' WHERE klic = 'eet_odesilani_pozastaveno'`);
   const ca = vytvoritTestovaciCaARetezec({ cnRoot: 'TEST Root CA — Krok 3d zpevnění' });
   const klicOdesilatele = vytvoritTestovaciKlic();
   const opts = (mock, extra = {}) => ({
@@ -167,6 +177,8 @@ async function main() {
     }
 
   } finally {
+    await c1.query(`UPDATE nastaveni SET hodnota = $1 WHERE klic = 'eet_evidence_zapnuta'`, [puvodniHodnotaEvidence]).catch(() => {});
+    await c1.query(`UPDATE nastaveni SET hodnota = $1 WHERE klic = 'eet_odesilani_pozastaveno'`, [puvodniHodnotaPozastaveno]).catch(() => {});
     await c1.end();
   }
 

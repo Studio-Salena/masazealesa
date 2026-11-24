@@ -639,6 +639,21 @@ async function main() {
       `DELETE FROM evidovana_trzba_zdroje WHERE zdroj_typ = 'platba' AND zdroj_id IN (SELECT id FROM platby WHERE rezervace_id = ANY($1))`,
       [uklidRezervace], 'zdroje platba'
     );
+    // Pojistka navíc (nezávislá na výše uvedených dotazech podle typu zdroje):
+    // uklidTrzbaId obsahuje ID VŠECH evidovaných tržeb, které tenhle běh testu
+    // sám vytvořil (viz zdrojeTrzby/pocetZdroju výš, volá se pro každý
+    // scénář). Pokud by mezi vznikem zdroje a tímhle úklidem zmizela
+    // obchodní řádka, na kterou se výše uvedené dotazy spoléhají (např.
+    // platby smazané cizím/externím úklidem po přerušeném běhu — přesně
+    // tohle způsobilo 102 trvale osamělých zdroj_typ='platba' řádků
+    // nalezených při revizi 2026-11-24, protože subquery výš "SELECT id FROM
+    // platby WHERE rezervace_id..." už nic nenašla), tahle řádka smaže zdroj
+    // PŘÍMO podle evidovana_trzba_id, bez ohledu na to, jestli obchodní
+    // řádek ještě existuje.
+    if (uklidTrzbaId.size) await bezpecne(
+      `DELETE FROM evidovana_trzba_zdroje WHERE evidovana_trzba_id = ANY($1)`,
+      [[...uklidTrzbaId]], 'zdroje (podle evidovane trzby, odolne vuci dríve smazaným platbám/poukazům)'
+    );
     // Jen tržby, co tenhle test SÁM vytvořil (uklidTrzbaId) — nikdy hromadný
     // dotaz na "cokoli bez zdroje", aby se nesáhlo na data jiných testů
     // (např. eet-krok3a.test.js), které mohou mít vlastní, odlišný životní

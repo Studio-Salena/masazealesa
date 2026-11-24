@@ -59,11 +59,16 @@ function ziskatUuidZpravy(soapXml) {
   return m ? m[1] : null;
 }
 
-async function obsluhaPozadavku(req, res, podepisovatOdpovedi) {
+async function obsluhaPozadavku(req, res, podepisovatOdpovedi, predKazdymPozadavkem) {
   if (req.method !== 'POST') {
     res.writeHead(405).end();
     return;
   }
+  // Nepovinný test-only hák (Krok 3d — ověření přepínačů uprostřed dávky):
+  // zavolá se PŘED zpracováním KAŽDÉHO požadavku, čistě pro deterministické
+  // řízení pořadí v testu (např. "mezi prvním a druhým řádkem dávky změň
+  // nastavení v DB"), žádný vliv na produkční chování.
+  if (predKazdymPozadavkem) await predKazdymPozadavkem();
   const kusy = [];
   for await (const kus of req) kusy.push(kus);
   const telo = Buffer.concat(kusy).toString('utf8');
@@ -108,10 +113,10 @@ async function obsluhaPozadavku(req, res, podepisovatOdpovedi) {
   res.end(sestavitPotvrzeniXml(uuidZpravy, podepisovatOdpovedi));
 }
 
-function spustitMockEetServer({ podepisovatOdpovedi = null } = {}) {
+function spustitMockEetServer({ podepisovatOdpovedi = null, predKazdymPozadavkem = null } = {}) {
   return new Promise((resolve) => {
     const server = http.createServer((req, res) => {
-      obsluhaPozadavku(req, res, podepisovatOdpovedi).catch((e) => {
+      obsluhaPozadavku(req, res, podepisovatOdpovedi, predKazdymPozadavkem).catch((e) => {
         res.writeHead(500).end(String(e));
       });
     });

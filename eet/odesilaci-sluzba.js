@@ -45,6 +45,35 @@ async function dotaz(db, sql, params) {
   return rows;
 }
 
+// Kontrola OBOU přepínačů PŘÍMO tady, ne jen u volajícího (server.js dřív
+// kontroloval "eet_odesilani_pozastaveno" jen u okamžitého odeslání po
+// platbě — budoucí worker/dávkové zpracování i ruční znovu-zařazení by na
+// tuhle kontrolu musely spoléhat samostatně, a jediné opomenutí by znamenalo
+// síťové odeslání navzdory vypnutému přepínači). Obě cesty (odeslatIhned i
+// zpracovatDavku) volají STEJNOU zpracovatZamcenouTrzbu níž, takže kontrola
+// tady platí pro VŠECHNY vstupní cesty najednou.
+//
+// Fail-closed: povoleno je JEN přesná dvojice ('true','false'). Chybějící
+// řádek, NULL, prázdný řetězec nebo jakákoli jiná hodnota (typo, poškozená
+// migrace) se považuje za "nejasné nastavení" a odesílání se odmítne, nikdy
+// naopak.
+async function zkontrolovatPrepinaceOdesilani(db) {
+  const radky = await dotaz(
+    db,
+    `SELECT klic, hodnota FROM nastaveni WHERE klic IN ('eet_evidence_zapnuta','eet_odesilani_pozastaveno')`
+  );
+  const m = {};
+  radky.forEach(r => { m[r.klic] = r.hodnota; });
+
+  if (m.eet_evidence_zapnuta !== 'true') {
+    return { povoleno: false, duvod: `eet_evidence_zapnuta musí být přesně 'true' (nalezeno: ${JSON.stringify(m.eet_evidence_zapnuta ?? null)})` };
+  }
+  if (m.eet_odesilani_pozastaveno !== 'false') {
+    return { povoleno: false, duvod: `eet_odesilani_pozastaveno musí být přesně 'false' (nalezeno: ${JSON.stringify(m.eet_odesilani_pozastaveno ?? null)})` };
+  }
+  return { povoleno: true, duvod: null };
+}
+
 // Sestaví a podepíše XML pro JEDEN pokus o odeslání dané (už zamčené)
 // evidované tržby. "pocetPredchozichPokusu" se čte čerstvě z DB (ne z
 // počítadla v paměti) — je to jediný zdroj pravdy o tom, jde-li o první
@@ -147,6 +176,16 @@ async function zpracovatZamcenouTrzbu(db, trzbaRow, opts) {
     // oknem zámku, jinak by souběžný worker mohl tutéž tržbu zamknout a
     // odeslat PODRUHÉ, zatímco první pokus je stále skutečně v běhu.
     throw new Error(`timeoutMs (${timeoutMs}) je nebezpečně blízko nebo nad "stale" oknem zámku (${STALE_OKNO_MINUT} min) — mohlo by dojít k dvojímu odeslání. Maximální bezpečná hodnota je ${MAX_BEZPECNY_TIMEOUT_MS} ms.`);
+  }
+
+  // Oba přepínače se čtou ČERSTVĚ z DB při KAŽDÉM volání (ne jen jednou na
+  // začátku dávky) — pokud je někdo změní UPROSTŘED zpracovávání dávky,
+  // další řádek dávky už se řídí novou hodnotou, žádné "zamrznuté" čtení
+  // z doby, kdy dávka začala.
+  const prepinace = await zkontrolovatPrepinaceOdesilani(db);
+  if (!prepinace.povoleno) {
+    await dotaz(db, 'SELECT eet_uvolnit_zamek_bez_vysledku($1,$2)', [trzbaRow.id, trzbaRow.aktualni_pokus_id]);
+    throw new Error(`Odesílání odmítnuto přepínači (${prepinace.duvod}) — zámek uvolněn beze zápisu výsledku, tržba zůstává nedotčená pro další pokus, až budou přepínače v odesílatelném stavu.`);
   }
 
   // Certifikát/klíč se ověří JEŠTĚ PŘED sestavením zprávy a ZVLÁŠŤ od
@@ -253,7 +292,21 @@ async function zpracovatDavku(db, opts, pocet = 10, workerId = `worker-${process
   const zamcene = await dotaz(db, 'SELECT * FROM eet_zamknout_dalsi_davku($1,$2)', [workerId, pocet]);
   const vysledky = [];
   for (const radek of zamcene) {
-    vysledky.push({ trzbaId: radek.id, ...(await zpracovatZamcenouTrzbu(db, radek, opts)) });
+    try {
+      vysledky.push({ trzbaId: radek.id, ...(await zpracovatZamcenouTrzbu(db, radek, opts)) });
+    } catch (e) {
+      // zpracovatZamcenouTrzbu už sama uvolňuje zámek beze zápisu výsledku u
+      // ZNÁMÝCH chyb (přepínače, chybějící/nesedící certifikát) PŘED tím, než
+      // je vyhodí — ale bez tohoto catch by jediná taková chyba U JEDNOHO
+      // řádku dávky vyhodila výjimku z celé funkce a VŠECHNY další, už
+      // zamčené řádky téže dávky by zůstaly zamčené až do vypršení 5minutového
+      // "stale" okna, místo aby se o ně mohl ihned pokusit další běh workeru.
+      // Druhé (idempotentní, bezpečné i když zámek už byl uvolněn výš)
+      // uvolnění tady jako pojistka i pro JAKOUKOLI jinou, nečekanou chybu,
+      // co by zámek sama neuvolnila.
+      await dotaz(db, 'SELECT eet_uvolnit_zamek_bez_vysledku($1,$2)', [radek.id, radek.aktualni_pokus_id]).catch(() => {});
+      vysledky.push({ trzbaId: radek.id, zamceno: true, stav: 'chyba_zpracovani', chybaText: e.message });
+    }
   }
   return vysledky;
 }
@@ -270,4 +323,4 @@ async function znovuZaraditDoFronty(db, trzbaId, poznamka) {
   return vysledek.ok;
 }
 
-module.exports = { zpracovatZamcenouTrzbu, odeslatIhned, zpracovatDavku, klasifikovatOdpoved, znovuZaraditDoFronty, PRECHODNE_CHYBOVE_KODY, MAX_BEZPECNY_TIMEOUT_MS };
+module.exports = { zpracovatZamcenouTrzbu, odeslatIhned, zpracovatDavku, klasifikovatOdpoved, znovuZaraditDoFronty, zkontrolovatPrepinaceOdesilani, PRECHODNE_CHYBOVE_KODY, MAX_BEZPECNY_TIMEOUT_MS };
