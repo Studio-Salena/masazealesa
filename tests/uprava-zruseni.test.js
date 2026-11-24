@@ -83,6 +83,20 @@ const uklidPoukazy = [];
 const uklidKlientky = new Set();
 
 async function main() {
+  // Test 8 níž vyžaduje, aby neděle (den_v_tydnu=0) byla "uzavřený den" —
+  // bez toho test neověřuje nic (přesun by server správně povolil). TEST
+  // databáze ale může mít pracovní dobu nakonfigurovanou jinak (např. pokud
+  // ji nějaký jiný scénář/provoz nastavil na "otevřeno"), takže si tenhle
+  // test svou vlastní potřebnou konfiguraci dočasně zajistí sám a po sobě
+  // ji přesně vrátí zpět — stejný princip jako jiné testy dočasně nastavují
+  // "nastaveni" (EET přepínače) a vrací je v "finally".
+  const [puvodniNedele] = await fetch(API + '/admin/pracovni-doba', { headers: { 'x-admin-heslo': HESLO } }).then(r => r.json()).then(rows => rows.filter(r => r.den_v_tydnu === 0));
+  if (puvodniNedele && puvodniNedele.aktivni) {
+    await adminFetch('/admin/pracovni-doba/0', {
+      method: 'PUT',
+      body: JSON.stringify({ otevreno_od: puvodniNedele.otevreno_od, otevreno_do: puvodniNedele.otevreno_do, pauza_od: puvodniNedele.pauza_od, pauza_do: puvodniNedele.pauza_do, aktivni: false })
+    });
+  }
   try {
     const cenik = await fetch(API + '/cenik').then(r => r.json());
     const rezervovatelne = cenik.filter(c => c.rezervovatelna);
@@ -385,6 +399,12 @@ async function main() {
 
     console.log('\n✅ VŠECHNY TESTY ÚPRAVY A ZRUŠENÍ REZERVACE PROŠLY');
   } finally {
+    if (puvodniNedele && puvodniNedele.aktivni) {
+      await adminFetch('/admin/pracovni-doba/0', {
+        method: 'PUT',
+        body: JSON.stringify({ otevreno_od: puvodniNedele.otevreno_od, otevreno_do: puvodniNedele.otevreno_do, pauza_od: puvodniNedele.pauza_od, pauza_do: puvodniNedele.pauza_do, aktivni: true })
+      }).catch(() => {});
+    }
     for (const id of uklidRezervace) await uklidRezervaciSFallbackem(adminFetch, id);
     for (const id of uklidPoukazy) await adminFetch(`/admin/poukazy/${id}`, { method: 'DELETE' });
     // Klientky se mažou AŽ TEĎ, po smazání rezervací/poukazů — DELETE
