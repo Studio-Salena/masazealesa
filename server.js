@@ -1884,6 +1884,28 @@ app.get('/api/admin/google-kalendar/stav', async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, chyba: e.message }); }
 });
 
+// Jednorázové (ale bezpečně opakovatelné) dohnání historie — doplní do
+// Google kalendáře i čekající/potvrzené rezervace, které vznikly PŘED
+// zapojením synchronizace (ta normálně běží jen při založení/úpravě/změně
+// stavu). Idempotentní: zpracovává jen řádky s google_event_id IS NULL,
+// takže opakované volání nic nezdvojí.
+app.post('/api/admin/google-kalendar/dohnat-historii', async (req, res) => {
+  try {
+    const { rows } = await db.query(
+      "SELECT * FROM rezervace WHERE stav IN ('cekajici','potvrzena') AND google_event_id IS NULL ORDER BY datum, cas_od"
+    );
+    let ok = 0;
+    const chyby = [];
+    for (const r of rows) {
+      await synchronizovatKalendar(db, r);
+      const { rows: [zkontrolovana] } = await db.query('SELECT google_event_id FROM rezervace WHERE id = $1', [r.id]);
+      if (zkontrolovana.google_event_id) ok++;
+      else chyby.push(r.id);
+    }
+    res.json({ ok: true, celkem: rows.length, zpracovano: ok, selhalo: chyby });
+  } catch (e) { res.status(500).json({ ok: false, chyba: e.message }); }
+});
+
 // -- Přehled --
 // Kolik dní dopředu se poukaz počítá jako "brzy expiruje" na dashboardu —
 // konstanta stejného druhu jako jiné prahy v projektu (viz BUFFER_MINUT apod.),
