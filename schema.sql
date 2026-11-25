@@ -100,9 +100,12 @@ create table if not exists rezervace (
   uhrazeno numeric not null default 0, -- vždy = SUM(platby.castka) pro tuhle rezervaci, viz níž
   uhrazeno_kdy timestamptz, -- nastaveno, jen když je stav_platby právě teď "zaplaceno" (jinak null)
   vytvoreno timestamptz not null default now(),
-  klientka_id integer -- Fáze 6D: vazba na klientky(id), FK přidaná až níž (tabulka klientky
+  klientka_id integer, -- Fáze 6D: vazba na klientky(id), FK přidaná až níž (tabulka klientky
     -- v souboru vzniká později) — nullable, jmeno/telefon/email tu ZŮSTÁVAJÍ jako
     -- snímek z okamžiku rezervace, klientka_id je jen navíc pro CRM
+  google_event_id text -- jednosměrná synchronizace do osobního Google kalendáře (jen
+    -- stav cekajici/potvrzena) — ID události v Google kalendáři, NULL = žádná
+    -- (buď sync vypnutý, nebo rezervace v jiném stavu)
 );
 
 -- Deník jednotlivých plateb a vratek k rezervaci (Fáze 3B). rezervace.uhrazeno/

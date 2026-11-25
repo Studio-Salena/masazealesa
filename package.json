@@ -11,6 +11,7 @@
     "@xmldom/xmldom": "^0.9.12",
     "cors": "^2.8.5",
     "express": "^4.19.2",
+    "googleapis": "^190.0.0",
     "pdfkit": "^0.21.0",
     "pg": "^8.13.0",
     "xml-crypto": "^6.4.0",

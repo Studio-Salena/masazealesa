@@ -11,6 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const PDFDocument = require('pdfkit');
 const { Pool, types } = require('pg');
+const { synchronizovatKalendar, odstranitUdalost } = require('./google-kalendar');
 
 const API_URL = process.env.API_URL || 'https://masazealesa.onrender.com';
 
@@ -1530,6 +1531,8 @@ app.post('/api/rezervace', async (req, res) => {
 
     await client.query('COMMIT');
 
+    synchronizovatKalendar(db, rezervace).catch(() => {});
+
     if (souhlas_newsletter && email) {
       const token = crypto.randomBytes(20).toString('hex');
       db.query(
@@ -2010,6 +2013,8 @@ app.post('/api/admin/rezervace', async (req, res) => {
 
     await client.query('COMMIT');
 
+    synchronizovatKalendar(db, rezervace).catch(() => {});
+
     if (email) {
       vykreslitEmail('potvrzovaci', { jmeno: rezervace.jmeno, masaz: rezervace.masaz, datum: formatDatumCz(rezervace.datum), cas: String(rezervace.cas_od).slice(0,5) + '–' + String(rezervace.cas_do).slice(0,5) })
         .then(({ predmet, html }) => odeslatEmail(email, predmet, html));
@@ -2126,6 +2131,8 @@ app.patch('/api/admin/rezervace/:id', async (req, res) => {
 
     await client.query('COMMIT');
 
+    synchronizovatKalendar(db, aktualizovana).catch(() => {});
+
     const skutecnaZmena = terminSeMeni
       || jmeno !== puvodni.jmeno
       || telefon !== puvodni.telefon
@@ -2193,6 +2200,7 @@ app.patch('/api/admin/rezervace/:id/stav', async (req, res) => {
   } finally {
     client.release();
   }
+  synchronizovatKalendar(db, { ...predtim, stav }).catch(() => {});
   try {
     // E-maily o potvrzení/zrušení se posílají jen při SKUTEČNÉM přechodu do daného
     // stavu (ne při každém uložení / opakovaném zrušení už zrušené rezervace), ať
@@ -2924,6 +2932,7 @@ app.delete('/api/admin/rezervace/:id', async (req, res) => {
     await vratitPromoVyuziti(client, 'rezervace', rezervace.id, 'Rezervace smazána');
     await client.query('DELETE FROM rezervace WHERE id = $1', [req.params.id]);
     await client.query('COMMIT');
+    odstranitUdalost(rezervace).catch(() => {});
     res.json({ ok: true });
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch {}
