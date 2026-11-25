@@ -1884,15 +1884,16 @@ app.get('/api/admin/google-kalendar/stav', async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, chyba: e.message }); }
 });
 
-// Jednorázové (ale bezpečně opakovatelné) dohnání historie — doplní do
-// Google kalendáře i čekající/potvrzené rezervace, které vznikly PŘED
-// zapojením synchronizace (ta normálně běží jen při založení/úpravě/změně
-// stavu). Idempotentní: zpracovává jen řádky s google_event_id IS NULL,
-// takže opakované volání nic nezdvojí.
+// Ruční přesynchronizování všech čekajících/potvrzených rezervací do Google
+// kalendáře — doplní ty, co vznikly PŘED zapojením synchronizace (ta normálně
+// běží jen při založení/úpravě/změně stavu), a zároveň přepíše i už
+// existující události (např. po změně vzhledu/barvy v udalostZRezervace).
+// Bezpečně opakovatelné — events.update/insert v synchronizovatKalendar nikdy
+// nic nezdvojí, jen použije/založí google_event_id.
 app.post('/api/admin/google-kalendar/dohnat-historii', async (req, res) => {
   try {
     const { rows } = await db.query(
-      "SELECT * FROM rezervace WHERE stav IN ('cekajici','potvrzena') AND google_event_id IS NULL ORDER BY datum, cas_od"
+      "SELECT * FROM rezervace WHERE stav IN ('cekajici','potvrzena') ORDER BY datum, cas_od"
     );
     let ok = 0;
     const chyby = [];

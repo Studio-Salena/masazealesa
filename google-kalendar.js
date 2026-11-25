@@ -43,7 +43,8 @@ function udalostZRezervace(r) {
     summary: znacka + r.masaz + ' – ' + r.jmeno,
     description: popis || undefined,
     start: { dateTime: `${r.datum}T${String(r.cas_od).slice(0, 5)}:00`, timeZone: TIMEZONE },
-    end: { dateTime: `${r.datum}T${String(r.cas_do).slice(0, 5)}:00`, timeZone: TIMEZONE }
+    end: { dateTime: `${r.datum}T${String(r.cas_do).slice(0, 5)}:00`, timeZone: TIMEZONE },
+    colorId: '6' // Tangerine (sytě oranžová, nejbližší "dýňové" z palety Google kalendáře) — ať se rezervace odliší od ostatních událostí v kalendáři
   };
 }
 
