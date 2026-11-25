@@ -23,7 +23,7 @@ function ziskatKalendarClient() {
   }
   try {
     const klic = JSON.parse(klicJson);
-    const auth = new google.auth.JWT(klic.client_email, null, klic.private_key, ['https://www.googleapis.com/auth/calendar']);
+    const auth = new google.auth.JWT({ email: klic.client_email, key: klic.private_key, scopes: ['https://www.googleapis.com/auth/calendar'] });
     klientCache = google.calendar({ version: 'v3', auth });
   } catch (e) {
     console.error('Google Kalendář: neplatný GOOGLE_CALENDAR_SA_KEY —', e.message);
