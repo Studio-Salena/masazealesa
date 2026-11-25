@@ -11,7 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const PDFDocument = require('pdfkit');
 const { Pool, types } = require('pg');
-const { synchronizovatKalendar, odstranitUdalost } = require('./google-kalendar');
+const { synchronizovatKalendar, odstranitUdalost, diagnostika: diagnostikaKalendare } = require('./google-kalendar');
 
 const API_URL = process.env.API_URL || 'https://masazealesa.onrender.com';
 
@@ -1870,6 +1870,19 @@ app.post('/api/promo/overit', async (req, res) => {
 
 // ══════════════ ADMIN ENDPOINTY (heslo v hlavičce x-admin-heslo) ══════════════
 app.use('/api/admin', vyzadovatAdmina);
+
+// Diagnostika napojení na Google kalendář (GOOGLE_CALENDAR_SA_KEY/
+// GOOGLE_CALENDAR_ID) — zkouší skutečný round-trip (vytvořit testovací
+// událost a hned smazat), takže ověří i právo "Make changes to events", ne
+// jen že se klíč dá naparsovat. Používá se jen při zakládání/kontrole
+// nastavení, ne v běžném provozu (ten chyby jen loguje, nikdy je neukazuje
+// klientce ani adminovi).
+app.get('/api/admin/google-kalendar/stav', async (req, res) => {
+  try {
+    const vysledek = await diagnostikaKalendare();
+    res.json(vysledek);
+  } catch (e) { res.status(500).json({ ok: false, chyba: e.message }); }
+});
 
 // -- Přehled --
 // Kolik dní dopředu se poukaz počítá jako "brzy expiruje" na dashboardu —

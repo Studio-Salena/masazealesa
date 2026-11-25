@@ -100,4 +100,38 @@ async function odstranitUdalost(rezervace) {
   }
 }
 
-module.exports = { synchronizovatKalendar, odstranitUdalost };
+// Diagnostický round-trip (vytvořit testovací událost → smazat) pro admin
+// endpoint "/api/admin/google-kalendar/stav" — jediné místo, kde se chyba z
+// Google API vrací zpět k uživatelce (jinak se v synchronizovatKalendar/
+// odstranitUdalost jen tiše loguje, ať to nikdy nezablokuje běžný provoz).
+async function diagnostika() {
+  const klicNastaven = !!process.env.GOOGLE_CALENDAR_SA_KEY;
+  const idNastaveno = !!process.env.GOOGLE_CALENDAR_ID;
+  const kalendar = ziskatKalendarClient();
+  if (!kalendar) {
+    return {
+      ok: false,
+      chyba: !klicNastaven || !idNastaveno
+        ? 'Chybí proměnná prostředí GOOGLE_CALENDAR_SA_KEY nebo GOOGLE_CALENDAR_ID.'
+        : 'GOOGLE_CALENDAR_SA_KEY není platný JSON (zkontrolujte, že je vložený celý a beze změny).'
+    };
+  }
+  const calendarId = process.env.GOOGLE_CALENDAR_ID;
+  try {
+    const { data } = await kalendar.calendars.get({ calendarId });
+    const test = await kalendar.events.insert({
+      calendarId,
+      requestBody: {
+        summary: 'Testovací událost (Masáže Alesa — smazat)',
+        start: { dateTime: new Date(Date.now() + 86400000).toISOString(), timeZone: TIMEZONE },
+        end: { dateTime: new Date(Date.now() + 86400000 + 600000).toISOString(), timeZone: TIMEZONE }
+      }
+    });
+    await kalendar.events.delete({ calendarId, eventId: test.data.id });
+    return { ok: true, kalendarNazev: data.summary, casovePasmo: data.timeZone };
+  } catch (e) {
+    return { ok: false, chyba: e.message, kod: e.code };
+  }
+}
+
+module.exports = { synchronizovatKalendar, odstranitUdalost, diagnostika };
